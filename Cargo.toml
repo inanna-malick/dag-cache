@@ -15,3 +15,7 @@ futures = "0.1"
 failure = "0.1.5"
 base64 = "0.10.1"
 base58 = "0.1.0"
+
+actix-multipart-rfc7578 = "0.1.0"
+
+serde_json = "1.0"
