@@ -20,6 +20,9 @@ use std::io::Cursor;
 
 use actix_multipart_rfc7578::client::{multipart};
 
+// use reqwest::multipart;
+
+
 // TODO:
 // - use multicache or similar (weighted lru) to have upper bound on size, not cardinality
 
@@ -29,7 +32,7 @@ enum DagCacheError {
     IPFSError,
     #[fail(display = "ipfs error")]
     IPFSJsonError,
-    #[fail(display = "unknown error")]
+    #[fail(display = "unkhttps://www.muji.us/store/4550002185565.htmlnown error")]
     UnknownError,
 }
 
@@ -50,11 +53,13 @@ struct IpfsHeader {
     name: String,
     hash: DagNodeLink,
     size: u64,
-
-    #[serde(rename = "Type")]
-    typ: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct IPFSPutResp {
+    hash: DagNodeLink,
+}
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
 struct DagNodeLink(Vec<u8>);
@@ -178,7 +183,20 @@ fn get(data: web::Data<State>, k: web::Path<(DagNodeLink)>) -> Box<dyn Future<It
     }
 }
 
-fn put(data: web::Data<State>, v: web::Json<DagNode>) -> Box<dyn Future<Item = web::Json<DagNodeLink>, Error = DagCacheError>> {
+
+
+
+
+struct TestGenerator;
+
+impl multipart::BoundaryGenerator for TestGenerator {
+    fn generate_boundary() -> String {
+        // this should not be hardcoded comma lmao
+        "------------------------38b3f234-0aa2-4d2d-b0a3-b693724fd735".to_string() // lmao, extreme hack
+    }
+}
+
+fn put(data: web::Data<State>, v: web::Json<DagNode>) -> Box<dyn Future<Item = web::Json<IPFSPutResp>, Error = DagCacheError>> {
 
     let vprime = v.into_inner();
 
@@ -191,40 +209,48 @@ fn put(data: web::Data<State>, v: web::Json<DagNode>) -> Box<dyn Future<Item = w
 
     println!("hitting url: {:?}", u.clone());
 
-    let bytes = serde_json::toString(vprime.clone()).expect("json _serialize_ failed(???)");
+    let bytes = serde_json::to_vec(&vprime.clone()).expect("json _serialize_ failed(???)");
 
-    let mut form = multipart::Form::default();
-    form.add_reader_file("name", bytes, "data"); // 'name'/'data' is mock filename/name(?)..
+    let cursor = Cursor::new(bytes);
 
-    let header: &str = "multipart/form-data; boundary=\"???\"".as_ref();
+    let mut form = multipart::Form::new::<TestGenerator>();
+    form.add_reader_file("file", cursor, "data"); // 'name'/'data' is mock filename/name(?)..
 
+    let header: &str = "multipart/form-data; boundary=------------------------38b3f234-0aa2-4d2d-b0a3-b693724fd735".as_ref();
     // req.body(I::from(Body::from(self)).into())
 
+    let body: multipart::Body = multipart::Body::from(form);
+
+    // println!("{:?}", body.boundary);
+
+    let body = futures::stream::Stream::map_err(body, |_e| DagCacheError::IPFSError);
 
     let f = client::Client::new()
         .post(u)
         .header(CONTENT_TYPE, header)
-        .send_stream(multipart::Body::from(form))
-        .map_err(|_e| DagCacheError::IPFSError) // todo: wrap originating error
+        .send_stream(body)
+        .map_err(|_e| DagCacheError::IPFSError)
         .and_then(|mut res| {
+
             client::ClientResponse::json(&mut res)
                 .map_err(|e| {
                     println!("error converting response body to json: {:?}", e);
                     DagCacheError::IPFSJsonError
                 })
         })
-    .and_then( move |dag_node_link: DagNodeLink| {
-        let mut cache = data.cache.lock().unwrap(); // <- get cache's MutexGuard
-        cache.put(dag_node_link.clone(), vprime);
+    .and_then( move |dag_node_link: IPFSPutResp| {
+        let mut cache = data.cache.lock().unwrap();
+        cache.put(dag_node_link.hash.clone(), vprime);
         Ok(web::Json(dag_node_link))
-    });
+    }
+    );
     Box::new(f)
 
 }
 
 
-
 fn main() {
+
     // PROBLEM: provisioning based on number of entities and _not_ number of bytes allocated total
     //          some dag nodes may be small and some may be large.
     let sys = actix::System::new("system");  // <- create Actix system

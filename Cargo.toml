@@ -19,3 +19,4 @@ base58 = "0.1.0"
 actix-multipart-rfc7578 = "0.1.0"
 
 serde_json = "1.0"
+# reqwest = "0.9"
