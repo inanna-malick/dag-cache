@@ -187,15 +187,6 @@ fn get(data: web::Data<State>, k: web::Path<(DagNodeLink)>) -> Box<dyn Future<It
 
 
 
-struct TestGenerator;
-
-impl multipart::BoundaryGenerator for TestGenerator {
-    fn generate_boundary() -> String {
-        // this should not be hardcoded comma lmao
-        "------------------------38b3f234-0aa2-4d2d-b0a3-b693724fd735".to_string() // lmao, extreme hack
-    }
-}
-
 fn put(data: web::Data<State>, v: web::Json<DagNode>) -> Box<dyn Future<Item = web::Json<IPFSPutResp>, Error = DagCacheError>> {
 
     let vprime = v.into_inner();
@@ -213,15 +204,16 @@ fn put(data: web::Data<State>, v: web::Json<DagNode>) -> Box<dyn Future<Item = w
 
     let cursor = Cursor::new(bytes);
 
-    let mut form = multipart::Form::new::<TestGenerator>();
+    let mut form = multipart::Form::default();
     form.add_reader_file("file", cursor, "data"); // 'name'/'data' is mock filename/name(?)..
 
-    let header: &str = "multipart/form-data; boundary=------------------------38b3f234-0aa2-4d2d-b0a3-b693724fd735".as_ref();
+    let boundary = form.boundary.clone();
+
+    let header: &str = &("multipart/form-data; boundary=".to_owned() + &boundary);
     // req.body(I::from(Body::from(self)).into())
 
     let body: multipart::Body = multipart::Body::from(form);
 
-    // println!("{:?}", body.boundary);
 
     let body = futures::stream::Stream::map_err(body, |_e| DagCacheError::IPFSError);
 

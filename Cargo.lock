@@ -135,11 +135,11 @@ dependencies = [
 [[package]]
 name = "actix-multipart-rfc7578"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "git+https://github.com/pkinsky/rust-multipart-rfc7578#9e6de4633cb37aeb564795ff0c2e035d9789f4f7"
 dependencies = [
  "actix-web 0.7.19 (registry+https://github.com/rust-lang/crates.io-index)",
  "bytes 0.4.12 (registry+https://github.com/rust-lang/crates.io-index)",
- "common-multipart-rfc7578 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "common-multipart-rfc7578 0.1.1 (git+https://github.com/pkinsky/rust-multipart-rfc7578)",
  "futures 0.1.28 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -549,7 +549,7 @@ dependencies = [
 [[package]]
 name = "common-multipart-rfc7578"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "git+https://github.com/pkinsky/rust-multipart-rfc7578#9e6de4633cb37aeb564795ff0c2e035d9789f4f7"
 dependencies = [
  "bytes 0.4.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures 0.1.28 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -634,7 +634,7 @@ name = "dag-cache"
 version = "0.1.0"
 dependencies = [
  "actix 0.8.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "actix-multipart-rfc7578 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "actix-multipart-rfc7578 0.1.0 (git+https://github.com/pkinsky/rust-multipart-rfc7578)",
  "actix-web 1.0.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "base58 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "base64 0.10.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2193,7 +2193,7 @@ dependencies = [
 "checksum actix-codec 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "9f2c11af4b06dc935d8e1b1491dad56bfb32febc49096a91e773f8535c176453"
 "checksum actix-connect 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "646be02316c497d1cb8b1ed82eb723b052d6b3e2462c94bd52d0ac2d4a29a165"
 "checksum actix-http 0.2.9 (registry+https://github.com/rust-lang/crates.io-index)" = "de5aaeef8b9eef653b910f957a02bea9c1b375f7fa49b411fb75dad8f41462eb"
-"checksum actix-multipart-rfc7578 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "191d1b059201ac6924520ed6cb529221255068925b51339b5735ffff26a04555"
+"checksum actix-multipart-rfc7578 0.1.0 (git+https://github.com/pkinsky/rust-multipart-rfc7578)" = "<none>"
 "checksum actix-net 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)" = "8bebfbe6629e0131730746718c9e032b58f02c6ce06ed7c982b9fef6c8545acd"
 "checksum actix-router 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)" = "23224bb527e204261d0291102cb9b52713084def67d94f7874923baefe04ccf7"
 "checksum actix-rt 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)" = "18d9054b1cfacfa441846b9b99001010cb8fbb02130e6cfdb25cea36d3e98e87"
@@ -2228,7 +2228,7 @@ dependencies = [
 "checksum cfg-if 0.1.9 (registry+https://github.com/rust-lang/crates.io-index)" = "b486ce3ccf7ffd79fdeb678eac06a9e6c09fc88d33836340becb8fffe87c5e33"
 "checksum chrono 0.4.7 (registry+https://github.com/rust-lang/crates.io-index)" = "77d81f58b7301084de3b958691458a53c3f7e0b1d702f77e550b6a88e3a88abe"
 "checksum cloudabi 0.0.3 (registry+https://github.com/rust-lang/crates.io-index)" = "ddfc5b9aa5d4507acaf872de71051dfd0e309860e88966e1051e462a077aac4f"
-"checksum common-multipart-rfc7578 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "fd208355198cd34c14c894257d606ceaad4a5f209a2ed511a6f15e53979b245d"
+"checksum common-multipart-rfc7578 0.1.1 (git+https://github.com/pkinsky/rust-multipart-rfc7578)" = "<none>"
 "checksum cookie 0.11.1 (registry+https://github.com/rust-lang/crates.io-index)" = "99be24cfcf40d56ed37fd11c2123be833959bbc5bddecb46e1c2e442e15fa3e0"
 "checksum copyless 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "6ff9c56c9fb2a49c05ef0e431485a22400af20d33226dc0764d891d09e724127"
 "checksum crc32fast 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ba125de2af0df55319f41944744ad91c71113bf74a4646efff39afe1f6842db1"
