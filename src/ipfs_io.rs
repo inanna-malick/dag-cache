@@ -6,7 +6,10 @@ use http::uri;
 use serde_json;
 use std::io::Cursor;
 
-use crate::types::{HashPointer, DagNode, DagCacheError};
+use crate::types::{DagCacheError, DagNode, HashPointer};
+
+use tracing::{event, info, span, Level};
+use tracing_futures::Instrument;
 
 pub struct IPFSNode(http::uri::Authority);
 
@@ -15,36 +18,45 @@ impl IPFSNode {
         IPFSNode(a)
     }
 
+    // TODO: bias cache strongly towards small nodes
     pub fn get(&self, k: HashPointer) -> Box<dyn Future<Item = DagNode, Error = DagCacheError>> {
         let pnq = "/api/v0/object/get?data-encoding=base64&arg=".to_owned() + &k.to_string();
         let pnq_prime: uri::PathAndQuery = pnq
             .parse()
-            .expect("uri path and query component build failed (should not be possible)");
+            .expect("uri path and query component build failed (should not be possible, base58 is uri safe)");
         let u = uri::Uri::builder()
-            .scheme("http") // lmao
+            .scheme("http")
             .authority(self.0.clone()) // feels weird to be cloning this ~constant value
             .path_and_query(pnq_prime)
             .build()
             .expect("uri build failed(???)");
 
-        println!("hitting url: {:?}", &u);
         let f = client::Client::new()
-            .get(u)
+            .get(&u)
             .send()
             .map_err(|_e| DagCacheError::IPFSError) // todo: wrap originating error
             .and_then(|mut res| {
+                event!(Level::TRACE, msg = "attempting to parse resp");
                 client::ClientResponse::json(&mut res).map_err(|e| {
-                    println!("error converting response body to json: {:?}", e);
+
+                    event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
                     DagCacheError::IPFSJsonError
+                }).and_then(|x| {
+
+                    event!(Level::INFO, msg = "successfully parsed resp");
+                    Ok(x)
+
                 })
-            });
+            })
+            // NOTE: outermost in chain wraps all previous b/c poll model
+            .instrument(span!(Level::TRACE, "ipfs get (via instrument, fails)", hash_pointer = k.to_string().as_str(), uri = ?u ));
 
         Box::new(f)
     }
 
     pub fn put(&self, v: DagNode) -> Box<dyn Future<Item = HashPointer, Error = DagCacheError>> {
         let u = uri::Uri::builder()
-            .scheme("http") // lmao
+            .scheme("http")
             .authority(self.0.clone()) // feels weird to be cloning this ~constant value
             .path_and_query("/api/v0/object/put?datafieldenc=base64")
             .build()
@@ -67,7 +79,7 @@ impl IPFSNode {
         let body = futures::stream::Stream::map_err(body, |_e| DagCacheError::IPFSError);
 
         let f = client::Client::new()
-            .post(u)
+            .post(&u)
             .header(CONTENT_TYPE, header)
             .send_stream(body)
             .map_err(|_e| DagCacheError::IPFSError)
@@ -84,7 +96,7 @@ impl IPFSNode {
                 // NOTE: as json (via ) or log
                 client::ClientResponse::body(&mut res)
                     .map_err(|e| {
-                        println!("error getting response body: {:?}", e);
+                        event!(Level::ERROR, msg = "error getting response body(?)", err = ?e);
                         DagCacheError::IPFSJsonError
                     })
                     .and_then(|b| {
@@ -92,9 +104,11 @@ impl IPFSNode {
                         let cursor = Cursor::new(b);
                         let res = serde_json::de::from_reader(cursor).expect("lmao, will fail");
 
+                        info!("test");
                         Ok(res)
                     })
-            });
+            })
+            .instrument(span!(Level::TRACE, "ipfs-put", uri = ?u));
 
         Box::new(f)
     }
