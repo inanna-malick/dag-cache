@@ -7,17 +7,20 @@ use std::sync::Mutex;
 
 use std::collections::VecDeque;
 
-mod types;
-use crate::types::*;
-// use crate::types::{
-//     DagCacheBulkPutReq, DagCacheError, DagNode, DagNodeGetResp, IPFSHash, IPFSPutResp, DagCacheToPutInMem
-// };
+mod ipfs_types;
+use crate::ipfs_types;
+mod encoding_types;
+use crate::encoding_types;
+mod api_types;
+use crate::api_types::{ClientSideHash};
+mod in_mem_types;
+use crate::in_mem_types;
 
-mod ipfs_io;
+mod ipfs_api;
 
 use tracing::{info, span, Level};
 
-type Cache = Mutex<LruCache<IPFSHash, DagNode>>;
+type Cache = Mutex<LruCache<ipfs_types::IPFSHash, ipfs_types::DagNode>>;
 
 struct State {
     cache: Cache,
@@ -25,7 +28,7 @@ struct State {
 }
 
 // TODO: rain says investigate stable deref (given that all refs here are immutable)
-fn cache_get(mutex: &Cache, k: IPFSHash) -> Option<DagNode> {
+fn cache_get(mutex: &Cache, k: ipfs_types::IPFSHash) -> Option<DagNode> {
     // succeed or die. failure is unrecoverable (mutex poisoned)
     let mut cache = mutex.lock().unwrap();
     // let mv = cache.get(&k);
@@ -34,7 +37,7 @@ fn cache_get(mutex: &Cache, k: IPFSHash) -> Option<DagNode> {
     mv.cloned() // this feels weird? clone(d) is actually needed, right?
 }
 
-fn cache_put(mutex: &Cache, k: IPFSHash, v: DagNode) {
+fn cache_put(mutex: &Cache, k: ipfs_types::IPFSHash, v: DagNode) {
     // succeed or die. failure is unrecoverable (mutex poisoned)
     let mut cache = mutex.lock().unwrap();
     cache.put(k, v);
@@ -42,8 +45,8 @@ fn cache_put(mutex: &Cache, k: IPFSHash, v: DagNode) {
 
 fn get(
     data: web::Data<State>,
-    k: web::Path<(IPFSHash)>,
-) -> Box<dyn Future<Item = web::Json<DagNodeGetResp>, Error = DagCacheError>> {
+    k: web::Path<(ipfs_types::IPFSHash)>,
+) -> Box<dyn Future<Item = web::Json<DagNodeGetResp>, Error = api_types::DagCacheError>> {
     let span = span!(Level::TRACE, "dag cache get handler");
     let _enter = span.enter();
     info!("attempt cache get");
@@ -74,7 +77,7 @@ fn get(
 
 // TODO: figure out traversal termination strategy - don't want to return whole cache in one resp (or do I?)
 // NOTE: breadth first first, probably.. sounds good.
-fn extend(cache: &Cache, node: (IPFSHash, DagNode)) -> DagNodeGetResp {
+fn extend(cache: &Cache, node: (ipfs_types::IPFSHash, DagNode)) -> DagNodeGetResp {
     let mut frontier = VecDeque::new();
     let mut res = Vec::new();
 
@@ -107,22 +110,24 @@ fn extend(cache: &Cache, node: (IPFSHash, DagNode)) -> DagNodeGetResp {
 fn put(
     data: web::Data<State>,
     v: web::Json<DagNode>,
-) -> Box<dyn Future<Item = web::Json<IPFSPutResp>, Error = DagCacheError>> {
+) -> Box<dyn Future<Item = web::Json<IPFSPutResp>, Error = api_types::DagCacheError>> {
     info!("dag cache put handler");
     let v = v.into_inner();
 
-    let f = data.ipfs_node.put(v.clone()).and_then(move |hp: IPFSHash| {
-        cache_put(&data.cache, hp.clone(), v);
-        Ok(web::Json(IPFSPutResp { hash: hp }))
-    });
+    let f = data
+        .ipfs_node
+        .put(v.clone())
+        .and_then(move |hp: ipfs_types::IPFSHash| {
+            cache_put(&data.cache, hp.clone(), v);
+            Ok(web::Json(IPFSPutResp { hash: hp }))
+        });
     Box::new(f)
 }
 
 fn put_many(
     app_data: web::Data<State>,
-    v: web::Json<DagCacheBulkPutReq>,
-) -> Box<dyn Future<Item = web::Json<IPFSHeader>, Error = DagCacheError>> {
-    // todo: maybe
+    v: web::Json<api_types::bulk_put::Req>,
+) -> Box<dyn Future<Item = web::Json<ipfs_types::IPFSHeader>, Error = api_types::DagCacheError>> {
     info!("dag cache put handler");
     let DagCacheBulkPutReq { entry_point, nodes } = v.into_inner();
     let (csh, dctp) = entry_point;
@@ -133,46 +138,40 @@ fn put_many(
         node_map.insert(k, v);
     }
 
-    let in_mem = DagCacheToPutInMem::build(dctp, &mut node_map)
-        .expect("todo: handle malformed req case here");
+    let in_mem = in_mem_types::DagNode::build(dctp, &mut node_map)
+        .expect("todo: handle malformed req case here"); // FIXME
 
-    // // cause of future stack overflow - y u no trampoline
-    // fn helper2(
-    //     app_data: web::Data<State>,
-    //     x: BulkDagCachePutHashLinkInMem,
-    // ) -> Box<dyn Future<Item = IPFSHeader, Error = DagCacheError>> {
-    // };
-
-    // cause of future stack overflow?
+    // FIXME: cause of future stack overflow? idk, could use custom future w/ state to avoid recursing on polls
     fn helper(
-        app_data: web::Data<State>,
+        app_data: web::Data<State>, // todo: just pass around arc, probably
         csh: ClientSideHash,
-        x: DagCacheToPutInMem,
-    ) -> Box<dyn Future<Item = IPFSHeader, Error = DagCacheError>> {
-        let DagCacheToPutInMem { data, links } = x;
+        x: in_mem_types::DagNode,
+    ) -> Box<dyn Future<Item = ipfs_types::IPFSHeader, Error = api_types::DagCacheError>> {
+        let in_mem_types::DagNode { data, links } = x;
 
         let app_data_prime = app_data.clone();
 
-        let bar: Vec<_> = links.into_iter().map({
-            |x| match x {
-                BulkDagCachePutHashLinkInMem::NodeInThisReqInMem(hp, sn) => {
-                    helper(app_data_prime.clone(), hp, *sn)
+        let bar: Vec<_> = links
+            .into_iter()
+            .map({
+                |x| match x {
+                    BulkDagCachePutHashLinkInMem::NodeInThisReqInMem(hp, sn) => {
+                        helper(app_data_prime.clone(), hp, *sn)
+                    }
+                    BulkDagCachePutHashLinkInMem::NodeInIpfsInMem(nh) => {
+                        Box::new(futures::future::ok(nh))
+                    }
                 }
-                BulkDagCachePutHashLinkInMem::NodeInIpfsInMem(nh) => {
-                    Box::new(futures::future::ok(nh))
-                }
-            }
-        }).collect();
+            })
+            .collect();
 
         let foo = futures::future::join_all(bar);
 
-
-        let f = foo
-            .and_then(|links: Vec<IPFSHeader>| {
+        let f = foo.and_then(|links: Vec<ipfs_types::IPFSHeader>| {
             // might be a bit of an approximation, but w/e
             let size = data.0.len() as u64 + links.iter().map(|x| x.size).sum::<u64>();
 
-            let dag_node = DagNode {
+            let dag_node = ipfs_types::DagNode {
                 data: data,
                 links: links,
             };
@@ -180,9 +179,9 @@ fn put_many(
             app_data
                 .ipfs_node
                 .put(dag_node.clone())
-                .and_then(move |hp: IPFSHash| {
+                .and_then(move |hp: ipfs_types::IPFSHash| {
                     cache_put(&app_data.cache, hp.clone(), dag_node);
-                    let hdr = IPFSHeader {
+                    let hdr = ipfs_types::IPFSHeader {
                         name: csh.to_string(),
                         hash: hp,
                         size: size,
@@ -200,7 +199,7 @@ fn put_many(
     // let f = data
     //     .ipfs_node
     //     .put(v.clone())
-    //     .and_then(move |hp: IPFSHash| {
+    //     .and_then(move |hp: ipfs_types::IPFSHash| {
     //         cache_put(&data.cache, hp.clone(), v);
     //         Ok(web::Json(IPFSPutResp { hash: hp }))
     //     });

@@ -113,3 +113,12 @@ impl IPFSNode {
         Box::new(f)
     }
 }
+
+
+// IPFS API resp type - lives here, not a huge fan of their json format - stays here
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct IPFSPutResp {
+    // note: todo: schema is all fucky, should have 1x type specific to ipfs api, 1x for mine
+    pub hash: IPFSHash,
+}
