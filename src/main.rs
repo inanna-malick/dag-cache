@@ -8,13 +8,16 @@ use std::sync::Mutex;
 use std::collections::VecDeque;
 
 mod types;
-use crate::types::{DagCacheError, DagNode, DagNodeGetResp, HashPointer, IPFSPutResp};
+use crate::types::*;
+// use crate::types::{
+//     DagCacheBulkPutReq, DagCacheError, DagNode, DagNodeGetResp, IPFSHash, IPFSPutResp, DagCacheToPutInMem
+// };
 
 mod ipfs_io;
 
 use tracing::{info, span, Level};
 
-type Cache = Mutex<LruCache<HashPointer, DagNode>>;
+type Cache = Mutex<LruCache<IPFSHash, DagNode>>;
 
 struct State {
     cache: Cache,
@@ -22,7 +25,7 @@ struct State {
 }
 
 // TODO: rain says investigate stable deref (given that all refs here are immutable)
-fn cache_get(mutex: &Cache, k: HashPointer) -> Option<DagNode> {
+fn cache_get(mutex: &Cache, k: IPFSHash) -> Option<DagNode> {
     // succeed or die. failure is unrecoverable (mutex poisoned)
     let mut cache = mutex.lock().unwrap();
     // let mv = cache.get(&k);
@@ -31,7 +34,7 @@ fn cache_get(mutex: &Cache, k: HashPointer) -> Option<DagNode> {
     mv.cloned() // this feels weird? clone(d) is actually needed, right?
 }
 
-fn cache_put(mutex: &Cache, k: HashPointer, v: DagNode) {
+fn cache_put(mutex: &Cache, k: IPFSHash, v: DagNode) {
     // succeed or die. failure is unrecoverable (mutex poisoned)
     let mut cache = mutex.lock().unwrap();
     cache.put(k, v);
@@ -39,7 +42,7 @@ fn cache_put(mutex: &Cache, k: HashPointer, v: DagNode) {
 
 fn get(
     data: web::Data<State>,
-    k: web::Path<(HashPointer)>,
+    k: web::Path<(IPFSHash)>,
 ) -> Box<dyn Future<Item = web::Json<DagNodeGetResp>, Error = DagCacheError>> {
     let span = span!(Level::TRACE, "dag cache get handler");
     let _enter = span.enter();
@@ -69,10 +72,9 @@ fn get(
     }
 }
 
-
 // TODO: figure out traversal termination strategy - don't want to return whole cache in one resp (or do I?)
 // NOTE: breadth first first, probably.. sounds good.
-fn extend(cache: &Cache, node: (HashPointer, DagNode)) -> DagNodeGetResp {
+fn extend(cache: &Cache, node: (IPFSHash, DagNode)) -> DagNodeGetResp {
     let mut frontier = VecDeque::new();
     let mut res = Vec::new();
 
@@ -109,14 +111,100 @@ fn put(
     info!("dag cache put handler");
     let v = v.into_inner();
 
-    let f = data
-        .ipfs_node
-        .put(v.clone())
-        .and_then(move |hp: HashPointer| {
-            cache_put(&data.cache, hp.clone(), v);
-            Ok(web::Json(IPFSPutResp { hash: hp }))
-        });
+    let f = data.ipfs_node.put(v.clone()).and_then(move |hp: IPFSHash| {
+        cache_put(&data.cache, hp.clone(), v);
+        Ok(web::Json(IPFSPutResp { hash: hp }))
+    });
     Box::new(f)
+}
+
+fn put_many(
+    app_data: web::Data<State>,
+    v: web::Json<DagCacheBulkPutReq>,
+) -> Box<dyn Future<Item = web::Json<IPFSHeader>, Error = DagCacheError>> {
+    // todo: maybe
+    info!("dag cache put handler");
+    let DagCacheBulkPutReq { entry_point, nodes } = v.into_inner();
+    let (csh, dctp) = entry_point;
+
+    let mut node_map = std::collections::HashMap::with_capacity(nodes.len());
+
+    for (k, v) in nodes.into_iter() {
+        node_map.insert(k, v);
+    }
+
+    let in_mem = DagCacheToPutInMem::build(dctp, &mut node_map)
+        .expect("todo: handle malformed req case here");
+
+    // // cause of future stack overflow - y u no trampoline
+    // fn helper2(
+    //     app_data: web::Data<State>,
+    //     x: BulkDagCachePutHashLinkInMem,
+    // ) -> Box<dyn Future<Item = IPFSHeader, Error = DagCacheError>> {
+    // };
+
+    // cause of future stack overflow?
+    fn helper(
+        app_data: web::Data<State>,
+        csh: ClientSideHash,
+        x: DagCacheToPutInMem,
+    ) -> Box<dyn Future<Item = IPFSHeader, Error = DagCacheError>> {
+        let DagCacheToPutInMem { data, links } = x;
+
+        let app_data_prime = app_data.clone();
+
+        let bar: Vec<_> = links.into_iter().map({
+            |x| match x {
+                BulkDagCachePutHashLinkInMem::NodeInThisReqInMem(hp, sn) => {
+                    helper(app_data_prime.clone(), hp, *sn)
+                }
+                BulkDagCachePutHashLinkInMem::NodeInIpfsInMem(nh) => {
+                    Box::new(futures::future::ok(nh))
+                }
+            }
+        }).collect();
+
+        let foo = futures::future::join_all(bar);
+
+
+        let f = foo
+            .and_then(|links: Vec<IPFSHeader>| {
+            // might be a bit of an approximation, but w/e
+            let size = data.0.len() as u64 + links.iter().map(|x| x.size).sum::<u64>();
+
+            let dag_node = DagNode {
+                data: data,
+                links: links,
+            };
+
+            app_data
+                .ipfs_node
+                .put(dag_node.clone())
+                .and_then(move |hp: IPFSHash| {
+                    cache_put(&app_data.cache, hp.clone(), dag_node);
+                    let hdr = IPFSHeader {
+                        name: csh.to_string(),
+                        hash: hp,
+                        size: size,
+                    };
+                    futures::future::ok(hdr)
+                })
+        });
+
+        Box::new(f)
+    };
+
+    let f = helper(app_data, csh, in_mem).map(web::Json);
+
+    Box::new(f)
+    // let f = data
+    //     .ipfs_node
+    //     .put(v.clone())
+    //     .and_then(move |hp: IPFSHash| {
+    //         cache_put(&data.cache, hp.clone(), v);
+    //         Ok(web::Json(IPFSPutResp { hash: hp }))
+    //     });
+    // Box::new(f)
 }
 
 fn main() -> Result<(), std::io::Error> {
@@ -139,9 +227,10 @@ fn main() -> Result<(), std::io::Error> {
     HttpServer::new(move || {
         println!("init app");
         App::new()
-            .register_data(data.clone()) // <- register the created data
+            .register_data(data.clone()) // <- register the created data (Arc) - keeps 1 reference to keep it alive, presumably
             .route("/get/{n}", web::get().to_async(get))
-            .route("/put", web::post().to_async(put))
+            .route("/object/put", web::post().to_async(put))
+            .route("/objects/put", web::post().to_async(put_many))
     })
     .bind("127.0.0.1:8088")
     .expect("Can not bind to 127.0.0.1:8088")

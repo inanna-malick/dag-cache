@@ -3,7 +3,7 @@ use base64;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
-pub struct Base58(Vec<u8>);
+pub struct Base58(pub Vec<u8>);
 
 impl Base58 {
     pub fn to_string<'a>(&self) -> String {
@@ -41,7 +41,7 @@ impl<'de> Deserialize<'de> for Base58 {
 }
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
-pub struct Base64(Vec<u8>);
+pub struct Base64(pub Vec<u8>);
 
 // always serialize as string (json)
 impl Serialize for Base64 {

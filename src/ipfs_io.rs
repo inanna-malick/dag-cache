@@ -6,7 +6,7 @@ use http::uri;
 use serde_json;
 use std::io::Cursor;
 
-use crate::types::{DagCacheError, DagNode, HashPointer};
+use crate::types::{DagCacheError, DagNode, IPFSHash};
 
 use tracing::{event, info, span, Level};
 use tracing_futures::Instrument;
@@ -19,7 +19,7 @@ impl IPFSNode {
     }
 
     // TODO: bias cache strongly towards small nodes
-    pub fn get(&self, k: HashPointer) -> Box<dyn Future<Item = DagNode, Error = DagCacheError>> {
+    pub fn get(&self, k: IPFSHash) -> Box<dyn Future<Item = DagNode, Error = DagCacheError>> {
         let pnq = "/api/v0/object/get?data-encoding=base64&arg=".to_owned() + &k.to_string();
         let pnq_prime: uri::PathAndQuery = pnq
             .parse()
@@ -54,7 +54,7 @@ impl IPFSNode {
         Box::new(f)
     }
 
-    pub fn put(&self, v: DagNode) -> Box<dyn Future<Item = HashPointer, Error = DagCacheError>> {
+    pub fn put(&self, v: DagNode) -> Box<dyn Future<Item = IPFSHash, Error = DagCacheError>> {
         let u = uri::Uri::builder()
             .scheme("http")
             .authority(self.0.clone()) // feels weird to be cloning this ~constant value
