@@ -73,6 +73,6 @@ pub mod get {
     pub struct Resp {
         pub requested_node: ipfs_types::DagNode,
         pub extra_node_count: usize,
-        pub extra_nodes: Vec<ipfs_types::DagNodeWithHash>,
+        pub extra_nodes: Vec<ipfs_types::DagNodeWithHeader>,
     }
 }

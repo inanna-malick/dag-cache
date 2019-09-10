@@ -95,7 +95,7 @@ fn extend(cache: &Cache, node: ipfs_types::DagNode) -> api_types::get::Resp {
                 // iter over ref
                 frontier.push_back(hp.clone());
             }
-            res.push(ipfs_types::DagNodeWithHash { hash: hp, node: dn });
+            res.push(ipfs_types::DagNodeWithHeader { header: hp, node: dn });
         }
     }
 

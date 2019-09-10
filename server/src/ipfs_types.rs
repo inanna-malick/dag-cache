@@ -28,7 +28,7 @@ pub struct DagNode {
 
 // exists primarily to have better serialized json (tuples result in 2-elem lists)
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct DagNodeWithHash {
-    pub hash: IPFSHeader,
+pub struct DagNodeWithHeader {
+    pub header: IPFSHeader,
     pub node: DagNode,
 }
