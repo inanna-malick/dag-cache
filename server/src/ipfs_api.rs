@@ -29,6 +29,7 @@ impl IPFSNode {
         let pnq = "/api/v0/object/get?data-encoding=base64&arg=".to_owned() + &k.to_string();
         let pnq_prime: uri::PathAndQuery = pnq
             .parse()
+            // TODO: move to some lib that provides better builder fn, should not have to run partial parse fn
             .expect("uri path and query component build failed (should not be possible, base58 is uri safe)");
         let u = uri::Uri::builder()
             .scheme("http")
@@ -55,7 +56,7 @@ impl IPFSNode {
                 })
             })
             // NOTE: outermost in chain wraps all previous b/c poll model
-            .instrument(span!(Level::TRACE, "ipfs get (via instrument, fails)", hash_pointer = k.to_string().as_str(), uri = ?u ));
+            .instrument(span!(Level::TRACE, "ipfs-get", hash_pointer = k.to_string().as_str(), uri = ?u ));
 
         Box::new(f)
     }
@@ -117,12 +118,12 @@ impl IPFSNode {
                         DagCacheError::IPFSJsonError
                     })
                     .and_then(|b| {
-                        // println!("raw bytes from resp: {:?}", b);
+                        println!("raw bytes from resp: {:?}", b);
                         let cursor = Cursor::new(b);
-                        let res = serde_json::de::from_reader(cursor).expect("lmao, will fail");
+                        let res: IPFSPutResp = serde_json::de::from_reader(cursor).expect("lmao, will fail"); // TODO: not this (FIXME)
 
                         info!("test");
-                        Ok(res)
+                        Ok(res.hash)
                     })
             })
             .instrument(span!(Level::TRACE, "ipfs-put", uri = ?u));

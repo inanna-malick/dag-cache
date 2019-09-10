@@ -1,4 +1,3 @@
-use actix_web::{error, http, HttpResponse};
 use serde::{Deserialize, Serialize};
 
 use crate::encoding_types;

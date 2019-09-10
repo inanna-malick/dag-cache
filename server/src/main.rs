@@ -76,7 +76,6 @@ fn get(
 }
 
 // TODO: figure out traversal termination strategy - don't want to return whole cache in one resp (or do I?)
-// NOTE: breadth first first, probably.. sounds good.
 fn extend(cache: &Cache, node: ipfs_types::DagNode) -> api_types::get::Resp {
     let mut frontier = VecDeque::new();
     let mut res = Vec::new();
@@ -99,7 +98,6 @@ fn extend(cache: &Cache, node: ipfs_types::DagNode) -> api_types::get::Resp {
         }
     }
 
-    // NEL-like structure
     api_types::get::Resp {
         requested_node: node,
         extra_node_count: res.len(),
@@ -194,14 +192,6 @@ fn put_many(
     let f = helper(app_data, csh, in_mem).map(web::Json);
 
     Box::new(f)
-    // let f = data
-    //     .ipfs_node
-    //     .put(v.clone())
-    //     .and_then(move |hp: ipfs_types::IPFSHash| {
-    //         cache_put(&data.cache, hp.clone(), v);
-    //         Ok(web::Json(IPFSPutResp { hash: hp }))
-    //     });
-    // Box::new(f)
 }
 
 fn main() -> Result<(), std::io::Error> {
