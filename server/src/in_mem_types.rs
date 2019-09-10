@@ -1,10 +1,8 @@
-
 // mod ipfs_types;
-use crate::ipfs_types;
-use crate::encoding_types;
 use crate::api_types;
-use crate::api_types::{ClientSideHash};
-
+use crate::api_types::ClientSideHash;
+use crate::encoding_types;
+use crate::ipfs_types;
 
 // ephemeral, used for data structure in memory, should it be here? mb not
 pub struct DagNode {

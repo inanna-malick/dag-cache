@@ -12,7 +12,7 @@ mod ipfs_types;
 mod encoding_types;
 // use crate::encoding_types;
 mod api_types;
-use crate::api_types::{ClientSideHash};
+use crate::api_types::ClientSideHash;
 mod in_mem_types;
 // use crate::in_mem_types;
 
@@ -55,7 +55,7 @@ fn get(
         Some(dag_node) => {
             info!("cache hit");
             // see if have any of the referenced subnodes in the local cache
-            let resp = extend(&data.cache, (k, dag_node));
+            let resp = extend(&data.cache, dag_node);
             Box::new(future::ok(web::Json(resp)))
         }
         None => {
@@ -67,7 +67,7 @@ fn get(
                     info!("writing result of post cache miss lookup to cache");
                     cache_put(&data.cache, k.clone(), dag_node.clone());
                     // see if have any of the referenced subnodes in the local cache
-                    let resp = extend(&data.cache, (k, dag_node));
+                    let resp = extend(&data.cache, dag_node);
                     Ok(web::Json(resp))
                 });
             Box::new(f)
@@ -77,25 +77,25 @@ fn get(
 
 // TODO: figure out traversal termination strategy - don't want to return whole cache in one resp (or do I?)
 // NOTE: breadth first first, probably.. sounds good.
-fn extend(cache: &Cache, node: (ipfs_types::IPFSHash, ipfs_types::DagNode)) -> api_types::get::Resp {
+fn extend(cache: &Cache, node: ipfs_types::DagNode) -> api_types::get::Resp {
     let mut frontier = VecDeque::new();
     let mut res = Vec::new();
 
-    for hp in node.1.links.iter() {
+    for hp in node.links.iter() {
         // iter over ref
-        frontier.push_back(hp.hash.clone()); // clone :(
+        frontier.push_back(hp.clone());
     }
 
     // explore the frontier of potentially cached hash pointers
     while let Some(hp) = frontier.pop_front() {
         // if a hash pointer is in the cache, grab the associated node and continue traversal
-        if let Some(dn) = cache_get(cache, hp.clone()) {
+        if let Some(dn) = cache_get(cache, hp.hash.clone()) {
             // clone :(
             for hp in dn.links.iter() {
                 // iter over ref
-                frontier.push_back(hp.hash.clone()); // clone :(
+                frontier.push_back(hp.clone());
             }
-            res.push((hp, dn));
+            res.push(ipfs_types::DagNodeWithHash { hash: hp, node: dn });
         }
     }
 
@@ -119,7 +119,7 @@ fn put(
         .put(v.clone())
         .and_then(move |hp: ipfs_types::IPFSHash| {
             cache_put(&data.cache, hp.clone(), v);
-            Ok(web::Json( hp ))
+            Ok(web::Json(hp))
         });
     Box::new(f)
 }
@@ -158,9 +158,7 @@ fn put_many(
                     in_mem_types::DagNodeLink::Local(hp, sn) => {
                         helper(app_data_prime.clone(), hp, *sn)
                     }
-                    in_mem_types::DagNodeLink::Remote(nh) => {
-                        Box::new(futures::future::ok(nh))
-                    }
+                    in_mem_types::DagNodeLink::Remote(nh) => Box::new(futures::future::ok(nh)),
                 }
             })
             .collect();

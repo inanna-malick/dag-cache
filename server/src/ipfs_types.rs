@@ -4,9 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::encoding_types;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
 pub struct IPFSHeader {
-    // todo more fitting name? idk
     pub name: String,
     pub hash: IPFSHash,
     pub size: u64,
@@ -23,8 +21,14 @@ impl IPFSHash {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "PascalCase")]
 pub struct DagNode {
     pub links: Vec<IPFSHeader>,
     pub data: encoding_types::Base64,
+}
+
+// exists primarily to have better serialized json (tuples result in 2-elem lists)
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DagNodeWithHash {
+    pub hash: IPFSHeader,
+    pub node: DagNode,
 }

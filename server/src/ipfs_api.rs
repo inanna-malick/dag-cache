@@ -3,12 +3,13 @@ use actix_web::{client, http};
 use futures::future::Future;
 use http::header::CONTENT_TYPE;
 use http::uri;
+use serde::{Deserialize, Serialize};
 use serde_json;
 use std::io::Cursor;
-use serde::{Deserialize, Serialize};
 
-use crate::ipfs_types::{DagNode, IPFSHash};
-use crate::api_types::{DagCacheError};
+use crate::api_types::DagCacheError;
+use crate::encoding_types;
+use crate::ipfs_types;
 
 use tracing::{event, info, span, Level};
 use tracing_futures::Instrument;
@@ -21,7 +22,10 @@ impl IPFSNode {
     }
 
     // TODO: bias cache strongly towards small nodes
-    pub fn get(&self, k: IPFSHash) -> Box<dyn Future<Item = DagNode, Error = DagCacheError>> {
+    pub fn get(
+        &self,
+        k: ipfs_types::IPFSHash,
+    ) -> Box<dyn Future<Item = ipfs_types::DagNode, Error = DagCacheError>> {
         let pnq = "/api/v0/object/get?data-encoding=base64&arg=".to_owned() + &k.to_string();
         let pnq_prime: uri::PathAndQuery = pnq
             .parse()
@@ -39,7 +43,7 @@ impl IPFSNode {
             .map_err(|_e| DagCacheError::IPFSError) // todo: wrap originating error
             .and_then(|mut res| {
                 event!(Level::TRACE, msg = "attempting to parse resp");
-                client::ClientResponse::json(&mut res).map_err(|e| {
+                client::ClientResponse::json(&mut res).map(|DagNode{links,data}| ipfs_types::DagNode{ data: data, links: links.into_iter().map(|IPFSHeader{hash, name, size}| ipfs_types::IPFSHeader{hash, name, size}).collect()} ).map_err(|e| { // FIXME: lmao
 
                     event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
                     DagCacheError::IPFSJsonError
@@ -56,7 +60,10 @@ impl IPFSNode {
         Box::new(f)
     }
 
-    pub fn put(&self, v: DagNode) -> Box<dyn Future<Item = IPFSHash, Error = DagCacheError>> {
+    pub fn put(
+        &self,
+        v: ipfs_types::DagNode,
+    ) -> Box<dyn Future<Item = ipfs_types::IPFSHash, Error = DagCacheError>> {
         let u = uri::Uri::builder()
             .scheme("http")
             .authority(self.0.clone()) // feels weird to be cloning this ~constant value
@@ -66,6 +73,14 @@ impl IPFSNode {
 
         println!("hitting url: {:?}", &u);
 
+        let v = DagNode {
+            data: v.data,
+            links: v
+                .links
+                .into_iter()
+                .map(|ipfs_types::IPFSHeader { hash, name, size }| IPFSHeader { hash, name, size })
+                .collect(),
+        };
         let bytes = serde_json::to_vec(&v).expect("json _serialize_ failed (should be impossible)");
 
         let cursor = Cursor::new(bytes);
@@ -116,11 +131,32 @@ impl IPFSNode {
     }
 }
 
-
-// IPFS API resp type - lives here, not a huge fan of their json format - stays here
+// IPFS API resp types - lives here, not a huge fan of their json format - stays here
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct IPFSPutResp {
-    // note: todo: schema is all fucky, should have 1x type specific to ipfs api, 1x for mine
-    pub hash: IPFSHash,
+    pub hash: ipfs_types::IPFSHash,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct IPFSHeader {
+    pub name: String,
+    pub hash: ipfs_types::IPFSHash,
+    pub size: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct DagNode {
+    pub links: Vec<IPFSHeader>,
+    pub data: encoding_types::Base64,
+}
+
+//NOTE: why is this here? FIXME
+// exists primarily to have better serialized json (tuples result in 2-elem lists)
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DagNodeWithHash {
+    pub hash: IPFSHeader,
+    pub node: DagNode,
 }

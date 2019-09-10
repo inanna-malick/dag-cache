@@ -25,8 +25,6 @@ impl error::ResponseError for DagCacheError {
     }
 }
 
-
-
 #[derive(PartialEq, Eq, Hash, Clone, Debug, Serialize, Deserialize)]
 pub struct ClientSideHash(Base58);
 impl ClientSideHash {
@@ -35,12 +33,11 @@ impl ClientSideHash {
     }
 }
 
-
 pub mod bulk_put {
-    use serde::{Deserialize, Serialize};
-    use super::{ClientSideHash};
-    use crate::encoding_types::{Base64};
+    use super::ClientSideHash;
+    use crate::encoding_types::Base64;
     use crate::ipfs_types;
+    use serde::{Deserialize, Serialize};
 
     // idea is that a put req will contain some number of nodes, with only client-side blake hashing performed.
     // all hash links in body will solely use blake hash. ipfs is then treated as an implementation detail
@@ -57,7 +54,7 @@ pub mod bulk_put {
     #[derive(Clone, Debug, Serialize, Deserialize)]
     pub struct DagNode {
         pub links: Vec<DagNodeLink>, // list of pointers - either to elems in this bulk req or already-uploaded
-        pub data: Base64, // this node's data
+        pub data: Base64,            // this node's data
     }
 
     #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -68,15 +65,14 @@ pub mod bulk_put {
 }
 
 pub mod get {
-    use serde::{Deserialize, Serialize};
     use crate::ipfs_types;
+    use serde::{Deserialize, Serialize};
 
     // ~= NonEmptyList (head, rest struct)
     #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct Resp {
-        pub requested_node: (ipfs_types::IPFSHash, ipfs_types::DagNode),
+        pub requested_node: ipfs_types::DagNode,
         pub extra_node_count: usize,
-        pub extra_nodes: Vec<(ipfs_types::IPFSHash, ipfs_types::DagNode)>, // will likely result in ugly json from tuples, but w/e
+        pub extra_nodes: Vec<ipfs_types::DagNodeWithHash>,
     }
-
 }
