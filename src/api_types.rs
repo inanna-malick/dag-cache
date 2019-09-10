@@ -2,9 +2,9 @@ use actix_web::{error, http, HttpResponse};
 use failure::Fail;
 use serde::{Deserialize, Serialize};
 
-use encoding_types;
-use in_mem_types;
-use ipfs_types;
+use crate::encoding_types::{Base58, Base64};
+use crate::in_mem_types;
+use crate::ipfs_types;
 
 #[derive(Fail, Debug)]
 pub enum DagCacheError {
@@ -25,9 +25,22 @@ impl error::ResponseError for DagCacheError {
     }
 }
 
+
+
+#[derive(PartialEq, Eq, Hash, Clone, Debug, Serialize, Deserialize)]
+pub struct ClientSideHash(Base58);
+impl ClientSideHash {
+    pub fn to_string<'a>(&self) -> String {
+        self.0.to_string()
+    }
+}
+
+
 pub mod bulk_put {
-    use failure::Fail;
     use serde::{Deserialize, Serialize};
+    use super::{ClientSideHash};
+    use crate::encoding_types::{Base64};
+    use crate::ipfs_types;
 
     // idea is that a put req will contain some number of nodes, with only client-side blake hashing performed.
     // all hash links in body will solely use blake hash. ipfs is then treated as an implementation detail
@@ -44,29 +57,26 @@ pub mod bulk_put {
     #[derive(Clone, Debug, Serialize, Deserialize)]
     pub struct DagNode {
         pub links: Vec<DagNodeLink>, // list of pointers - either to elems in this bulk req or already-uploaded
-        pub data: encoding_types::Base64, // this node's data
+        pub data: Base64, // this node's data
     }
 
     #[derive(Clone, Debug, Serialize, Deserialize)]
     pub enum DagNodeLink {
         Local(ClientSideHash),
-        Remote(IPFSHeader),
+        Remote(ipfs_types::IPFSHeader),
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug, Serialize, Deserialize)]
-pub struct ClientSideHash(encoding_types::Base58);
-impl ClientSideHash {
-    pub fn to_string<'a>(&self) -> String {
-        self.0.to_string()
+pub mod get {
+    use serde::{Deserialize, Serialize};
+    use crate::ipfs_types;
+
+    // ~= NonEmptyList (head, rest struct)
+    #[derive(Clone, Debug, Deserialize, Serialize)]
+    pub struct Resp {
+        pub requested_node: (ipfs_types::IPFSHash, ipfs_types::DagNode),
+        pub extra_node_count: usize,
+        pub extra_nodes: Vec<(ipfs_types::IPFSHash, ipfs_types::DagNode)>, // will likely result in ugly json from tuples, but w/e
     }
-}
 
-
-// ~= NonEmptyList (head, rest struct)
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct DagNodeGetResp {
-    pub requested_node: (IPFSHash, DagNode),
-    pub extra_node_count: usize,
-    pub extra_nodes: Vec<(IPFSHash, DagNode)>, // will likely result in ugly json from tuples, but w/e
 }

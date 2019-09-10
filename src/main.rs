@@ -8,13 +8,13 @@ use std::sync::Mutex;
 use std::collections::VecDeque;
 
 mod ipfs_types;
-use crate::ipfs_types;
+// use crate::ipfs_types;
 mod encoding_types;
-use crate::encoding_types;
+// use crate::encoding_types;
 mod api_types;
 use crate::api_types::{ClientSideHash};
 mod in_mem_types;
-use crate::in_mem_types;
+// use crate::in_mem_types;
 
 mod ipfs_api;
 
@@ -24,11 +24,11 @@ type Cache = Mutex<LruCache<ipfs_types::IPFSHash, ipfs_types::DagNode>>;
 
 struct State {
     cache: Cache,
-    ipfs_node: ipfs_io::IPFSNode,
+    ipfs_node: ipfs_api::IPFSNode,
 }
 
 // TODO: rain says investigate stable deref (given that all refs here are immutable)
-fn cache_get(mutex: &Cache, k: ipfs_types::IPFSHash) -> Option<DagNode> {
+fn cache_get(mutex: &Cache, k: ipfs_types::IPFSHash) -> Option<ipfs_types::DagNode> {
     // succeed or die. failure is unrecoverable (mutex poisoned)
     let mut cache = mutex.lock().unwrap();
     // let mv = cache.get(&k);
@@ -37,7 +37,7 @@ fn cache_get(mutex: &Cache, k: ipfs_types::IPFSHash) -> Option<DagNode> {
     mv.cloned() // this feels weird? clone(d) is actually needed, right?
 }
 
-fn cache_put(mutex: &Cache, k: ipfs_types::IPFSHash, v: DagNode) {
+fn cache_put(mutex: &Cache, k: ipfs_types::IPFSHash, v: ipfs_types::DagNode) {
     // succeed or die. failure is unrecoverable (mutex poisoned)
     let mut cache = mutex.lock().unwrap();
     cache.put(k, v);
@@ -46,7 +46,7 @@ fn cache_put(mutex: &Cache, k: ipfs_types::IPFSHash, v: DagNode) {
 fn get(
     data: web::Data<State>,
     k: web::Path<(ipfs_types::IPFSHash)>,
-) -> Box<dyn Future<Item = web::Json<DagNodeGetResp>, Error = api_types::DagCacheError>> {
+) -> Box<dyn Future<Item = web::Json<api_types::get::Resp>, Error = api_types::DagCacheError>> {
     let span = span!(Level::TRACE, "dag cache get handler");
     let _enter = span.enter();
     info!("attempt cache get");
@@ -63,7 +63,7 @@ fn get(
             let f = data
                 .ipfs_node
                 .get(k.clone())
-                .and_then(move |dag_node: DagNode| {
+                .and_then(move |dag_node: ipfs_types::DagNode| {
                     info!("writing result of post cache miss lookup to cache");
                     cache_put(&data.cache, k.clone(), dag_node.clone());
                     // see if have any of the referenced subnodes in the local cache
@@ -77,7 +77,7 @@ fn get(
 
 // TODO: figure out traversal termination strategy - don't want to return whole cache in one resp (or do I?)
 // NOTE: breadth first first, probably.. sounds good.
-fn extend(cache: &Cache, node: (ipfs_types::IPFSHash, DagNode)) -> DagNodeGetResp {
+fn extend(cache: &Cache, node: (ipfs_types::IPFSHash, ipfs_types::DagNode)) -> api_types::get::Resp {
     let mut frontier = VecDeque::new();
     let mut res = Vec::new();
 
@@ -100,7 +100,7 @@ fn extend(cache: &Cache, node: (ipfs_types::IPFSHash, DagNode)) -> DagNodeGetRes
     }
 
     // NEL-like structure
-    DagNodeGetResp {
+    api_types::get::Resp {
         requested_node: node,
         extra_node_count: res.len(),
         extra_nodes: res,
@@ -109,8 +109,8 @@ fn extend(cache: &Cache, node: (ipfs_types::IPFSHash, DagNode)) -> DagNodeGetRes
 
 fn put(
     data: web::Data<State>,
-    v: web::Json<DagNode>,
-) -> Box<dyn Future<Item = web::Json<IPFSPutResp>, Error = api_types::DagCacheError>> {
+    v: web::Json<ipfs_types::DagNode>,
+) -> Box<dyn Future<Item = web::Json<ipfs_types::IPFSHash>, Error = api_types::DagCacheError>> {
     info!("dag cache put handler");
     let v = v.into_inner();
 
@@ -119,7 +119,7 @@ fn put(
         .put(v.clone())
         .and_then(move |hp: ipfs_types::IPFSHash| {
             cache_put(&data.cache, hp.clone(), v);
-            Ok(web::Json(IPFSPutResp { hash: hp }))
+            Ok(web::Json( hp ))
         });
     Box::new(f)
 }
@@ -129,7 +129,7 @@ fn put_many(
     v: web::Json<api_types::bulk_put::Req>,
 ) -> Box<dyn Future<Item = web::Json<ipfs_types::IPFSHeader>, Error = api_types::DagCacheError>> {
     info!("dag cache put handler");
-    let DagCacheBulkPutReq { entry_point, nodes } = v.into_inner();
+    let api_types::bulk_put::Req { entry_point, nodes } = v.into_inner();
     let (csh, dctp) = entry_point;
 
     let mut node_map = std::collections::HashMap::with_capacity(nodes.len());
@@ -155,10 +155,10 @@ fn put_many(
             .into_iter()
             .map({
                 |x| match x {
-                    BulkDagCachePutHashLinkInMem::NodeInThisReqInMem(hp, sn) => {
+                    in_mem_types::DagNodeLink::Local(hp, sn) => {
                         helper(app_data_prime.clone(), hp, *sn)
                     }
-                    BulkDagCachePutHashLinkInMem::NodeInIpfsInMem(nh) => {
+                    in_mem_types::DagNodeLink::Remote(nh) => {
                         Box::new(futures::future::ok(nh))
                     }
                 }
@@ -219,7 +219,7 @@ fn main() -> Result<(), std::io::Error> {
 
     let state = State {
         cache: Mutex::new(cache),
-        ipfs_node: ipfs_io::IPFSNode::new(http::uri::Authority::from_static("localhost:5001")),
+        ipfs_node: ipfs_api::IPFSNode::new(http::uri::Authority::from_static("localhost:5001")),
     };
     let data = web::Data::new(state);
 

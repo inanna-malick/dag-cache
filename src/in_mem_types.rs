@@ -1,5 +1,10 @@
 
-use cargo::ipfs_types;
+// mod ipfs_types;
+use crate::ipfs_types;
+use crate::encoding_types;
+use crate::api_types;
+use crate::api_types::{ClientSideHash};
+
 
 // ephemeral, used for data structure in memory, should it be here? mb not
 pub struct DagNode {
@@ -19,23 +24,23 @@ pub enum DagNodeBuildErr {
 
 impl DagNode {
     pub fn build(
-        entry: api_types::DagNode,
-        remaining: &mut std::collections::HashMap<ClientSideHash, api_types::DagNode>,
+        entry: api_types::bulk_put::DagNode,
+        remaining: &mut std::collections::HashMap<ClientSideHash, api_types::bulk_put::DagNode>,
     ) -> Result<DagNode, DagNodeBuildErr> {
-        let DagCacheToPut { links, data } = entry;
+        let api_types::bulk_put::DagNode { links, data } = entry;
 
         let links = links
             .into_iter()
             .map(|x| match x {
-                api_types::DagNodeLink::Local(csh) => match remaining.remove(&csh) {
+                api_types::bulk_put::DagNodeLink::Local(csh) => match remaining.remove(&csh) {
                     Some(dctp) => {
                         Self::build(dctp, remaining).map(|x| DagNodeLink::Local(csh, Box::new(x)))
                     }
-                    None => Err(DagNodeBuildErr(csh)),
+                    None => Err(DagNodeBuildErr::InvalidLink(csh)),
                 },
-                api_types::DagNodeLink::Remote(nh) => Ok(DagNodeLink::Remote(nh)),
+                api_types::bulk_put::DagNodeLink::Remote(nh) => Ok(DagNodeLink::Remote(nh)),
             })
-            .collect::<Result<Vec<DagNode>, DagNodeBuildErr>>()?;
+            .collect::<Result<Vec<DagNodeLink>, DagNodeBuildErr>>()?;
 
         Ok(DagNode { links, data })
     }

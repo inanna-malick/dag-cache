@@ -5,8 +5,10 @@ use http::header::CONTENT_TYPE;
 use http::uri;
 use serde_json;
 use std::io::Cursor;
+use serde::{Deserialize, Serialize};
 
-use crate::types::{DagCacheError, DagNode, IPFSHash};
+use crate::ipfs_types::{DagNode, IPFSHash};
+use crate::api_types::{DagCacheError};
 
 use tracing::{event, info, span, Level};
 use tracing_futures::Instrument;
