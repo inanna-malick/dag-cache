@@ -2,7 +2,7 @@ use actix_web::{error, http, HttpResponse};
 use failure::Fail;
 use serde::{Deserialize, Serialize};
 
-use crate::encoding_types::{Base58};
+use crate::encoding_types::Base58;
 
 #[derive(Fail, Debug)]
 pub enum DagCacheError {

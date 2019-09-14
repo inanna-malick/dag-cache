@@ -16,13 +16,27 @@ use tracing_futures::Instrument;
 
 pub struct IPFSNode(http::uri::Authority);
 
+pub trait IPFSCapability {
+    fn get(
+        &self,
+        k: ipfs_types::IPFSHash,
+    ) -> Box<dyn Future<Item = ipfs_types::DagNode, Error = DagCacheError>>;
+
+    fn put(
+        &self,
+        v: ipfs_types::DagNode,
+    ) -> Box<dyn Future<Item = ipfs_types::IPFSHash, Error = DagCacheError>>;
+}
+
 impl IPFSNode {
     pub fn new(a: http::uri::Authority) -> Self {
         IPFSNode(a)
     }
+}
 
+impl IPFSCapability for IPFSNode {
     // TODO: bias cache strongly towards small nodes
-    pub fn get(
+    fn get(
         &self,
         k: ipfs_types::IPFSHash,
     ) -> Box<dyn Future<Item = ipfs_types::DagNode, Error = DagCacheError>> {
@@ -44,24 +58,38 @@ impl IPFSNode {
             .map_err(|_e| DagCacheError::IPFSError) // todo: wrap originating error
             .and_then(|mut res| {
                 event!(Level::TRACE, msg = "attempting to parse resp");
-                client::ClientResponse::json(&mut res).map(|DagNode{links,data}| ipfs_types::DagNode{ data: data, links: links.into_iter().map(|IPFSHeader{hash, name, size}| ipfs_types::IPFSHeader{hash, name, size}).collect()} ).map_err(|e| { // FIXME: lmao
+                client::ClientResponse::json(&mut res)
+                    .map(|DagNode { links, data }| ipfs_types::DagNode {
+                        data: data,
+                        links: links
+                            .into_iter()
+                            .map(|IPFSHeader { hash, name, size }| ipfs_types::IPFSHeader {
+                                hash,
+                                name,
+                                size,
+                            })
+                            .collect(),
+                    })
+                    .map_err(|e| {
+                        // FIXME: lmao
 
-                    event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
-                    DagCacheError::IPFSJsonError
-                }).and_then(|x| {
-
-                    event!(Level::INFO, msg = "successfully parsed resp");
-                    Ok(x)
-
-                })
+                        event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
+                        DagCacheError::IPFSJsonError
+                    })
+                    .and_then(|x| {
+                        event!(Level::INFO, msg = "successfully parsed resp");
+                        Ok(x)
+                    })
             })
             // NOTE: outermost in chain wraps all previous b/c poll model
-            .instrument(span!(Level::TRACE, "ipfs-get", hash_pointer = k.to_string().as_str(), uri = ?u ));
+            .instrument(
+                span!(Level::TRACE, "ipfs-get", hash_pointer = k.to_string().as_str(), uri = ?u ),
+            );
 
         Box::new(f)
     }
 
-    pub fn put(
+    fn put(
         &self,
         v: ipfs_types::DagNode,
     ) -> Box<dyn Future<Item = ipfs_types::IPFSHash, Error = DagCacheError>> {
@@ -120,7 +148,8 @@ impl IPFSNode {
                     .and_then(|b| {
                         println!("raw bytes from resp: {:?}", b);
                         let cursor = Cursor::new(b);
-                        let res: IPFSPutResp = serde_json::de::from_reader(cursor).expect("lmao, will fail"); // TODO: not this (FIXME)
+                        let res: IPFSPutResp =
+                            serde_json::de::from_reader(cursor).expect("lmao, will fail"); // TODO: not this (FIXME)
 
                         info!("test");
                         Ok(res.hash)
