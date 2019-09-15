@@ -1,5 +1,5 @@
 use crate::cache::{Cache, CacheCapability};
-use crate::ipfs_api::{IPFSNode, IPFSCapability};
+use crate::ipfs_api::{IPFSCapability, IPFSNode};
 
 pub struct Capabilities {
     cache: Cache,
@@ -8,7 +8,7 @@ pub struct Capabilities {
 
 impl Capabilities {
     pub fn new(cache: Cache, ipfs_node: IPFSNode) -> Capabilities {
-        Capabilities{cache, ipfs_node}
+        Capabilities { cache, ipfs_node }
     }
 }
 
@@ -31,7 +31,6 @@ pub trait HasCacheCap {
 
     fn cache_caps(&self) -> &Self::Output;
 }
-
 
 impl HasCacheCap for Capabilities {
     type Output = Cache;

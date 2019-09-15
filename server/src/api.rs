@@ -8,12 +8,17 @@ use crate::api_types;
 use crate::in_mem_types;
 use crate::ipfs_types;
 
-use crate::capabilities::{HasCacheCap, HasIPFSCap};
+use tokio;
+
 use crate::api_types::ClientSideHash;
 use crate::cache::CacheCapability;
+use crate::capabilities::{HasCacheCap, HasIPFSCap};
 use crate::ipfs_api::IPFSCapability;
+use crate::lib::BoxFuture;
 use std::convert::AsRef;
 use tracing::{info, span, Level};
+
+use futures::sync::oneshot;
 
 pub fn get<C: 'static + HasIPFSCap + HasCacheCap>(
     caps: web::Data<C>,
@@ -53,10 +58,7 @@ pub fn get<C: 'static + HasIPFSCap + HasCacheCap>(
 }
 
 // TODO: figure out traversal termination strategy - don't want to return whole cache in one resp
-fn extend<C: 'static + HasCacheCap>(
-    caps: &C,
-    node: ipfs_types::DagNode,
-) -> api_types::get::Resp {
+fn extend<C: 'static + HasCacheCap>(caps: &C, node: ipfs_types::DagNode) -> api_types::get::Resp {
     let mut frontier = VecDeque::new();
     let mut res = Vec::new();
 
@@ -105,10 +107,10 @@ pub fn put<C: 'static + HasCacheCap + HasIPFSCap>(
     Box::new(f)
 }
 
-pub fn put_many<C: 'static + HasCacheCap + HasIPFSCap>(
+pub fn put_many<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>( // TODO: figure out exactly what sync does
     caps: web::Data<C>,
     req: web::Json<api_types::bulk_put::Req>,
-) -> Box<dyn Future<Item = web::Json<ipfs_types::IPFSHeader>, Error = api_types::DagCacheError>> {
+) -> BoxFuture<web::Json<ipfs_types::IPFSHeader>, api_types::DagCacheError> {
     // let caps = caps.into_inner(); // just copy arc, lmao
 
     info!("dag cache put handler");
@@ -124,56 +126,84 @@ pub fn put_many<C: 'static + HasCacheCap + HasIPFSCap>(
     let in_mem = in_mem_types::DagNode::build(dctp, &mut node_map)
         .expect("todo: handle malformed req case here"); // FIXME
 
-    // FIXME: cause of future stack overflow? idk, could use custom future w/ state to avoid recursing on polls
-    fn helper<C: 'static + HasCacheCap + HasIPFSCap>(
-        caps: std::sync::Arc<C>, // todo: just pass around arc, probably
+    fn helper<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
+        chan: oneshot::Sender<Result<ipfs_types::IPFSHeader, api_types::DagCacheError>>,
+        caps: std::sync::Arc<C>,
         hash: ClientSideHash,
         node: in_mem_types::DagNode,
-    ) -> Box<dyn Future<Item = ipfs_types::IPFSHeader, Error = api_types::DagCacheError>> {
+    ) -> BoxFuture<(), ()> {
         let in_mem_types::DagNode { data, links } = node;
 
-        // async await lets me avoid this I think... investigate
         let caps2 = caps.clone();
 
-        let bar: Vec<_> = links
+        let link_fetches: Vec<_> = links
             .into_iter()
             .map({
-                |x| match x {
-                    in_mem_types::DagNodeLink::Local(hp, sn) => helper(caps2.clone(), hp, *sn),
-                    in_mem_types::DagNodeLink::Remote(nh) => Box::new(futures::future::ok(nh)),
+                |x| -> BoxFuture<ipfs_types::IPFSHeader, api_types::DagCacheError> {
+                    match x {
+                        in_mem_types::DagNodeLink::Local(hp, sn) => {
+                            let (send, receive) = oneshot::channel();
+                            tokio::spawn(helper(send, caps2.clone(), hp, *sn));
+                            let f = receive
+                                .map_err(|_| api_types::DagCacheError::UnexpectedError)
+                                .and_then(|x| x);
+                            Box::new(f)
+                        }
+                        in_mem_types::DagNodeLink::Remote(nh) => Box::new(futures::future::ok(nh)),
+                    }
                 }
             })
             .collect();
 
-        let foo = futures::future::join_all(bar);
+        let joined_link_fetches = futures::future::join_all(link_fetches);
 
-        let f = foo.and_then(|links: Vec<ipfs_types::IPFSHeader>| {
-            // might be a bit of an approximation, but w/e
-            let size = data.0.len() as u64 + links.iter().map(|x| x.size).sum::<u64>();
+        let f = joined_link_fetches
+            .and_then(|links: Vec<ipfs_types::IPFSHeader>| {
+                // might be a bit of an approximation, but w/e
+                let size = data.0.len() as u64 + links.iter().map(|x| x.size).sum::<u64>();
 
-            let dag_node = ipfs_types::DagNode {
-                data: data,
-                links: links,
-            };
+                let dag_node = ipfs_types::DagNode {data,links};
 
-            caps.as_ref()
-                .ipfs_caps()
-                .put(dag_node.clone())
-                .and_then(move |hp: ipfs_types::IPFSHash| {
-                    caps.as_ref().cache_caps().put(hp.clone(), dag_node);
-                    let hdr = ipfs_types::IPFSHeader {
-                        name: hash.to_string(),
-                        hash: hp,
-                        size: size,
-                    };
-                    futures::future::ok(hdr)
-                })
-        });
+                caps.as_ref().ipfs_caps().put(dag_node.clone()).then(
+                    move |res| { match res {
+                        Ok(hp) => {
+                            caps.as_ref().cache_caps().put(hp.clone(), dag_node);
+                            let hdr = ipfs_types::IPFSHeader {
+                                name: hash.to_string(),
+                                hash: hp,
+                                size: size,
+                            };
+
+                            let chan_send_res = chan.send(Ok(hdr));
+                            if let Err(err) = chan_send_res {
+                                info!("failed oneshot channel send {:?}", err);
+                            };
+                            futures::future::ok(())
+                        }
+                        Err(err) => {
+                            let chan_send_res = chan.send(Err(err));
+                            if let Err(err) = chan_send_res {
+                                info!("failed oneshot channel send {:?}", err);
+                            };
+                            futures::future::ok(()) // note: what does err/success mean for spawn? both ().
+                        }
+                    }
+                    },
+                )
+            }).map_err(|_| ());
 
         Box::new(f)
     };
 
-    let f = helper(caps.into_inner(), csh, in_mem).map(web::Json);
+    let (send, receive) = oneshot::channel();
+    tokio::spawn(helper(send, caps.into_inner(), csh, in_mem));
+
+    let f = receive
+        .map_err(|_| api_types::DagCacheError::UnexpectedError)
+        .and_then(|res| match res {
+            Ok(res) => future::ok(web::Json(res)),
+            Err(err) => future::err(err),
+        });
 
     Box::new(f)
 }

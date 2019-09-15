@@ -15,9 +15,12 @@ futures = "0.1"
 failure = "0.1.5"
 base64 = "0.10.1"
 base58 = "0.1.0"
-
+tokio = "0.1.22"
 # with some hax
 actix-multipart-rfc7578 = { git = "https://github.com/pkinsky/rust-multipart-rfc7578" }
+
+
+reqwest = "0.9"
 
 serde_json = "1.0"
 

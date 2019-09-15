@@ -12,6 +12,8 @@ pub enum DagCacheError {
     IPFSJsonError,
     // #[fail(display = "ipfs json error, foo: {:?}")]
     // IPFSJsonError(Foo), // todo, look at docs :)
+    #[fail(display = "??? lmao ???")] // FIXME
+    UnexpectedError,
 }
 
 impl error::ResponseError for DagCacheError {
