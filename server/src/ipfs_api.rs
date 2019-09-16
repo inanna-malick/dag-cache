@@ -127,12 +127,18 @@ mod tests {
     use super::*;
     use crate::encoding_types::Base64;
     use crate::ipfs_types::{DagNode, IPFSHash, IPFSHeader};
+    use crate::lib;
     use rand;
     use rand::Rng;
 
     #[test]
-    // NOTE: assumes IPFS daemon running locally at localhost:5001. Daemon can be shared between tests.
     fn test_put_and_get() {
+        lib::run_test(test_put_and_get_worker)
+    }
+
+
+    // NOTE: assumes IPFS daemon running locally at localhost:5001. Daemon can be shared between tests.
+    fn test_put_and_get_worker() -> BoxFuture<(), String> {
         let mut random_bytes = vec![];
 
         let mut rng = rand::thread_rng(); // faster if cached locally
@@ -167,26 +173,7 @@ mod tests {
                 ()
             });
 
-        run_test(Box::new(f))
-    }
-
-    // TODO: could take list of futures and be top level test runner.. (better than one tokio runtime per test case)
-    fn run_test<E: std::fmt::Debug + Send + Sync + 'static>(f: BoxFuture<(), E>) {
-        let subscriber = tracing_subscriber::fmt::Subscriber::builder().finish();
-        // attempt to set, failure means already set (other test suite?)
-        let _ = tracing::subscriber::set_global_default(subscriber);
-
-        let (send, receive) = futures::sync::oneshot::channel();
-        let f = f.then(|res| {
-            send.send(res).unwrap();
-            Ok(())
-        });
-
-        tokio::run(f);
-
-        if let Err(e) = receive.wait().unwrap() {
-            panic!("test failed with error {:?}", e);
-        };
+        Box::new(f)
     }
 
 }

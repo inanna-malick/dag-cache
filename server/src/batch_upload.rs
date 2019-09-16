@@ -127,10 +127,12 @@ mod tests {
     use crate::encoding_types::{Base58, Base64};
     use crate::in_mem_types::DagNodeLink::Local;
     use crate::ipfs_types::{DagNode, IPFSHash};
+    use crate::lib;
     use rand;
     use rand::Rng;
     use std::collections::HashMap;
     use std::sync::Mutex;
+
 
     struct MockIPFS(Mutex<HashMap<IPFSHash, DagNode>>);
 
@@ -188,7 +190,7 @@ mod tests {
 
     #[test]
     fn test_batch_upload() {
-        run_test(test_batch_upload_worker)
+        lib::run_test(test_batch_upload_worker)
     }
 
     // uses mock capabilities, does not require local ipfs daemon
@@ -253,37 +255,6 @@ mod tests {
             });
 
         Box::new(f)
-    }
-
-    // TODO: could take list of futures and be top level test runner.. (better than one tokio runtime per test case)
-    // NOTE: Fn b/c it may use tokio::spawn and needs to have a runtime ready
-    fn run_test<F, E>(f: F)
-    where
-        F: Fn() -> BoxFuture<(), E> + Send + Sync + 'static,
-        E: std::fmt::Debug + Send + Sync + 'static,
-    {
-        // initialize and register event/span logging subscriber
-        let subscriber = tracing_subscriber::fmt::Subscriber::builder().finish();
-        // attempt to set, failure means already set (other test suite?)
-        let _ = tracing::subscriber::set_global_default(subscriber);
-
-        let (send, receive) = futures::sync::oneshot::channel();
-        let f = futures::future::ok(()).and_then(move |()| f()).then(|res| {
-            let chan_send_res = send.send(res);
-            if let Err(err) = chan_send_res {
-                info!("failed oneshot channel send {:?}", err);
-            };
-
-            Ok(())
-        });
-
-        println!("test harness run");
-        tokio::run(f);
-        println!("test harness post-run");
-
-        if let Err(e) = receive.wait().unwrap() {
-            panic!("test failed with error {:?}", e);
-        };
     }
 
 }
