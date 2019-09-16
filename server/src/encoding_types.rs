@@ -9,6 +9,10 @@ impl Base58 {
     pub fn to_string<'a>(&self) -> String {
         base58::ToBase58::to_base58(&self.0[..])
     }
+
+    pub fn from_string<'a>(x: &str) -> Result<Base58, base58::FromBase58Error> {
+        base58::FromBase58::from_base58(x).map(Base58)
+    }
 }
 
 // always serialize as string (json)

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::encoding_types;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct IPFSHeader {
     pub name: String,
     pub hash: IPFSHash,
@@ -14,12 +14,21 @@ pub struct IPFSHeader {
 pub struct IPFSHash(encoding_types::Base58);
 
 impl IPFSHash {
+    pub fn from_string(x: &str) -> Result<IPFSHash, base58::FromBase58Error> {
+        encoding_types::Base58::from_string(x).map(Self::from_raw)
+    }
+
+    // probably unsafe, but, like, what do I look like, a cop?
+    pub fn from_raw(raw: encoding_types::Base58) -> IPFSHash {
+        IPFSHash(raw)
+    }
+
     pub fn to_string<'a>(&self) -> String {
         self.0.to_string()
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Deserialize, Serialize)]
 pub struct DagNode {
     pub links: Vec<IPFSHeader>,
     pub data: encoding_types::Base64,
