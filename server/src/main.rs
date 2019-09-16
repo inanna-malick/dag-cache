@@ -30,7 +30,9 @@ fn main() -> Result<(), std::io::Error> {
     tracing::subscriber::set_global_default(subscriber).expect("setting global default failed");
 
     let cache = Cache::new(LruCache::new(32)); // TODO: config, sensible defaults, etc
-    let ipfs_node = IPFSNode::new(reqwest::Url::parse("http://localhost:5001").expect("parsing static string failed? fix it"));
+    let ipfs_node = IPFSNode::new(
+        reqwest::Url::parse("http://localhost:5001").expect("parsing static string failed? fix it"),
+    );
 
     let caps = web::Data::new(Capabilities::new(cache, ipfs_node));
 
