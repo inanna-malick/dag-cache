@@ -8,12 +8,10 @@ use crate::encoding_types::Base58;
 pub enum DagCacheError {
     #[fail(display = "ipfs error")]
     IPFSError,
-    #[fail(display = "ipfs json error")]
+    #[fail(display = "ipfs json parse error")] // FIXME - does this make sense here?
     IPFSJsonError,
-    // #[fail(display = "ipfs json error, foo: {:?}")]
-    // IPFSJsonError(Foo), // todo, look at docs :)
-    #[fail(display = "??? lmao ???")] // FIXME
-    UnexpectedError,
+    #[fail(display = "unexpected error: {}", msg)]
+    UnexpectedError { msg: String },
 }
 
 impl error::ResponseError for DagCacheError {
@@ -28,6 +26,11 @@ impl error::ResponseError for DagCacheError {
 #[derive(PartialEq, Eq, Hash, Clone, Debug, Serialize, Deserialize)]
 pub struct ClientSideHash(Base58);
 impl ClientSideHash {
+    #[cfg(test)]
+    pub fn new(x: Base58) -> ClientSideHash {
+        ClientSideHash(x)
+    }
+
     pub fn to_string<'a>(&self) -> String {
         self.0.to_string()
     }

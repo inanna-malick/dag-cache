@@ -22,8 +22,6 @@ impl CacheCapability for Cache {
     fn get(&self, k: IPFSHash) -> Option<DagNode> {
         // succeed or die. failure is unrecoverable (mutex poisoned)
         let mut cache = self.0.lock().unwrap();
-        // let mv = cache.get(&k);
-        // mv.cloned() // this feels weird? clone(d) is actually needed, right?
         let mv = cache.get(&k);
         mv.cloned() // this feels weird? clone(d) is actually needed, right?
     }

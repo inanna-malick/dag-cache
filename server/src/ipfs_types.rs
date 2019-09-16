@@ -14,11 +14,13 @@ pub struct IPFSHeader {
 pub struct IPFSHash(encoding_types::Base58);
 
 impl IPFSHash {
+    #[cfg(test)]
     pub fn from_string(x: &str) -> Result<IPFSHash, base58::FromBase58Error> {
         encoding_types::Base58::from_string(x).map(Self::from_raw)
     }
 
     // probably unsafe, but, like, what do I look like, a cop?
+    #[cfg(test)]
     pub fn from_raw(raw: encoding_types::Base58) -> IPFSHash {
         IPFSHash(raw)
     }

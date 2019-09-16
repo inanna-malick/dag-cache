@@ -99,7 +99,8 @@ impl IPFSCapability for IPFSNode {
     }
 }
 
-// IPFS API resp types - lives here, not a huge fan of their json format - stays here
+// IPFS API resp types live here, not a huge fan of their json format - stays here
+// NOTE: these mirror types in ipfs_types, only difference is upper-case first char in json field names
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct IPFSPutResp {
@@ -121,14 +122,6 @@ pub struct DagNode {
     pub data: encoding_types::Base64,
 }
 
-//NOTE: why is this here? FIXME
-// exists primarily to have better serialized json (tuples result in 2-elem lists)
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct DagNodeWithHash {
-    pub hash: IPFSHeader,
-    pub node: DagNode,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,6 +131,7 @@ mod tests {
     use rand::Rng;
 
     #[test]
+    // NOTE: assumes IPFS daemon running locally at localhost:5001. Daemon can be shared between tests.
     fn test_put_and_get() {
         let mut random_bytes = vec![];
 
@@ -146,7 +140,6 @@ mod tests {
             random_bytes.push(rng.gen())
         }
 
-        // invalid hash pointer, should be fine
         let header = IPFSHeader {
             name: "foo".to_string(),
             // needs to be a valid IPFS hash (length, encoding bit, etc), so just use a randomly-chosen one
@@ -179,13 +172,15 @@ mod tests {
 
     // TODO: could take list of futures and be top level test runner.. (better than one tokio runtime per test case)
     fn run_test<E: std::fmt::Debug + Send + Sync + 'static>(f: BoxFuture<(), E>) {
-        // initialize and register event/span logging subscriber
         let subscriber = tracing_subscriber::fmt::Subscriber::builder().finish();
-        tracing::subscriber::set_global_default(subscriber).expect("setting global default failed");
-
+        // attempt to set, failure means already set (other test suite?)
+        let _ = tracing::subscriber::set_global_default(subscriber);
 
         let (send, receive) = futures::sync::oneshot::channel();
-        let f = f.then(|res| {send.send(res).unwrap(); Ok(())});
+        let f = f.then(|res| {
+            send.send(res).unwrap();
+            Ok(())
+        });
 
         tokio::run(f);
 

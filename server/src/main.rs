@@ -16,6 +16,7 @@ use capabilities::Capabilities;
 use ipfs_api::IPFSNode;
 
 mod api;
+mod batch_upload;
 mod cache;
 
 use tracing::{info, span, Level};

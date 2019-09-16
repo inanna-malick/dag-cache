@@ -4,12 +4,15 @@ use crate::api_types::ClientSideHash;
 use crate::encoding_types;
 use crate::ipfs_types;
 
-// ephemeral, used for data structure in memory, should it be here? mb not
+// ephemeral, used for data structure in memory
+
+#[derive(Clone)]
 pub struct DagNode {
     pub links: Vec<DagNodeLink>, // list of pointers - either to elems in this bulk req or already-uploaded
     pub data: encoding_types::Base64, // this node's data
 }
 
+#[derive(Clone)]
 pub enum DagNodeLink {
     Local(ClientSideHash, Box<DagNode>),
     Remote(ipfs_types::IPFSHeader),
@@ -21,6 +24,7 @@ pub enum DagNodeBuildErr {
 }
 
 impl DagNode {
+    // TODO: should error if remaining not empty? or return remaining nodes in tuple res
     pub fn build(
         entry: api_types::bulk_put::DagNode,
         remaining: &mut std::collections::HashMap<ClientSideHash, api_types::bulk_put::DagNode>,
