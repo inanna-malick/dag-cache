@@ -10,93 +10,99 @@ use crate::encoding_types;
 use crate::ipfs_types;
 use crate::lib::BoxFuture;
 
-pub struct IPFSNode(reqwest::Url); //base url, copy mutated to produce specific path. should have no path component
+pub struct IPFSNode(reqwest::Url); //base url, copy mutated to produce specific path. should not have a path component.
 
-pub trait IPFSCapability {
-    fn get(&self, k: ipfs_types::IPFSHash) -> BoxFuture<ipfs_types::DagNode, DagCacheError>;
-
-    fn put(&self, v: ipfs_types::DagNode) -> BoxFuture<ipfs_types::IPFSHash, DagCacheError>;
+pub struct IPFSCapability {
+    get: Box<dyn Fn(ipfs_types::IPFSHash) -> BoxFuture<ipfs_types::DagNode, DagCacheError>>,
+    put: Box<dyn Fn(ipfs_types::DagNode) -> BoxFuture<ipfs_types::IPFSHash, DagCacheError>>,
 }
 
 impl IPFSNode {
     pub fn new(a: reqwest::Url) -> Self {
         IPFSNode(a)
     }
+
+    pub fn as_capability(&self) -> IPFSCapability {
+        IPFSCapability {
+            get: {
+                let node = self.clone();
+                |k| get(node, k)
+            },
+            put: {
+                let node = self.clone();
+                |v| put(node, v)
+            },
+        }
+    }
 }
 
-impl IPFSCapability for IPFSNode {
-    fn get(&self, k: ipfs_types::IPFSHash) -> BoxFuture<ipfs_types::DagNode, DagCacheError> {
-        let mut url = self.0.clone();
-        url.set_path("api/v0/object/get");
-        url.query_pairs_mut()
-            .append_pair("data-encoding", "base64")
-            .append_pair("arg", &k.to_string());
+fn get(node: &IPFSNode, k: ipfs_types::IPFSHash) -> BoxFuture<ipfs_types::DagNode, DagCacheError> {
+    let mut url = node.0.clone();
+    url.set_path("api/v0/object/get");
+    url.query_pairs_mut()
+        .append_pair("data-encoding", "base64")
+        .append_pair("arg", &k.to_string());
 
-        println!("hitting url: {:?}", &url);
+    println!("hitting url: {:?}", &url);
 
-        let f = Client::new()
-            .get(url.clone())
-            .send()
-            .and_then(|mut x| x.json())
-            .map(|e: DagNode| ipfs_types::DagNode {
-                data: e.data,
-                links: e
-                    .links
-                    .into_iter()
-                    .map(|IPFSHeader { hash, name, size }| ipfs_types::IPFSHeader {
-                        hash,
-                        name,
-                        size,
-                    })
-                    .collect(),
-            })
-            .map_err(|e| {
-                event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
-                DagCacheError::IPFSJsonError
-            })
-            .instrument(
-                span!(Level::TRACE, "ipfs-get", hash_pointer = k.to_string().as_str(), url = ?url ),
-            );
-
-        Box::new(f)
-    }
-
-    fn put(&self, v: ipfs_types::DagNode) -> BoxFuture<ipfs_types::IPFSHash, DagCacheError> {
-        let mut url = self.0.clone();
-        url.set_path("api/v0/object/put");
-        url.query_pairs_mut().append_pair("datafieldenc", "base64");
-
-        println!("hitting url: {:?}", &url);
-
-        let v = DagNode {
-            data: v.data,
-            links: v
+    let f = Client::new()
+        .get(url.clone())
+        .send()
+        .and_then(|mut x| x.json())
+        .map(|e: DagNode| ipfs_types::DagNode {
+            data: e.data,
+            links: e
                 .links
                 .into_iter()
-                .map(|ipfs_types::IPFSHeader { hash, name, size }| IPFSHeader { hash, name, size })
+                .map(|IPFSHeader { hash, name, size }| ipfs_types::IPFSHeader { hash, name, size })
                 .collect(),
-        };
-        let bytes = serde_json::to_vec(&v).expect("json _serialize_ failed (should be impossible)");
+        })
+        .map_err(|e| {
+            event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
+            DagCacheError::IPFSJsonError
+        })
+        .instrument(
+            span!(Level::TRACE, "ipfs-get", hash_pointer = k.to_string().as_str(), url = ?url ),
+        );
 
-        println!("sending bytes: {:?}", &std::str::from_utf8(&bytes));
+    Box::new(f)
+}
 
-        let part = multipart::Part::bytes(bytes).file_name("data"); // or vice versa, idk
-        let form = multipart::Form::new().part("file", part);
+fn put(node: &IPFSNode, v: ipfs_types::DagNode) -> BoxFuture<ipfs_types::IPFSHash, DagCacheError> {
+    let mut url = node.0.clone();
+    url.set_path("api/v0/object/put");
+    url.query_pairs_mut().append_pair("datafieldenc", "base64");
 
-        let f = Client::new()
-            .post(url.clone())
-            .multipart(form)
-            .send()
-            .and_then(|mut x| x.json())
-            .map(|IPFSPutResp { hash }| hash)
-            .map_err(|e| {
-                event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
-                DagCacheError::IPFSJsonError
-            })
-            .instrument(span!(Level::TRACE, "ipfs-put", url = ?url ));
+    println!("hitting url: {:?}", &url);
 
-        Box::new(f)
-    }
+    let v = DagNode {
+        data: v.data,
+        links: v
+            .links
+            .into_iter()
+            .map(|ipfs_types::IPFSHeader { hash, name, size }| IPFSHeader { hash, name, size })
+            .collect(),
+    };
+    let bytes = serde_json::to_vec(&v).expect("json _serialize_ failed (should be impossible)");
+
+    println!("sending bytes: {:?}", &std::str::from_utf8(&bytes));
+
+    let part = multipart::Part::bytes(bytes).file_name("data"); // or vice versa, idk
+    let form = multipart::Form::new().part("file", part);
+
+    let f = Client::new()
+        .post(url.clone())
+        .multipart(form)
+        .send()
+        .and_then(|mut x| x.json())
+        .map(|IPFSPutResp { hash }| hash)
+        .map_err(|e| {
+            event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
+            DagCacheError::IPFSJsonError
+        })
+        .instrument(span!(Level::TRACE, "ipfs-put", url = ?url ));
+
+    Box::new(f)
 }
 
 // IPFS API resp types live here, not a huge fan of their json format - stays here
@@ -135,7 +141,6 @@ mod tests {
     fn test_put_and_get() {
         lib::run_test(test_put_and_get_worker)
     }
-
 
     // NOTE: assumes IPFS daemon running locally at localhost:5001. Daemon can be shared between tests.
     fn test_put_and_get_worker() -> BoxFuture<(), String> {

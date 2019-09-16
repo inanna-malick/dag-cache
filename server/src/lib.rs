@@ -2,7 +2,6 @@ use futures::future::Future;
 
 pub type BoxFuture<Item, Error> = Box<dyn Future<Item = Item, Error = Error> + 'static + Send>;
 
-
 #[cfg(test)]
 // NOTE: takes Fn b/c it may use tokio::spawn and needs to have a runtime ready
 // TODO: could take list of futures and be top level test runner.. (better than one tokio runtime per test case)

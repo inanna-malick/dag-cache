@@ -13,15 +13,12 @@ impl Capabilities {
 }
 
 pub trait HasIPFSCap {
-    type Output: IPFSCapability;
-
-    fn ipfs_caps(&self) -> &Self::Output;
+    fn ipfs_caps(&self) -> &IPFSCapability;
 }
 
 //todo: read up on generalized associated types
 impl HasIPFSCap for Capabilities {
-    type Output = IPFSNode;
-    fn ipfs_caps(&self) -> &IPFSNode {
+    fn ipfs_caps(&self) -> &IPFSCapability {
         &self.ipfs_node
     }
 }

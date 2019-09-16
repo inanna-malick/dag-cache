@@ -133,7 +133,6 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-
     struct MockIPFS(Mutex<HashMap<IPFSHash, DagNode>>);
 
     struct BlackHoleCache;
