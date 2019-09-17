@@ -10,9 +10,8 @@ use std::sync::Arc;
 use tokio;
 
 use crate::api_types::ClientSideHash;
-use crate::cache::CacheCapability;
-use crate::capabilities::{HasCacheCap, HasIPFSCap};
-use crate::ipfs_api::IPFSCapability;
+use crate::cache::HasCacheCap;
+use crate::ipfs_api::HasIPFSCap;
 use crate::ipfs_types::IPFSHeader;
 use crate::lib::BoxFuture;
 use std::convert::AsRef;
@@ -29,29 +28,13 @@ pub fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
 ) -> impl Future<Item = IPFSHeader, Error = api_types::DagCacheError> + 'static + Send {
     let (send, receive) = oneshot::channel();
 
-    println!(
-        "spawn publish worker for client side hash {:?}",
-        hash.to_string()
-    );
-    let hash2 = hash.clone();
-    let hash3 = hash.clone();
     tokio::spawn(ipfs_publish_worker(caps, send, hash, node));
-    println!(
-        "post spawn publish worker for client side hash {:?}",
-        hash3.to_string()
-    );
 
     receive
         .map_err(|_| api_types::DagCacheError::UnexpectedError {
             msg: "one shot channel cancelled".to_string(),
         }) // one-shot channel cancelled
-        .then(move |x| {
-            println!(
-                "complete publish worker for client side hash {:?}",
-                hash2.to_string()
-            );
-            x
-        })
+        .then(move |x| x)
         .and_then(|res| match res {
             Ok(res) => future::ok(res),
             Err(err) => future::err(err),
@@ -91,11 +74,10 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
             let dag_node = ipfs_types::DagNode { data, links };
 
             caps.as_ref()
-                .ipfs_caps()
-                .put(dag_node.clone())
+                .ipfs_put(dag_node.clone())
                 .then(move |res| match res {
                     Ok(hp) => {
-                        caps.as_ref().cache_caps().put(hp.clone(), dag_node);
+                        caps.as_ref().cache_put(hp.clone(), dag_node);
                         let hdr = IPFSHeader {
                             name: hash.to_string(),
                             hash: hp,
@@ -123,9 +105,11 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cache::{HasCacheCap, CacheCapability};
     use crate::api_types::DagCacheError;
     use crate::encoding_types::{Base58, Base64};
     use crate::in_mem_types::DagNodeLink::Local;
+    use crate::ipfs_api::{HasIPFSCap, IPFSCapability};
     use crate::ipfs_types::{DagNode, IPFSHash};
     use crate::lib;
     use rand;

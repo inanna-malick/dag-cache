@@ -8,9 +8,8 @@ use crate::api_types;
 use crate::in_mem_types;
 use crate::ipfs_types;
 
-use crate::cache::CacheCapability;
-use crate::capabilities::{HasCacheCap, HasIPFSCap};
-use crate::ipfs_api::IPFSCapability;
+use crate::cache::HasCacheCap;
+use crate::ipfs_api::HasIPFSCap;
 use crate::lib::BoxFuture;
 use tracing::{info, span, Level};
 
@@ -26,7 +25,7 @@ pub fn get<C: 'static + HasIPFSCap + HasCacheCap>(
     let _enter = span.enter();
     info!("attempt cache get");
     let k = k.into_inner();
-    match caps.cache_caps().get(k.clone()) {
+    match caps.cache_get(k.clone()) {
         Some(dag_node) => {
             info!("cache hit");
             // see if have any of the referenced subnodes in the local cache
@@ -36,14 +35,11 @@ pub fn get<C: 'static + HasIPFSCap + HasCacheCap>(
         None => {
             info!("cache miss");
             let f =
-                // caps.as_ref()
-                //     .ipfs_get(k.clone())
                 caps
-                .ipfs_caps()
-                .get(k.clone())
+                .ipfs_get(k.clone())
                     .and_then(move |dag_node: ipfs_types::DagNode| {
                         info!("writing result of post cache miss lookup to cache");
-                        caps.cache_caps().put(k.clone(), dag_node.clone());
+                        caps.cache_put(k.clone(), dag_node.clone());
                         // see if have any of the referenced subnodes in the local cache
                         let resp = extend(caps.as_ref(), dag_node);
                         Ok(web::Json(resp))
@@ -66,7 +62,7 @@ fn extend<C: 'static + HasCacheCap>(caps: &C, node: ipfs_types::DagNode) -> api_
     // explore the frontier of potentially cached hash pointers
     while let Some(hp) = frontier.pop_front() {
         // if a hash pointer is in the cache, grab the associated node and continue traversal
-        if let Some(dn) = caps.cache_caps().get(hp.hash.clone()) {
+        if let Some(dn) = caps.cache_get(hp.hash.clone()) {
             // clone :(
             for hp in dn.links.iter() {
                 // iter over ref
@@ -94,10 +90,9 @@ pub fn put<C: 'static + HasCacheCap + HasIPFSCap>(
     let node = node.into_inner();
 
     let f = caps
-        .ipfs_caps()
-        .put(node.clone())
+        .ipfs_put(node.clone())
         .and_then(move |hp: ipfs_types::IPFSHash| {
-            caps.cache_caps().put(hp.clone(), node);
+            caps.cache_put(hp.clone(), node);
             Ok(web::Json(hp))
         });
     Box::new(f)

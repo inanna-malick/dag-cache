@@ -14,9 +14,24 @@ pub struct IPFSNode(reqwest::Url); //base url, copy mutated to produce specific 
 
 pub trait IPFSCapability {
     fn get(&self, k: ipfs_types::IPFSHash) -> BoxFuture<ipfs_types::DagNode, DagCacheError>;
-
     fn put(&self, v: ipfs_types::DagNode) -> BoxFuture<ipfs_types::IPFSHash, DagCacheError>;
 }
+
+
+pub trait HasIPFSCap {
+    type Output: IPFSCapability;
+
+    fn ipfs_caps(&self) -> &Self::Output;
+
+    fn ipfs_get(&self, k: ipfs_types::IPFSHash) -> BoxFuture<ipfs_types::DagNode, DagCacheError>{
+        self.ipfs_caps().get(k)
+    }
+
+    fn ipfs_put(&self, v: ipfs_types::DagNode) -> BoxFuture<ipfs_types::IPFSHash, DagCacheError>{
+        self.ipfs_caps().put(v)
+    }
+}
+
 
 impl IPFSNode {
     pub fn new(a: reqwest::Url) -> Self {
@@ -32,7 +47,6 @@ impl IPFSCapability for IPFSNode {
             .append_pair("data-encoding", "base64")
             .append_pair("arg", &k.to_string());
 
-        println!("hitting url: {:?}", &url);
 
         let f = Client::new()
             .get(url.clone())
@@ -66,8 +80,6 @@ impl IPFSCapability for IPFSNode {
         url.set_path("api/v0/object/put");
         url.query_pairs_mut().append_pair("datafieldenc", "base64");
 
-        println!("hitting url: {:?}", &url);
-
         let v = DagNode {
             data: v.data,
             links: v
@@ -78,7 +90,7 @@ impl IPFSCapability for IPFSNode {
         };
         let bytes = serde_json::to_vec(&v).expect("json _serialize_ failed (should be impossible)");
 
-        println!("sending bytes: {:?}", &std::str::from_utf8(&bytes));
+        event!(Level::DEBUG, ipfs_put_body = ?std::str::from_utf8(&bytes));
 
         let part = multipart::Part::bytes(bytes).file_name("data"); // or vice versa, idk
         let form = multipart::Form::new().part("file", part);
