@@ -17,21 +17,19 @@ pub trait IPFSCapability {
     fn put(&self, v: ipfs_types::DagNode) -> BoxFuture<ipfs_types::IPFSHash, DagCacheError>;
 }
 
-
 pub trait HasIPFSCap {
     type Output: IPFSCapability;
 
     fn ipfs_caps(&self) -> &Self::Output;
 
-    fn ipfs_get(&self, k: ipfs_types::IPFSHash) -> BoxFuture<ipfs_types::DagNode, DagCacheError>{
+    fn ipfs_get(&self, k: ipfs_types::IPFSHash) -> BoxFuture<ipfs_types::DagNode, DagCacheError> {
         self.ipfs_caps().get(k)
     }
 
-    fn ipfs_put(&self, v: ipfs_types::DagNode) -> BoxFuture<ipfs_types::IPFSHash, DagCacheError>{
+    fn ipfs_put(&self, v: ipfs_types::DagNode) -> BoxFuture<ipfs_types::IPFSHash, DagCacheError> {
         self.ipfs_caps().put(v)
     }
 }
-
 
 impl IPFSNode {
     pub fn new(a: reqwest::Url) -> Self {
@@ -46,7 +44,6 @@ impl IPFSCapability for IPFSNode {
         url.query_pairs_mut()
             .append_pair("data-encoding", "base64")
             .append_pair("arg", &k.to_string());
-
 
         let f = Client::new()
             .get(url.clone())
@@ -147,7 +144,6 @@ mod tests {
     fn test_put_and_get() {
         lib::run_test(test_put_and_get_worker)
     }
-
 
     // NOTE: assumes IPFS daemon running locally at localhost:5001. Daemon can be shared between tests.
     fn test_put_and_get_worker() -> BoxFuture<(), String> {

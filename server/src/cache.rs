@@ -9,22 +9,19 @@ pub trait CacheCapability {
     fn put(&self, k: IPFSHash, v: DagNode);
 }
 
-
 pub trait HasCacheCap {
     type Output: CacheCapability;
 
     fn cache_caps(&self) -> &Self::Output;
 
-
-    fn cache_get(&self, k: IPFSHash) -> Option<DagNode>{
+    fn cache_get(&self, k: IPFSHash) -> Option<DagNode> {
         self.cache_caps().get(k)
     }
 
-    fn cache_put(&self, k: IPFSHash, v: DagNode){
+    fn cache_put(&self, k: IPFSHash, v: DagNode) {
         self.cache_caps().put(k, v)
     }
 }
-
 
 pub struct Cache(Mutex<LruCache<IPFSHash, DagNode>>);
 

@@ -34,16 +34,15 @@ pub fn get<C: 'static + HasIPFSCap + HasCacheCap>(
         }
         None => {
             info!("cache miss");
-            let f =
-                caps
+            let f = caps
                 .ipfs_get(k.clone())
-                    .and_then(move |dag_node: ipfs_types::DagNode| {
-                        info!("writing result of post cache miss lookup to cache");
-                        caps.cache_put(k.clone(), dag_node.clone());
-                        // see if have any of the referenced subnodes in the local cache
-                        let resp = extend(caps.as_ref(), dag_node);
-                        Ok(web::Json(resp))
-                    });
+                .and_then(move |dag_node: ipfs_types::DagNode| {
+                    info!("writing result of post cache miss lookup to cache");
+                    caps.cache_put(k.clone(), dag_node.clone());
+                    // see if have any of the referenced subnodes in the local cache
+                    let resp = extend(caps.as_ref(), dag_node);
+                    Ok(web::Json(resp))
+                });
             Box::new(f)
         }
     }

@@ -105,8 +105,8 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cache::{HasCacheCap, CacheCapability};
     use crate::api_types::DagCacheError;
+    use crate::cache::{CacheCapability, HasCacheCap};
     use crate::encoding_types::{Base58, Base64};
     use crate::in_mem_types::DagNodeLink::Local;
     use crate::ipfs_api::{HasIPFSCap, IPFSCapability};
@@ -116,7 +116,6 @@ mod tests {
     use rand::Rng;
     use std::collections::HashMap;
     use std::sync::Mutex;
-
 
     struct MockIPFS(Mutex<HashMap<IPFSHash, DagNode>>);
 

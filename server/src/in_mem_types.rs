@@ -5,7 +5,6 @@ use crate::encoding_types;
 use crate::ipfs_types;
 
 // ephemeral, used for data structure in memory
-
 #[derive(Clone)]
 pub struct DagNode {
     pub links: Vec<DagNodeLink>, // list of pointers - either to elems in this bulk req or already-uploaded
