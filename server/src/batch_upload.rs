@@ -23,15 +23,20 @@ use petgraph::graph;
 
 use std::collections::HashMap;
 
-enum DagNodeBody {
-    NotYetUploaded,
-    AlreadyUploaded,
-}; // todo, actual body.
 
-struct MerkleTree<H> {
-    root: graph::NodeIndex<usize>,
-    graph: graph::Graph<DagNodeBody, H, petgraph::Directed, usize>,
-}
+// NOTE: may upload node twice if it's hit two times before first time finishes put operation
+// NOTE: punting on this entirely
+// enum DagNodeBody {
+//     NotYetUploaded(String), // todo: base64 type?
+//     AlreadyUploaded(IPFSHash, usize), // hash and size, may have different names (so not IPFS header)
+// }; // todo, actual body.
+
+// struct MerkleTree<H> {
+//     root: graph::NodeIndex<usize>,
+//     graph: graph::Graph<DagNodeBody, H, petgraph::Directed, usize>,
+// }
+
+// struct DagNodeBody; //todo: stand-in for just body (and not il)
 
 // // anamorphism (todo futu via cache, v1 goal is explicitly futu)
 // // NOTE: could speed up hugely by static caching graph structure
@@ -42,12 +47,15 @@ struct MerkleTree<H> {
 // ) -> impl Future<Item = MerkleDag, Error = api_types::DagCacheError> + 'static + Send {
 // } // NOTE: should be viable, best thing to do is mb just return petgraph graph for this instead of recursive data structure
 
+
+// NOTE: assuming tree and not dag, if dag will upload some nodes multiple times (FIXME FIXME)
 // catamorphism - a consuming change
 // recursively publish DAG node tree to IPFS, starting with leaf nodes
 pub fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     hash: ClientSideHash,
-    tree: MerkleTree<ClientSideHash>,
+    idx: graph::NodeIndex<usize>,
+    graph: graph::Graph<api_types::bulk_put::DagNode, ClientSideHash, petgraph::Directed, usize>,
 ) -> impl Future<Item = IPFSHeader, Error = api_types::DagCacheError> + 'static + Send {
     let (send, receive) = oneshot::channel();
 
@@ -68,8 +76,8 @@ pub fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
 fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     chan: oneshot::Sender<Result<IPFSHeader, api_types::DagCacheError>>,
-    hash: ClientSideHash,
-    node: MerkleTree<ClientSideHash>,
+    idx: graph::NodeIndex<usize>,
+    graph: graph::Graph<api_types::bulk_put::DagNode, ClientSideHash, petgraph::Directed, usize>,
 ) -> impl Future<Item = (), Error = ()> + 'static + Send {
     let MerkleTree { root, graph } = node;
 
