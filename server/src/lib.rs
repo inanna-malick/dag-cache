@@ -15,19 +15,13 @@ where
     // attempt to set, failure means already set (other test suite?)
     let _ = tracing::subscriber::set_global_default(subscriber);
 
-    let (send, receive) = futures::sync::oneshot::channel();
     let f = futures::future::ok(()).and_then(move |()| f()).then(|res| {
-        let chan_send_res = send.send(res);
-        if let Err(err) = chan_send_res {
-            println!("failed oneshot channel send {:?}", err);
-        };
-
-        Ok(())
+        if let Err(err) = res {
+            // NOTE: had problems communicating failure outwards, just nuke it all and panic on failure
+            panic!("test failed, err: {:?}", err)
+        }
+        futures::future::ok(())
     });
 
     tokio::run(f);
-
-    if let Err(e) = receive.wait().unwrap() {
-        println!("test failed with error {:?}", e);
-    };
 }

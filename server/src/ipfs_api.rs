@@ -170,15 +170,26 @@ mod tests {
         //dag nodes should be equivalent - shows round-trip get/put using this IPFS service impl
         let f = ipfs_node
             .put(input.clone())
-            .map_err(|e| format!("ipfs put error: {:?}", e))
+            .map_err(|e| {
+                println!("error handler for ipfs put");
+                format!("ipfs put error: {:?}", e)
+            })
             .and_then(move |input_hash| {
+                println!("ipfs put done, running get");
                 ipfs_node
                     .get(input_hash)
                     .map_err(|e| format!("ipfs get error: {:?}", e))
             })
-            .map(move |output| {
-                assert_eq!(input, output);
-                ()
+            .and_then(move |output| {
+                if input == output {
+                    futures::future::ok(())
+                } else {
+                    futures::future::err(format!("input {:?} != output {:?}", input, output))
+                }
+            })
+            .then(|r| {
+                println!("future res for test: {:?}", r);
+                r
             });
 
         Box::new(f)

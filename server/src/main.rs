@@ -3,6 +3,7 @@ use actix_web::{web, App, HttpServer};
 use lru::LruCache;
 
 mod capabilities;
+mod graph_cache;
 
 mod api_types;
 mod encoding_types;
@@ -24,7 +25,10 @@ use tracing::{info, span, Level};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
-#[structopt(name = "dag cache", about = "ipfs wrapper, provides bulk put and bulk get via LRU cache")]
+#[structopt(
+    name = "dag cache",
+    about = "ipfs wrapper, provides bulk put and bulk get via LRU cache"
+)]
 struct Opt {
     #[structopt(short = "p", long = "port", default_value = "8088")]
     port: u64,
@@ -34,9 +38,9 @@ struct Opt {
     #[structopt(long = "ipfs_port", default_value = "5001")]
     ipfs_port: u64,
 
-    #[structopt(short = "n", long = "max_cache_entries", default_value = "128")] // randomly chosen number..
+    #[structopt(short = "n", long = "max_cache_entries", default_value = "128")]
+    // randomly chosen number..
     max_cache_entries: u64,
-
 }
 // TODO ^ organize/clean inputs/use block
 
@@ -44,9 +48,10 @@ fn main() -> std::result::Result<(), std::io::Error> {
     let opt = Opt::from_args();
 
     let ipfs_node = format!("http://{}:{}", &opt.ipfs_host, opt.ipfs_port); // TODO: https...
-    let ipfs_node = IPFSNode::new(
-        reqwest::Url::parse(&ipfs_node).expect(&format!("unable to parse provided IPFS host + port ({:?}) as URL", &ipfs_node)),
-    );
+    let ipfs_node = IPFSNode::new(reqwest::Url::parse(&ipfs_node).expect(&format!(
+        "unable to parse provided IPFS host + port ({:?}) as URL",
+        &ipfs_node
+    )));
 
     let bind_to = format!("127.0.0.1:{}", opt.port);
 

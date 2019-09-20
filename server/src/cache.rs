@@ -1,12 +1,22 @@
+use crate::ipfs_types::{DagNode, IPFSHash};
 use lru::LruCache;
 use std::sync::Mutex;
-
-use crate::ipfs_types::{DagNode, IPFSHash};
 
 pub trait CacheCapability {
     fn get(&self, k: IPFSHash) -> Option<DagNode>;
 
     fn put(&self, k: IPFSHash, v: DagNode);
+
+    // fn depth_first_search<
+    //     X,
+    //     F: Fn(X, IPFSHash, &DagNode) -> (X, DFSControl),
+    //     I: IntoIterator<Item = IPFSHash>,
+    // >(
+    //     &self,
+    //     start: IPFSHash,
+    //     seed: X,
+    //     f: F,
+    // ) -> X;
 }
 
 pub trait HasCacheCap {
@@ -31,6 +41,11 @@ impl Cache {
     }
 }
 
+pub enum DFSControl {
+    Continue,
+    Break,
+}
+
 impl CacheCapability for Cache {
     // TODO: rain says investigate stable deref (given that all refs here are immutable)
     fn get(&self, k: IPFSHash) -> Option<DagNode> {
@@ -45,4 +60,31 @@ impl CacheCapability for Cache {
         let mut cache = self.0.lock().unwrap();
         cache.put(k, v);
     }
+
+    // fn depth_first_search<
+    //         X,
+    //     F: Fn(X, IPFSHash, &DagNode) -> (X, DFSControl),
+    //     I: IntoIterator<Item = IPFSHash>,
+    //     >(
+    //     &self,
+    //     start: IPFSHash,
+    //     seed: X,
+    //     f: F,
+    // ) -> X {
+    //     let mut cache = self.0.lock().unwrap();
+
+    //     let mut seed = seed; // better names for both of these pls
+    //     let mut start = start;
+
+    //     while let Some(node) = cache.get(&start) {
+    //         let (next_seed, control) = f(seed, start, node);
+    //         seed = next_seed;
+    //         match control {
+    //             Continue => {}
+    //             Break => { break; }
+    //         }
+    //     }
+
+    //     seed // result of fold - needs better name..
+    // }
 }
