@@ -6,28 +6,28 @@ use crate::ipfs_types;
 
 // ephemeral, used for data structure in memory
 #[derive(Clone)]
-pub struct DagNode {
-    pub links: Vec<DagNodeLink>, // list of pointers - either to elems in this bulk req or already-uploaded
+pub struct DagTree { // TODO: better name
+    pub links: Vec<DagTreeLink>, // list of pointers - either to elems in this bulk req or already-uploaded
     pub data: encoding_types::Base64, // this node's data
 }
 
 #[derive(Clone)]
-pub enum DagNodeLink {
-    Local(ClientSideHash, Box<DagNode>),
+pub enum DagTreeLink {
+    Local(ClientSideHash, Box<DagTree>),
     Remote(ipfs_types::IPFSHeader),
 }
 
 #[derive(Debug)]
-pub enum DagNodeBuildErr {
+pub enum DagTreeBuildErr {
     InvalidLink(ClientSideHash),
 }
 
-impl DagNode {
+impl DagTree {
     // TODO: should error if remaining not empty? or return remaining nodes in tuple res
     pub fn build(
         entry: api_types::bulk_put::DagNode,
         remaining: &mut std::collections::HashMap<ClientSideHash, api_types::bulk_put::DagNode>,
-    ) -> Result<DagNode, DagNodeBuildErr> {
+    ) -> Result<DagTree, DagTreeBuildErr> {
         let api_types::bulk_put::DagNode { links, data } = entry;
 
         let links = links
@@ -35,14 +35,14 @@ impl DagNode {
             .map(|x| match x {
                 api_types::bulk_put::DagNodeLink::Local(csh) => match remaining.remove(&csh) {
                     Some(dctp) => {
-                        Self::build(dctp, remaining).map(|x| DagNodeLink::Local(csh, Box::new(x)))
+                        Self::build(dctp, remaining).map(|x| DagTreeLink::Local(csh, Box::new(x)))
                     }
-                    None => Err(DagNodeBuildErr::InvalidLink(csh)),
+                    None => Err(DagTreeBuildErr::InvalidLink(csh)),
                 },
-                api_types::bulk_put::DagNodeLink::Remote(nh) => Ok(DagNodeLink::Remote(nh)),
+                api_types::bulk_put::DagNodeLink::Remote(nh) => Ok(DagTreeLink::Remote(nh)),
             })
-            .collect::<Result<Vec<DagNodeLink>, DagNodeBuildErr>>()?;
+            .collect::<Result<Vec<DagTreeLink>, DagTreeBuildErr>>()?;
 
-        Ok(DagNode { links, data })
+        Ok(DagTree { links, data })
     }
 }

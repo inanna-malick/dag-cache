@@ -13,22 +13,45 @@ use crate::api_types::ClientSideHash;
 use crate::cache::HasCacheCap;
 use crate::ipfs_api::HasIPFSCap;
 use crate::ipfs_types::IPFSHeader;
+use crate::in_mem_types::{DagTree, DagTreeLink};
 use crate::lib::BoxFuture;
 use std::convert::AsRef;
 use tracing::info;
 
 use futures::sync::oneshot;
+use petgraph::graph;
+
+use std::collections::HashMap;
+
+enum DagNodeBody {
+    NotYetUploaded,
+    AlreadyUploaded,
+}; // todo, actual body.
+
+struct MerkleTree<H> {
+    root: graph::NodeIndex<usize>,
+    graph: graph::Graph<DagNodeBody, H, petgraph::Directed, usize>,
+}
+
+// // anamorphism (todo futu via cache, v1 goal is explicitly futu)
+// // NOTE: could speed up hugely by static caching graph structure
+// pub fn ipfs_fetch_ana<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
+//     caps: Arc<C>,
+//     hash: ClientSideHash,
+//     root: IPFSHash,
+// ) -> impl Future<Item = MerkleDag, Error = api_types::DagCacheError> + 'static + Send {
+// } // NOTE: should be viable, best thing to do is mb just return petgraph graph for this instead of recursive data structure
 
 // catamorphism - a consuming change
 // recursively publish DAG node tree to IPFS, starting with leaf nodes
 pub fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     hash: ClientSideHash,
-    node: in_mem_types::DagNode,
+    tree: MerkleTree<ClientSideHash>,
 ) -> impl Future<Item = IPFSHeader, Error = api_types::DagCacheError> + 'static + Send {
     let (send, receive) = oneshot::channel();
 
-    tokio::spawn(ipfs_publish_worker(caps, send, hash, node));
+    tokio::spawn(ipfs_publish_worker(caps, send, hash, tree));
 
     receive
         .map_err(|_| api_types::DagCacheError::UnexpectedError {
@@ -46,19 +69,20 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     chan: oneshot::Sender<Result<IPFSHeader, api_types::DagCacheError>>,
     hash: ClientSideHash,
-    node: in_mem_types::DagNode,
+    node: MerkleTree<ClientSideHash>,
 ) -> impl Future<Item = (), Error = ()> + 'static + Send {
-    let in_mem_types::DagNode { data, links } = node;
+    let MerkleTree { root, graph } = node;
 
     let link_fetches: Vec<_> = links
         .into_iter()
         .map({
             |x| -> BoxFuture<IPFSHeader, api_types::DagCacheError> {
                 match x {
-                    in_mem_types::DagNodeLink::Local(hp, sn) => {
+                    DagTreeLink::Local(hp, sn) => {
+                        let g = MerkleGraph{ root, graph}; // todo need some way to avoid repeating work here for some node
                         Box::new(ipfs_publish_cata(caps.clone(), hp, *sn))
                     }
-                    in_mem_types::DagNodeLink::Remote(nh) => Box::new(futures::future::ok(nh)),
+                    DagTreeLink::Remote(nh) => Box::new(futures::future::ok(nh)),
                 }
             }
         })
@@ -108,7 +132,7 @@ mod tests {
     use crate::api_types::DagCacheError;
     use crate::cache::{CacheCapability, HasCacheCap};
     use crate::encoding_types::{Base58, Base64};
-    use crate::in_mem_types::DagNodeLink::Local;
+    use crate::DagTreeLink::Local;
     use crate::ipfs_api::{HasIPFSCap, IPFSCapability};
     use crate::ipfs_types::{DagNode, IPFSHash};
     use crate::lib;
@@ -183,17 +207,17 @@ mod tests {
             .map(|x| ClientSideHash::new(Base58::from_bytes(vec![x])))
             .collect();
 
-        let t1 = in_mem_types::DagNode {
+        let t1 = DagTree {
             links: vec![],
             data: Base64(vec![1, 3, 3, 7]),
         };
 
-        let t2 = in_mem_types::DagNode {
+        let t2 = DagTree {
             links: vec![],
             data: Base64(vec![3, 1, 4, 1, 5]),
         };
 
-        let t3 = in_mem_types::DagNode {
+        let t3 = DagTree {
             links: vec![
                 Local(client_hashes[0].clone(), Box::new(t1.clone())),
                 Local(client_hashes[1].clone(), Box::new(t2.clone())),
@@ -201,7 +225,7 @@ mod tests {
             data: Base64(vec![3, 1, 4, 1, 5]),
         };
 
-        let t4 = in_mem_types::DagNode {
+        let t4 = DagTree {
             links: vec![Local(client_hashes[2].clone(), Box::new(t3.clone()))],
             data: Base64(vec![0, 1, 1, 2, 3, 5]),
         };

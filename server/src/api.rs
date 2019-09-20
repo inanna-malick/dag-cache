@@ -5,7 +5,7 @@ use futures::future::Future;
 use std::collections::VecDeque;
 
 use crate::api_types;
-use crate::in_mem_types;
+use crate::in_mem_types::DagTree;
 use crate::ipfs_types;
 
 use crate::cache::HasCacheCap;
@@ -114,7 +114,7 @@ pub fn put_many<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
         node_map.insert(k, v);
     }
 
-    let in_mem = in_mem_types::DagNode::build(dctp, &mut node_map)
+    let in_mem = DagTree::build(dctp, &mut node_map)
         .expect("todo: handle malformed req case here"); // FIXME
 
     let f = batch_upload::ipfs_publish_cata(caps.into_inner(), csh, in_mem).map(web::Json);

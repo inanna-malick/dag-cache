@@ -24,6 +24,12 @@ use tracing::{info, span, Level};
 
 use structopt::StructOpt;
 
+// TODO: provide simple naming standard for dag links - can probably gen somehow from generic Structs
+// TODO: enforce (and parse) naming scheme for node pointers
+// TODO: eg: 'parent: Commit' // (NOTE: will need to handle multiple mappings, eg: 'dir_entity_1: DirEntity' and etc)
+// TODO: maybe also map entries
+
+
 #[derive(Debug, StructOpt)]
 #[structopt(
     name = "dag cache",
