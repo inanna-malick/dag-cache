@@ -3,7 +3,6 @@ use actix_web::{web, App, HttpServer};
 use lru::LruCache;
 
 mod capabilities;
-mod graph_cache;
 
 mod api_types;
 mod encoding_types;
