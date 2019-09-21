@@ -17,18 +17,31 @@ use crate::lib::BoxFuture;
 use std::convert::AsRef;
 use tracing::info;
 
+use crate::in_mem_types::ValidatedTree;
+
 use futures::sync::oneshot;
 
 // catamorphism - a consuming change
 // recursively publish DAG node tree to IPFS, starting with leaf nodes
 pub fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
-    hash: ClientSideHash,
-    node: in_mem_types::DagNode,
+    tree: in_mem_types::ValidatedTree,
+) -> impl Future<Item = IPFSHeader, Error = api_types::DagCacheError> + 'static + Send {
+    // todo use async/await I guess, mb can avoid needing Arc? ugh
+    let focus = tree.root.clone();
+    let tree = Arc::new(tree);
+    ipfs_publish_cata_unsafe(caps, tree, focus)
+}
+
+// unsafe b/c it can take any 'focus' ClientSideHash and not just the root node of tree
+pub fn ipfs_publish_cata_unsafe<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
+    caps: Arc<C>,
+    tree: Arc<in_mem_types::ValidatedTree>, // todo use async/await I guess, mb can avoid needing Arc? ugh
+    focus: ClientSideHash,
 ) -> impl Future<Item = IPFSHeader, Error = api_types::DagCacheError> + 'static + Send {
     let (send, receive) = oneshot::channel();
 
-    tokio::spawn(ipfs_publish_worker(caps, send, hash, node));
+    tokio::spawn(ipfs_publish_worker(caps, send, tree, focus));
 
     receive
         .map_err(|_| api_types::DagCacheError::UnexpectedError {
@@ -45,20 +58,24 @@ pub fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
 fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     chan: oneshot::Sender<Result<IPFSHeader, api_types::DagCacheError>>,
-    hash: ClientSideHash,
-    node: in_mem_types::DagNode,
+    tree: Arc<ValidatedTree>,
+    focus: ClientSideHash,
 ) -> impl Future<Item = (), Error = ()> + 'static + Send {
-    let in_mem_types::DagNode { data, links } = node;
+    // NOTE: could be more efficient by removing from node but would break guarantees
+    // unhandled deref failure, known to be safe b/c of validated tree wrapper
+    let api_types::bulk_put::DagNode { data, links } = tree.nodes[&focus].clone();
 
     let link_fetches: Vec<_> = links
         .into_iter()
         .map({
             |x| -> BoxFuture<IPFSHeader, api_types::DagCacheError> {
                 match x {
-                    in_mem_types::DagNodeLink::Local(hp, sn) => {
-                        Box::new(ipfs_publish_cata(caps.clone(), hp, *sn))
+                    api_types::bulk_put::DagNodeLink::Local(csh) => {
+                        Box::new(ipfs_publish_cata_unsafe(caps.clone(), tree.clone(), csh.clone()))
                     }
-                    in_mem_types::DagNodeLink::Remote(nh) => Box::new(futures::future::ok(nh)),
+                    api_types::bulk_put::DagNodeLink::Remote(nh) => {
+                        Box::new(futures::future::ok(nh.clone())) // TODO: stable deref via frozen/elsa? yes.
+                    }
                 }
             }
         })
@@ -77,9 +94,9 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
                 .ipfs_put(dag_node.clone())
                 .then(move |res| match res {
                     Ok(hp) => {
-                        caps.as_ref().cache_put(hp.clone(), dag_node);
+                        caps.as_ref().cache_put(hp.clone(), dag_node.clone());
                         let hdr = IPFSHeader {
-                            name: hash.to_string(),
+                            name: focus.to_string(),
                             hash: hp,
                             size: size,
                         };
@@ -106,18 +123,17 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
 mod tests {
     use super::*;
     use crate::api_types::DagCacheError;
+    use crate::api_types::bulk_put;
     use crate::cache::{CacheCapability, HasCacheCap};
     use crate::encoding_types::{Base58, Base64};
-    use crate::in_mem_types::DagNodeLink::Local;
+    use crate::in_mem_types::ValidatedTree;
     use crate::ipfs_api::{HasIPFSCap, IPFSCapability};
     use crate::ipfs_types::{DagNode, IPFSHash};
     use crate::lib;
-    use rand;
-    use rand::Rng;
-    use std::collections::HashMap;
+    use hashbrown::HashMap;
     use std::sync::Mutex;
 
-    struct MockIPFS(Mutex<HashMap<IPFSHash, DagNode>>);
+    struct MockIPFS(Mutex<HashMap<IPFSHash, ipfs_types::DagNode>>);
 
     struct BlackHoleCache;
     impl CacheCapability for BlackHoleCache {
@@ -138,20 +154,15 @@ mod tests {
         }
 
         fn put(&self, v: DagNode) -> BoxFuture<IPFSHash, DagCacheError> {
-            let mut random_bytes = vec![];
+            let mut map = self.0.lock().unwrap(); // fail on mutex poisoned
 
-            // not hitting the actual IPFS daemon API here so hashes don't need to be even a little bit valid
-            let mut rng = rand::thread_rng(); // faster if cached locally
-            for _ in 0..64 {
-                random_bytes.push(rng.gen())
-            }
+            // use map len (monotonic increasing) to provide unique hash ID
+            let hash = IPFSHash::from_raw(Base58::from_bytes(vec!(map.len() as u8)));
 
-            let random_hash = IPFSHash::from_raw(Base58::from_bytes(random_bytes));
+            map.insert(hash.clone(), v);
 
-            let mut map = self.0.lock().unwrap();
-            map.insert(random_hash.clone(), v);
 
-            Box::new(futures::future::ok(random_hash))
+            Box::new(futures::future::ok(hash))
         }
     }
 
@@ -183,34 +194,42 @@ mod tests {
             .map(|x| ClientSideHash::new(Base58::from_bytes(vec![x])))
             .collect();
 
-        let t1 = in_mem_types::DagNode {
+        let t0 = bulk_put::DagNode {
             links: vec![],
             data: Base64(vec![1, 3, 3, 7]),
         };
 
-        let t2 = in_mem_types::DagNode {
+        let t1 = bulk_put::DagNode {
             links: vec![],
             data: Base64(vec![3, 1, 4, 1, 5]),
         };
 
-        let t3 = in_mem_types::DagNode {
+        let t2 = bulk_put::DagNode {
             links: vec![
-                Local(client_hashes[0].clone(), Box::new(t1.clone())),
-                Local(client_hashes[1].clone(), Box::new(t2.clone())),
+                bulk_put::DagNodeLink::Local(client_hashes[0].clone()),
+                bulk_put::DagNodeLink::Local(client_hashes[1].clone()),
             ],
             data: Base64(vec![3, 1, 4, 1, 5]),
         };
 
-        let t4 = in_mem_types::DagNode {
-            links: vec![Local(client_hashes[2].clone(), Box::new(t3.clone()))],
+        let t3 = bulk_put::DagNode {
+            links: vec![bulk_put::DagNodeLink::Local(client_hashes[2].clone())],
             data: Base64(vec![0, 1, 1, 2, 3, 5]),
         };
+
+        let mut m = HashMap::new();
+        m.insert(client_hashes[0].clone(), t0.clone());
+        m.insert(client_hashes[1].clone(), t1.clone());
+        m.insert(client_hashes[2].clone(), t2.clone());
+        m.insert(client_hashes[3].clone(), t3.clone());
+
+        let validated_tree = ValidatedTree::validate(client_hashes[3].clone(), m).expect("static test invalid");
 
         let mock_ipfs = MockIPFS(Mutex::new(HashMap::new()));
         let caps = std::sync::Arc::new(TestCaps(mock_ipfs, BlackHoleCache));
         let caps2 = caps.clone();
 
-        let f = ipfs_publish_cata(caps, client_hashes[3].clone(), t4.clone())
+        let f = ipfs_publish_cata(caps, validated_tree)
             .map_err(|e| format!("ipfs publish cata error: {:?}", e))
             .map(move |_| {
                 let map = (caps2.0).0.lock().unwrap();
@@ -228,13 +247,13 @@ mod tests {
                     })
                     .collect();
 
-                assert!(&uploaded_values.contains(&(vec!(), t1.data))); // t1 uploaded
-                assert!(&uploaded_values.contains(&(vec!(), t2.data))); // t2 uploaded
+                assert!(&uploaded_values.contains(&(vec!(), t0.data))); // t1 uploaded
+                assert!(&uploaded_values.contains(&(vec!(), t1.data))); // t2 uploaded
                 assert!(&uploaded_values.contains(&(
                     vec!(client_hashes[0].clone(), client_hashes[1].clone()),
-                    t3.data
+                    t2.data
                 ))); // t3 uploaded
-                assert!(&uploaded_values.contains(&(vec!(client_hashes[2].clone()), t4.data))); // t4 uploaded
+                assert!(&uploaded_values.contains(&(vec!(client_hashes[2].clone()), t3.data))); // t4 uploaded
             });
 
         Box::new(f)

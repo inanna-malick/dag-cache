@@ -1,48 +1,54 @@
 // mod ipfs_types;
-use crate::api_types;
 use crate::api_types::ClientSideHash;
-use crate::encoding_types;
-use crate::ipfs_types;
+use crate::api_types::bulk_put::{DagNodeLink, DagNode};
+use hashbrown::HashMap;
+
 
 // ephemeral, used for data structure in memory
-#[derive(Clone)]
-pub struct DagNode {
-    pub links: Vec<DagNodeLink>, // list of pointers - either to elems in this bulk req or already-uploaded
-    pub data: encoding_types::Base64, // this node's data
+pub struct ValidatedTree { // how 2 make constructor priv but fields pub? just add pub accessors?
+    pub root: ClientSideHash,
+    pub nodes: HashMap<ClientSideHash, DagNode>,
 }
 
-#[derive(Clone)]
-pub enum DagNodeLink {
-    Local(ClientSideHash, Box<DagNode>),
-    Remote(ipfs_types::IPFSHeader),
+// TODO: idk, tests?
+impl ValidatedTree {
+    pub fn validate(
+        root: ClientSideHash,
+        nodes: HashMap<ClientSideHash, DagNode>,
+    ) -> Result<ValidatedTree, DagTreeBuildErr> {
+        let mut node_visited_count = 0;
+        let mut stack = vec![];
+
+        stack.push(root.clone());
+
+        while let Some(node_id) = stack.pop() {
+            node_visited_count += 1;
+            match nodes.get(&node_id) {
+                Some(node) => {
+                    for node_link in node.links.iter() {
+                        match node_link {
+                            // reference to node in map, must verify
+                            DagNodeLink::Local(csh) => stack.push(csh.clone()),
+                            // no-op, valid by definition
+                            DagNodeLink::Remote(_) => {}
+                        }
+                    }
+                }
+                None => return Err(DagTreeBuildErr::InvalidLink(node_id)),
+            }
+        }
+
+        if nodes.len() == node_visited_count {
+            // all nodes in map visited
+            Ok(ValidatedTree{root, nodes})
+        } else {
+            Err(DagTreeBuildErr::UnreachableNodes) // not all nodes in map are part of tree
+        }
+    }
 }
 
 #[derive(Debug)]
-pub enum DagNodeBuildErr {
+pub enum DagTreeBuildErr {
     InvalidLink(ClientSideHash),
-}
-
-impl DagNode {
-    // TODO: should error if remaining not empty? or return remaining nodes in tuple res
-    pub fn build(
-        entry: api_types::bulk_put::DagNode,
-        remaining: &mut std::collections::HashMap<ClientSideHash, api_types::bulk_put::DagNode>,
-    ) -> Result<DagNode, DagNodeBuildErr> {
-        let api_types::bulk_put::DagNode { links, data } = entry;
-
-        let links = links
-            .into_iter()
-            .map(|x| match x {
-                api_types::bulk_put::DagNodeLink::Local(csh) => match remaining.remove(&csh) {
-                    Some(dctp) => {
-                        Self::build(dctp, remaining).map(|x| DagNodeLink::Local(csh, Box::new(x)))
-                    }
-                    None => Err(DagNodeBuildErr::InvalidLink(csh)),
-                },
-                api_types::bulk_put::DagNodeLink::Remote(nh) => Ok(DagNodeLink::Remote(nh)),
-            })
-            .collect::<Result<Vec<DagNodeLink>, DagNodeBuildErr>>()?;
-
-        Ok(DagNode { links, data })
-    }
+    UnreachableNodes,
 }

@@ -5,7 +5,7 @@ use futures::future::Future;
 use std::collections::VecDeque;
 
 use crate::api_types;
-use crate::in_mem_types;
+use crate::in_mem_types::ValidatedTree;
 use crate::ipfs_types;
 
 use crate::cache::HasCacheCap;
@@ -98,26 +98,24 @@ pub fn put<C: 'static + HasCacheCap + HasIPFSCap>(
 }
 
 pub fn put_many<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
-    // TODO: figure out exactly what sync does
     caps: web::Data<C>,
     req: web::Json<api_types::bulk_put::Req>,
 ) -> BoxFuture<web::Json<ipfs_types::IPFSHeader>, api_types::DagCacheError> {
-    // let caps = caps.into_inner(); // just copy arc, lmao
-
     info!("dag cache put handler");
     let api_types::bulk_put::Req { entry_point, nodes } = req.into_inner();
-    let (csh, dctp) = entry_point;
+    let (root_focus, root_node) = entry_point;
 
-    let mut node_map = std::collections::HashMap::with_capacity(nodes.len());
+    let mut node_map = hashbrown::HashMap::with_capacity(nodes.len());
+
+    node_map.insert(root_focus.clone(), root_node);
 
     for (k, v) in nodes.into_iter() {
         node_map.insert(k, v);
     }
 
-    let in_mem = in_mem_types::DagNode::build(dctp, &mut node_map)
-        .expect("todo: handle malformed req case here"); // FIXME
+    let in_mem = ValidatedTree::validate(root_focus, node_map).expect("todo: handle malformed req case here"); // FIXME
 
-    let f = batch_upload::ipfs_publish_cata(caps.into_inner(), csh, in_mem).map(web::Json);
+    let f = batch_upload::ipfs_publish_cata(caps.into_inner(), in_mem).map(web::Json);
 
     Box::new(f)
 }
