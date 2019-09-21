@@ -11,6 +11,7 @@ mod in_mem_types;
 mod ipfs_api;
 mod ipfs_types;
 mod lib;
+// mod batch_fetch;
 
 use cache::Cache;
 use capabilities::Capabilities;
@@ -28,7 +29,6 @@ use structopt::StructOpt;
 // TODO: enforce (and parse) naming scheme for node pointers
 // TODO: eg: 'parent: Commit' // (NOTE: will need to handle multiple mappings, eg: 'dir_entity_1: DirEntity' and etc)
 // TODO: maybe also map entries
-
 
 #[derive(Debug, StructOpt)]
 #[structopt(

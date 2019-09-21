@@ -41,10 +41,10 @@ impl Cache {
     }
 }
 
-pub enum DFSControl {
-    Continue,
-    Break,
-}
+// pub enum DFSControl {
+//     Continue,
+//     Break,
+// }
 
 impl CacheCapability for Cache {
     // TODO: rain says investigate stable deref (given that all refs here are immutable)

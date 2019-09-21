@@ -16,9 +16,14 @@ where
     let _ = tracing::subscriber::set_global_default(subscriber);
 
     let f = futures::future::ok(()).and_then(move |()| f()).then(|res| {
-        if let Err(err) = res {
-            // NOTE: had problems communicating failure outwards, just nuke it all and panic on failure
-            panic!("test failed, err: {:?}", err)
+        match res {
+            Err(err) => {
+                // NOTE: had problems communicating failure outwards, just nuke it all and panic on failure
+                panic!("test failed, err: {:?}", err)
+            }
+            Ok(_) => {
+                println!("test passed, yay") // doing this b/c panic above doesn't propagate as expected
+            }
         }
         futures::future::ok(())
     });
