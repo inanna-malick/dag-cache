@@ -5,12 +5,12 @@ use lru::LruCache;
 mod capabilities;
 
 mod api_types;
+mod batch_fetch;
 mod encoding_types;
 mod in_mem_types;
 mod ipfs_api;
 mod ipfs_types;
 mod lib;
-// mod batch_fetch;
 
 use cache::Cache;
 use capabilities::Capabilities;

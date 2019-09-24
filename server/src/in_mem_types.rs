@@ -1,11 +1,11 @@
 // mod ipfs_types;
+use crate::api_types::bulk_put::{DagNode, DagNodeLink};
 use crate::api_types::ClientSideHash;
-use crate::api_types::bulk_put::{DagNodeLink, DagNode};
 use hashbrown::HashMap;
 
-
 // ephemeral, used for data structure in memory
-pub struct ValidatedTree { // how 2 make constructor priv but fields pub? just add pub accessors?
+pub struct ValidatedTree {
+    // how 2 make constructor priv but fields pub? just add pub accessors?
     pub root: ClientSideHash,
     pub nodes: HashMap<ClientSideHash, DagNode>,
 }
@@ -40,7 +40,7 @@ impl ValidatedTree {
 
         if nodes.len() == node_visited_count {
             // all nodes in map visited
-            Ok(ValidatedTree{root, nodes})
+            Ok(ValidatedTree { root, nodes })
         } else {
             Err(DagTreeBuildErr::UnreachableNodes) // not all nodes in map are part of tree
         }

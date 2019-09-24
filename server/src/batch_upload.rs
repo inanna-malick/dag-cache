@@ -70,9 +70,9 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
         .map({
             |x| -> BoxFuture<IPFSHeader, api_types::DagCacheError> {
                 match x {
-                    api_types::bulk_put::DagNodeLink::Local(csh) => {
-                        Box::new(ipfs_publish_cata_unsafe(caps.clone(), tree.clone(), csh.clone()))
-                    }
+                    api_types::bulk_put::DagNodeLink::Local(csh) => Box::new(
+                        ipfs_publish_cata_unsafe(caps.clone(), tree.clone(), csh.clone()),
+                    ),
                     api_types::bulk_put::DagNodeLink::Remote(nh) => {
                         Box::new(futures::future::ok(nh.clone())) // TODO: stable deref via frozen/elsa? yes.
                     }
@@ -122,8 +122,8 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api_types::DagCacheError;
     use crate::api_types::bulk_put;
+    use crate::api_types::DagCacheError;
     use crate::cache::{CacheCapability, HasCacheCap};
     use crate::encoding_types::{Base58, Base64};
     use crate::in_mem_types::ValidatedTree;
@@ -157,10 +157,9 @@ mod tests {
             let mut map = self.0.lock().unwrap(); // fail on mutex poisoned
 
             // use map len (monotonic increasing) to provide unique hash ID
-            let hash = IPFSHash::from_raw(Base58::from_bytes(vec!(map.len() as u8)));
+            let hash = IPFSHash::from_raw(Base58::from_bytes(vec![map.len() as u8]));
 
             map.insert(hash.clone(), v);
-
 
             Box::new(futures::future::ok(hash))
         }
@@ -223,7 +222,8 @@ mod tests {
         m.insert(client_hashes[2].clone(), t2.clone());
         m.insert(client_hashes[3].clone(), t3.clone());
 
-        let validated_tree = ValidatedTree::validate(client_hashes[3].clone(), m).expect("static test invalid");
+        let validated_tree =
+            ValidatedTree::validate(client_hashes[3].clone(), m).expect("static test invalid");
 
         let mock_ipfs = MockIPFS(Mutex::new(HashMap::new()));
         let caps = std::sync::Arc::new(TestCaps(mock_ipfs, BlackHoleCache));
