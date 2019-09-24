@@ -12,11 +12,11 @@ use crate::ipfs_types::{DagNode, IPFSHash};
 use std::convert::AsRef;
 use tracing::info;
 
+use crate::ipfs_types::IPFSHeader;
 use crate::lib::BoxFuture;
 use chashmap::CHashMap;
 use futures::sink::Sink;
 use futures::sync::mpsc;
-use crate::ipfs_types::IPFSHeader;
 
 // problem: can't meaningfully maintain validated graph structure while building tree via bulk fetch
 // concept: just, like, whatever: run the algorithm, toss stuff into the map, log some weird error if it fails (?)
@@ -59,7 +59,12 @@ pub fn ipfs_fetch_ana_internal<C: 'static + HasIPFSCap + Sync + Send>(
     to_populate.upsert(
         hash,
         || {
-            tokio::spawn(ipfs_fetch_worker(caps, hash2, resp_chan, to_populate.clone()));
+            tokio::spawn(ipfs_fetch_worker(
+                caps,
+                hash2,
+                resp_chan,
+                to_populate.clone(),
+            ));
             ()
         },
         |()| (),
@@ -102,7 +107,12 @@ fn ipfs_fetch_worker<C: 'static + HasIPFSCap + Sync + Send>(
         })
         .map(move |links| {
             for link in links.into_iter() {
-                ipfs_fetch_ana_internal(caps2.clone(), link.hash, resp_chan_2.clone(), to_populate.clone())
+                ipfs_fetch_ana_internal(
+                    caps2.clone(),
+                    link.hash,
+                    resp_chan_2.clone(),
+                    to_populate.clone(),
+                )
             }
             ()
         })

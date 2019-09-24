@@ -12,13 +12,14 @@ mod ipfs_api;
 mod ipfs_types;
 mod lib;
 
-use cache::Cache;
+use cache::Cached;
 use capabilities::Capabilities;
 use ipfs_api::IPFSNode;
 
 mod api;
 mod batch_upload;
 mod cache;
+mod graph_cache;
 
 use tracing::{info, span, Level};
 
@@ -57,6 +58,11 @@ fn main() -> std::result::Result<(), std::io::Error> {
         "unable to parse provided IPFS host + port ({:?}) as URL",
         &ipfs_node
     )));
+    // PROBLEM: provisioning based on number of entities and _not_ number of bytes allocated total
+    //          some dag nodes may be small and some may be large.
+    // TODO (fixme): either restore standalone LRU cap (so I can extend response via local nodes) _or_ restrict MVP API to batch put/batch get
+    // NOTE: mb leave eager fetch from cache as TODO - can provide same caps for actual use cases via get_bulk
+    let cached_ipfs = Cached::new(LruCache::new(opt.max_cache_entries), ipfs_node);
 
     let bind_to = format!("127.0.0.1:{}", opt.port);
 
@@ -66,11 +72,8 @@ fn main() -> std::result::Result<(), std::io::Error> {
     let subscriber = tracing_subscriber::fmt::Subscriber::builder().finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting global default failed");
 
-    // PROBLEM: provisioning based on number of entities and _not_ number of bytes allocated total
-    //          some dag nodes may be small and some may be large.
-    let cache = Cache::new(LruCache::new(32)); // TODO: config, sensible defaults, etc
 
-    let caps = web::Data::new(Capabilities::new(cache, ipfs_node));
+    let caps = web::Data::new(Capabilities::new(graph_cache, cached_ipfs));
 
     let span = span!(Level::TRACE, "app"); // todo: put app-level metadata here - port, any relevant config, etc
     let _enter = span.enter();

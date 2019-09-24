@@ -7,15 +7,16 @@ use std::collections::VecDeque;
 use crate::api_types;
 use crate::in_mem_types::ValidatedTree;
 use crate::ipfs_types;
+use crate::graph_cache::{HasGraphCacheCap};
 
-use crate::cache::HasCacheCap;
+// use crate::cache::HasGraphCacheCap;
 use crate::ipfs_api::HasIPFSCap;
 use crate::lib::BoxFuture;
 use tracing::{info, span, Level};
 
 use crate::batch_upload;
 
-pub fn get<C: 'static + HasIPFSCap + HasCacheCap>(
+pub fn get<C: 'static + HasIPFSCap + HasGraphCacheCap>(
     caps: web::Data<C>,
     k: web::Path<(ipfs_types::IPFSHash)>,
 ) -> Box<dyn Future<Item = web::Json<api_types::get::Resp>, Error = api_types::DagCacheError>> {
@@ -49,7 +50,10 @@ pub fn get<C: 'static + HasIPFSCap + HasCacheCap>(
 }
 
 // TODO: figure out traversal termination strategy - don't want to return whole cache in one resp
-fn extend<C: 'static + HasCacheCap>(caps: &C, node: ipfs_types::DagNode) -> api_types::get::Resp {
+fn extend<C: 'static + HasGraphCacheCap>(
+    caps: &C,
+    node: ipfs_types::DagNode,
+) -> api_types::get::Resp {
     let mut frontier = VecDeque::new();
     let mut res = Vec::new();
 
@@ -81,7 +85,7 @@ fn extend<C: 'static + HasCacheCap>(caps: &C, node: ipfs_types::DagNode) -> api_
     }
 }
 
-pub fn put<C: 'static + HasCacheCap + HasIPFSCap>(
+pub fn put<C: 'static + HasGraphCacheCap + HasIPFSCap>(
     caps: web::Data<C>,
     node: web::Json<ipfs_types::DagNode>,
 ) -> Box<dyn Future<Item = web::Json<ipfs_types::IPFSHash>, Error = api_types::DagCacheError>> {
@@ -97,7 +101,7 @@ pub fn put<C: 'static + HasCacheCap + HasIPFSCap>(
     Box::new(f)
 }
 
-pub fn put_many<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
+pub fn put_many<C: 'static + HasGraphCacheCap + HasIPFSCap + Sync + Send>(
     caps: web::Data<C>,
     req: web::Json<api_types::bulk_put::Req>,
 ) -> BoxFuture<web::Json<ipfs_types::IPFSHeader>, api_types::DagCacheError> {
