@@ -1,6 +1,6 @@
-use crate::encoding_types;
-use crate::error_types::DagCacheError;
-use crate::ipfs_types;
+use crate::types::encodings;
+use crate::types::errors::DagCacheError;
+use crate::types::ipfs;
 use crate::lib::BoxFuture;
 use futures::future::Future;
 use reqwest::r#async::{multipart, Client};
@@ -12,8 +12,8 @@ use tracing_futures::Instrument;
 pub struct IPFSNode(reqwest::Url); //base url, copy mutated to produce specific path. should have no path component
 
 pub trait IPFSCapability {
-    fn get(&self, k: ipfs_types::IPFSHash) -> BoxFuture<ipfs_types::DagNode, DagCacheError>;
-    fn put(&self, v: ipfs_types::DagNode) -> BoxFuture<ipfs_types::IPFSHash, DagCacheError>;
+    fn get(&self, k: ipfs::IPFSHash) -> BoxFuture<ipfs::DagNode, DagCacheError>;
+    fn put(&self, v: ipfs::DagNode) -> BoxFuture<ipfs::IPFSHash, DagCacheError>;
 }
 
 pub trait HasIPFSCap {
@@ -21,11 +21,11 @@ pub trait HasIPFSCap {
 
     fn ipfs_caps(&self) -> &Self::Output;
 
-    fn ipfs_get(&self, k: ipfs_types::IPFSHash) -> BoxFuture<ipfs_types::DagNode, DagCacheError> {
+    fn ipfs_get(&self, k: ipfs::IPFSHash) -> BoxFuture<ipfs::DagNode, DagCacheError> {
         self.ipfs_caps().get(k)
     }
 
-    fn ipfs_put(&self, v: ipfs_types::DagNode) -> BoxFuture<ipfs_types::IPFSHash, DagCacheError> {
+    fn ipfs_put(&self, v: ipfs::DagNode) -> BoxFuture<ipfs::IPFSHash, DagCacheError> {
         self.ipfs_caps().put(v)
     }
 }
@@ -35,7 +35,7 @@ impl IPFSNode {
 }
 
 impl IPFSCapability for IPFSNode {
-    fn get(&self, k: ipfs_types::IPFSHash) -> BoxFuture<ipfs_types::DagNode, DagCacheError> {
+    fn get(&self, k: ipfs::IPFSHash) -> BoxFuture<ipfs::DagNode, DagCacheError> {
         let mut url = self.0.clone();
         url.set_path("api/v0/object/get");
         url.query_pairs_mut()
@@ -55,12 +55,12 @@ impl IPFSCapability for IPFSNode {
                     DagCacheError::IPFSJsonError
                 })
             })
-            .map(|e: DagNode| ipfs_types::DagNode {
+            .map(|e: DagNode| ipfs::DagNode {
                 data: e.data,
                 links: e
                     .links
                     .into_iter()
-                    .map(|IPFSHeader { hash, name, size }| ipfs_types::IPFSHeader {
+                    .map(|IPFSHeader { hash, name, size }| ipfs::IPFSHeader {
                         hash,
                         name,
                         size,
@@ -74,7 +74,7 @@ impl IPFSCapability for IPFSNode {
         Box::new(f)
     }
 
-    fn put(&self, v: ipfs_types::DagNode) -> BoxFuture<ipfs_types::IPFSHash, DagCacheError> {
+    fn put(&self, v: ipfs::DagNode) -> BoxFuture<ipfs::IPFSHash, DagCacheError> {
         let mut url = self.0.clone();
         url.set_path("api/v0/object/put");
         url.query_pairs_mut().append_pair("datafieldenc", "base64");
@@ -84,7 +84,7 @@ impl IPFSCapability for IPFSNode {
             links: v
                 .links
                 .into_iter()
-                .map(|ipfs_types::IPFSHeader { hash, name, size }| IPFSHeader { hash, name, size })
+                .map(|ipfs::IPFSHeader { hash, name, size }| IPFSHeader { hash, name, size })
                 .collect(),
         };
         let bytes = serde_json::to_vec(&v).expect("json _serialize_ failed (should be impossible)");
@@ -111,18 +111,18 @@ impl IPFSCapability for IPFSNode {
 }
 
 // IPFS API resp types live here, not a huge fan of their json format - stays here
-// NOTE: these mirror types in ipfs_types, only difference is upper-case first char in json field names
+// NOTE: these mirror types in ipfs, only difference is upper-case first char in json field names
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct IPFSPutResp {
-    pub hash: ipfs_types::IPFSHash,
+    pub hash: ipfs::IPFSHash,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct IPFSHeader {
     pub name: String,
-    pub hash: ipfs_types::IPFSHash,
+    pub hash: ipfs::IPFSHash,
     pub size: u64,
 }
 
@@ -130,14 +130,14 @@ pub struct IPFSHeader {
 #[serde(rename_all = "PascalCase")]
 pub struct DagNode {
     pub links: Vec<IPFSHeader>,
-    pub data: encoding_types::Base64,
+    pub data: encodings::Base64,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::encoding_types::Base64;
-    use crate::ipfs_types::{DagNode, IPFSHash, IPFSHeader};
+    use crate::types::encodings::Base64;
+    use crate::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
     use crate::lib;
     use rand;
     use rand::Rng;

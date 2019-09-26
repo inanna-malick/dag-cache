@@ -1,4 +1,4 @@
-use crate::ipfs_types::{DagNode, IPFSHash};
+use crate::types::ipfs::{DagNode, IPFSHash};
 use lru::LruCache;
 use std::sync::Mutex;
 

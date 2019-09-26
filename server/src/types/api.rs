@@ -1,6 +1,5 @@
-use crate::encoding_types;
-use crate::encoding_types::Base58;
-use crate::error_types::ProtoDecodingError;
+use crate::types::encodings::Base58;
+use crate::types::errors::ProtoDecodingError;
 use crate::server::ipfscache as proto;
 use serde::{Deserialize, Serialize};
 
@@ -13,7 +12,7 @@ impl ClientSideHash {
     pub fn to_string<'a>(&self) -> String { self.0.to_string() }
 
     pub fn from_proto(p: proto::ClientSideHash) -> Result<Self, ProtoDecodingError> {
-        encoding_types::Base58::from_string(&p.hash)
+        Base58::from_string(&p.hash)
             .map(ClientSideHash)
             .map_err(|e| ProtoDecodingError {
                 cause: format!("invalid base58 string in client side hash: {:?}", e),
@@ -23,8 +22,8 @@ impl ClientSideHash {
 
 pub mod bulk_put {
     use super::{proto, ClientSideHash, ProtoDecodingError};
-    use crate::encoding_types::Base64;
-    use crate::ipfs_types;
+    use crate::types::encodings::Base64;
+    use crate::types::ipfs;
     use serde::{Deserialize, Serialize};
 
     // idea is that a put req will contain some number of nodes, with only client-side blake hashing performed.
@@ -100,14 +99,14 @@ pub mod bulk_put {
     #[derive(Clone, Debug, Serialize, Deserialize)]
     pub enum DagNodeLink {
         Local(ClientSideHash),
-        Remote(ipfs_types::IPFSHeader),
+        Remote(ipfs::IPFSHeader),
     }
 
     impl DagNodeLink {
         pub fn from_proto(p: proto::BulkPutLink) -> Result<Self, ProtoDecodingError> {
             match p.link {
                 Some(proto::bulk_put_link::Link::InIpfs(hdr)) => {
-                    ipfs_types::IPFSHeader::from_proto(hdr).map(DagNodeLink::Remote)
+                    ipfs::IPFSHeader::from_proto(hdr).map(DagNodeLink::Remote)
                 }
                 Some(proto::bulk_put_link::Link::InReq(csh)) => {
                     let csh = ClientSideHash::from_proto(csh)?;
@@ -126,15 +125,15 @@ pub mod bulk_put {
 
 pub mod get {
     use super::proto;
-    use crate::ipfs_types;
+    use crate::types::ipfs;
     use serde::{Deserialize, Serialize};
 
     // ~= NonEmptyList (head, rest struct)
     #[derive(Clone, Debug, Deserialize, Serialize)]
     pub struct Resp {
-        pub requested_node: ipfs_types::DagNode,
+        pub requested_node: ipfs::DagNode,
         pub extra_node_count: u64,
-        pub extra_nodes: Vec<ipfs_types::DagNodeWithHeader>,
+        pub extra_nodes: Vec<ipfs::DagNodeWithHeader>,
     }
 
     impl Resp {

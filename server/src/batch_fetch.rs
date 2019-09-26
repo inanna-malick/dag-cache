@@ -1,12 +1,11 @@
-use crate::error_types::DagCacheError;
+use crate::types::errors::DagCacheError;
 use crate::ipfs_api::HasIPFSCap;
-use crate::ipfs_types::IPFSHeader;
-use crate::ipfs_types::{DagNode, IPFSHash};
+use crate::types::ipfs::{DagNode, IPFSHeader, IPFSHash};
 use crate::lib::BoxFuture;
 use chashmap::CHashMap;
 use futures::future::Future;
-use futures::sink::Sink;
 use futures::stream::Stream;
+use futures::sink::Sink;
 use futures::sync::mpsc;
 use std::convert::AsRef;
 use std::sync::Arc;

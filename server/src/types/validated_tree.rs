@@ -1,5 +1,5 @@
-use crate::api_types::bulk_put::{DagNode, DagNodeLink};
-use crate::api_types::ClientSideHash;
+use crate::types::api::bulk_put::{DagNode, DagNodeLink};
+use crate::types::api::ClientSideHash;
 use hashbrown::HashMap;
 
 // ephemeral, used for data structure in memory

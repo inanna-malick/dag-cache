@@ -1,10 +1,10 @@
-use crate::api_types;
+use crate::types::api as api_types;
 use crate::batch_upload;
 use crate::cache::HasCacheCap;
-use crate::error_types::DagCacheError;
-use crate::in_mem_types::ValidatedTree;
+use crate::types::errors::DagCacheError;
+use crate::types::validated_tree::ValidatedTree;
 use crate::ipfs_api::HasIPFSCap;
-use crate::ipfs_types;
+use crate::types::ipfs as ipfs_types;
 use crate::lib::BoxFuture;
 use futures::future;
 use futures::future::Future;

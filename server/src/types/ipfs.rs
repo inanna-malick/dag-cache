@@ -1,5 +1,5 @@
-use crate::encoding_types;
-use crate::error_types::ProtoDecodingError;
+use crate::types::encodings::{Base58, Base64};
+use crate::types::errors::ProtoDecodingError;
 use crate::server::ipfscache as proto;
 use serde::{Deserialize, Serialize};
 
@@ -35,7 +35,7 @@ impl IPFSHeader {
 
 // NOTE: would be cool if I knew these were constant size instead of having a vec
 #[derive(Clone, Hash, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub struct IPFSHash(encoding_types::Base58);
+pub struct IPFSHash(Base58);
 
 impl IPFSHash {
     pub fn into_proto(self) -> proto::IpfsHash {
@@ -45,7 +45,7 @@ impl IPFSHash {
     }
 
     pub fn from_proto(p: proto::IpfsHash) -> Result<Self, ProtoDecodingError> {
-        encoding_types::Base58::from_string(&p.hash)
+        Base58::from_string(&p.hash)
             .map(IPFSHash)
             .map_err(|e| ProtoDecodingError {
                 cause: format!("invalid base58 string in ipfs hash: {:?}", e),
@@ -54,11 +54,11 @@ impl IPFSHash {
 
     #[cfg(test)]
     pub fn from_string(x: &str) -> Result<Self, base58::FromBase58Error> {
-        encoding_types::Base58::from_string(x).map(Self::from_raw)
+        Base58::from_string(x).map(Self::from_raw)
     }
 
     #[cfg(test)]
-    pub fn from_raw(raw: encoding_types::Base58) -> IPFSHash { IPFSHash(raw) }
+    pub fn from_raw(raw: Base58) -> IPFSHash { IPFSHash(raw) }
 
     pub fn to_string<'a>(&self) -> String { self.0.to_string() }
 }
@@ -66,7 +66,7 @@ impl IPFSHash {
 #[derive(PartialEq, Eq, Clone, Debug, Deserialize, Serialize)]
 pub struct DagNode {
     pub links: Vec<IPFSHeader>,
-    pub data: encoding_types::Base64,
+    pub data: Base64,
 }
 
 impl DagNode {
@@ -83,7 +83,7 @@ impl DagNode {
         let links = links?;
         let node = DagNode {
             links: links,
-            data: encoding_types::Base64(p.data),
+            data: Base64(p.data),
         };
         Ok(node)
     }

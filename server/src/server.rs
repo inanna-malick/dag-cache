@@ -1,10 +1,10 @@
 use crate::api;
-use crate::api_types;
+use crate::types;
 use crate::batch_fetch;
 use crate::cache::HasCacheCap;
-use crate::error_types::DagCacheError;
+use crate::types::errors::DagCacheError;
 use crate::ipfs_api::HasIPFSCap;
-use crate::ipfs_types;
+use crate::types::ipfs;
 use crate::lib::BoxFuture;
 use crate::server::ipfscache::{server, BulkPutReq, GetResp, IpfsHash, IpfsNode};
 use futures::{Future, Stream};
@@ -33,7 +33,7 @@ impl<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static> ipfscache::server::Ipf
     // note: trait requires mut here? ideally would allow non-mut as impl
     fn get_node(&mut self, request: Request<IpfsHash>) -> Self::GetNodeFuture {
         println!("HIT GET NODE");
-        match ipfs_types::IPFSHash::from_proto(request.into_inner()) {
+        match ipfs::IPFSHash::from_proto(request.into_inner()) {
             Ok(domain_hash) => {
                 let f = api::get(self.0.clone(), domain_hash)
                     .map(|get_resp| {
@@ -55,10 +55,10 @@ impl<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static> ipfscache::server::Ipf
     type GetNodesFuture = BoxFuture<Response<Self::GetNodesStream>, tower_grpc::Status>;
 
     fn get_nodes(&mut self, request: Request<IpfsHash>) -> Self::GetNodesFuture {
-        match ipfs_types::IPFSHash::from_proto(request.into_inner()) {
+        match ipfs::IPFSHash::from_proto(request.into_inner()) {
             Ok(domain_hash) => {
                 let s = batch_fetch::ipfs_fetch(self.0.clone(), domain_hash)
-                    .map(|n| n.into_proto())
+                    .map(|n: ipfs::DagNode| n.into_proto())
                     .map_err(|domain_err| domain_err.into_status());
                 let resp: Response<Self::GetNodesStream> = Response::new(Box::new(s));
                 Box::new(futures::future::ok(resp))
@@ -75,7 +75,7 @@ impl<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static> ipfscache::server::Ipf
     type PutNodeFuture = BoxFuture<Response<IpfsHash>, tower_grpc::Status>;
 
     fn put_node(&mut self, request: Request<IpfsNode>) -> Self::PutNodeFuture {
-        match ipfs_types::DagNode::from_proto(request.into_inner()) {
+        match ipfs::DagNode::from_proto(request.into_inner()) {
             Ok(domain_node) => {
                 let f = api::put(self.0.clone(), domain_node)
                     .map(|hash| {
@@ -96,7 +96,7 @@ impl<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static> ipfscache::server::Ipf
     type PutNodesFuture = BoxFuture<Response<IpfsHash>, tower_grpc::Status>;
 
     fn put_nodes(&mut self, request: Request<BulkPutReq>) -> Self::PutNodeFuture {
-        match api_types::bulk_put::Req::from_proto(request.into_inner()) {
+        match types::api::bulk_put::Req::from_proto(request.into_inner()) {
             Ok(bulk_put_req) => {
                 let f = api::put_many(self.0.clone(), bulk_put_req)
                     .map(|hash| {

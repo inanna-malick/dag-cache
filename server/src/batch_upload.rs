@@ -1,10 +1,9 @@
-use crate::api_types::bulk_put;
+use crate::types::api::bulk_put;
 use crate::cache::HasCacheCap;
-use crate::error_types::DagCacheError;
-use crate::in_mem_types::ValidatedTree;
+use crate::types::errors::DagCacheError;
+use crate::types::validated_tree::ValidatedTree;
 use crate::ipfs_api::HasIPFSCap;
-use crate::ipfs_types;
-use crate::ipfs_types::{IPFSHash, IPFSHeader};
+use crate::types::ipfs::{IPFSHash, IPFSHeader, DagNode};
 use crate::lib::BoxFuture;
 use futures::future;
 use futures::future::Future;
@@ -87,7 +86,7 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
 
     joined_link_fetches
         .and_then(move |links: Vec<IPFSHeader>| {
-            let dag_node = ipfs_types::DagNode { data, links };
+            let dag_node = DagNode { data, links };
 
             // might be a bit of an approximation, but w/e
             let size = size + dag_node.links.iter().map(|x| x.size).sum::<u64>();
@@ -119,18 +118,18 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api_types::ClientSideHash;
+    use crate::types::api::ClientSideHash;
     use crate::cache::{CacheCapability, HasCacheCap};
-    use crate::encoding_types::{Base58, Base64};
-    use crate::error_types::DagCacheError;
-    use crate::in_mem_types::ValidatedTree;
+    use crate::types::encodings::{Base58, Base64};
+    use crate::types::errors::DagCacheError;
+    use crate::types::validated_tree::ValidatedTree;
     use crate::ipfs_api::{HasIPFSCap, IPFSCapability};
-    use crate::ipfs_types::{DagNode, IPFSHash};
+    use crate::types::ipfs::{DagNode, IPFSHash};
     use crate::lib;
     use hashbrown::HashMap;
     use std::sync::Mutex;
 
-    struct MockIPFS(Mutex<HashMap<IPFSHash, ipfs_types::DagNode>>);
+    struct MockIPFS(Mutex<HashMap<IPFSHash, DagNode>>);
 
     struct BlackHoleCache;
     impl CacheCapability for BlackHoleCache {

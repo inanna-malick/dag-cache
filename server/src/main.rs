@@ -1,18 +1,14 @@
 #![deny(warnings, rust_2018_idioms)]
 
 mod api;
-mod api_types;
 mod batch_fetch;
 mod batch_upload;
 mod cache;
 mod capabilities;
-mod encoding_types;
-mod error_types;
-mod in_mem_types;
 mod ipfs_api;
-mod ipfs_types;
 mod lib;
 mod server;
+mod types;
 
 use capabilities::Capabilities;
 use ipfs_api::IPFSNode;
