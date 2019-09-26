@@ -1,3 +1,4 @@
+use crate::encoding_types;
 use crate::error_types::ProtoDecodingError;
 use crate::ipfs_types;
 use crate::server::ipfscache as proto;
@@ -17,8 +18,12 @@ impl ClientSideHash {
         self.0.to_string()
     }
 
-    pub fn from_proto(p: proto::ClientSideHash) -> Self {
-        ClientSideHash(Base58(p.hash))
+    pub fn from_proto(p: proto::ClientSideHash) -> Result<Self, ProtoDecodingError> {
+        encoding_types::Base58::from_string(&p.hash)
+            .map(ClientSideHash)
+            .map_err(|e| ProtoDecodingError {
+                cause: format!("invalid base58 string in client side hash: {:?}", e),
+            })
     }
 }
 
@@ -71,7 +76,7 @@ pub mod bulk_put {
                 cause: "client side hash not present on BulkPutIpfsNodeWithHash proto".to_string(),
             })?;
 
-            let hash = ClientSideHash::from_proto(hash);
+            let hash = ClientSideHash::from_proto(hash)?;
 
             let node = p.node.ok_or(ProtoDecodingError {
                 cause: "node not present on BulkPutIpfsNodeWithHash proto".to_string(),
@@ -111,7 +116,7 @@ pub mod bulk_put {
                     ipfs_types::IPFSHeader::from_proto(hdr).map(DagNodeLink::Remote)
                 }
                 Some(proto::bulk_put_link::Link::InReq(csh)) => {
-                    let csh = ClientSideHash::from_proto(csh);
+                    let csh = ClientSideHash::from_proto(csh)?;
                     Ok(DagNodeLink::Local(csh))
                 }
                 None => Err(ProtoDecodingError {

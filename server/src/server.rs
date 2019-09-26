@@ -16,10 +16,10 @@ use futures::{future, Future, Sink, Stream};
 use log::error;
 // use std::collections::HashMap;
 // use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 // use std::time::Instant;
 use tokio::net::TcpListener;
-use tower_grpc::{Request, Response, Streaming};
+use tower_grpc::{Request, Response};
 use tower_hyper::server::{Http, Server};
 
 // question not the gprc macro magic (I sadly have no idea what this does)
@@ -40,26 +40,44 @@ impl<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static> ipfscache::server::Ipf
 
     // note: trait requires mut here? ideally would allow non-mut as impl
     fn get_node(&mut self, request: Request<IpfsHash>) -> Self::GetNodeFuture {
-        let domain_hash = ipfs_types::IPFSHash::from_proto(request.into_inner());
-        let f = api::get(self.0.clone(), domain_hash)
-            .map(|get_resp| {
-                let proto_get_resp = get_resp.into_proto();
-                Response::new(proto_get_resp)
-            })
-            .map_err(|domain_err| domain_err.into_status());
-        Box::new(f)
+        println!("HIT GET NODE");
+        match ipfs_types::IPFSHash::from_proto(request.into_inner()) {
+            Ok(domain_hash) => {
+                let f = api::get(self.0.clone(), domain_hash)
+                    .map(|get_resp| {
+                        let proto_get_resp = get_resp.into_proto();
+                        Response::new(proto_get_resp)
+                    })
+                    .map_err(|domain_err| domain_err.into_status());
+                Box::new(f)
+            }
+            Err(de) => {
+                let e = DagCacheError::ProtoDecodingError(de);
+                let f = futures::future::err(e.into_status());
+                Box::new(f)
+            }
+        }
     }
 
     type GetNodesStream = Box<dyn Stream<Item = IpfsNode, Error = tower_grpc::Status> + Send>;
     type GetNodesFuture = BoxFuture<Response<Self::GetNodesStream>, tower_grpc::Status>;
 
     fn get_nodes(&mut self, request: Request<IpfsHash>) -> Self::GetNodesFuture {
-        let domain_hash = ipfs_types::IPFSHash::from_proto(request.into_inner());
-        let s = batch_fetch::ipfs_fetch(self.0.clone(), domain_hash)
-            .map(|n| n.into_proto())
-            .map_err(|domain_err| domain_err.into_status());
-        let resp: Response<Self::GetNodesStream> = Response::new(Box::new(s));
-        Box::new(futures::future::ok(resp))
+        match ipfs_types::IPFSHash::from_proto(request.into_inner()) {
+            Ok(domain_hash) => {
+                let s = batch_fetch::ipfs_fetch(self.0.clone(), domain_hash)
+                    .map(|n| n.into_proto())
+                    .map_err(|domain_err| domain_err.into_status());
+                let resp: Response<Self::GetNodesStream> = Response::new(Box::new(s));
+                Box::new(futures::future::ok(resp))
+            }
+
+            Err(de) => {
+                let e = DagCacheError::ProtoDecodingError(de);
+                let f = futures::future::err(e.into_status());
+                Box::new(f)
+            }
+        }
     }
 
     type PutNodeFuture = BoxFuture<Response<IpfsHash>, tower_grpc::Status>;
@@ -105,7 +123,7 @@ impl<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static> ipfscache::server::Ipf
     }
 }
 
-pub fn serve<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(caps: Arc<C>) {
+pub fn serve<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(caps: Arc<C>, bind_to: String) {
     let _ = ::env_logger::init(); // using this + some other tracing logger? TODO: unify
 
     let new_service = server::IpfsCacheServer::new(App(caps));
@@ -113,7 +131,7 @@ pub fn serve<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(caps: Arc<C>) 
     let mut server = Server::new(new_service);
     let http = Http::new().http2_only(true).clone();
 
-    let addr = "127.0.0.1:10000".parse().unwrap();
+    let addr = bind_to.parse().unwrap();
     let bind = TcpListener::bind(&addr).expect("bind");
 
     println!("listining on {:?}", addr);

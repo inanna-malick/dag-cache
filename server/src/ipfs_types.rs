@@ -23,9 +23,10 @@ impl IPFSHeader {
         let hash = p.hash.ok_or(ProtoDecodingError {
             cause: "hash field not present on IpfsHeader proto".to_string(),
         })?;
+        let hash = IPFSHash::from_proto(hash)?;
         let hdr = IPFSHeader {
             name: p.name,
-            hash: IPFSHash::from_proto(hash),
+            hash: hash,
             size: p.size,
         };
         Ok(hdr)
@@ -39,21 +40,22 @@ pub struct IPFSHash(encoding_types::Base58);
 impl IPFSHash {
     pub fn into_proto(self) -> proto::IpfsHash {
         let base_58 = self.0;
-        let raw_bytes = base_58.0;
-        proto::IpfsHash { hash: raw_bytes }
+        let raw = base_58.to_string();
+        proto::IpfsHash { hash: raw }
     }
 
-    pub fn from_proto(p: proto::IpfsHash) -> Self {
-        IPFSHash(encoding_types::Base58::from_bytes(p.hash)) // note: no validation
+    pub fn from_proto(p: proto::IpfsHash) -> Result<Self, ProtoDecodingError> {
+        encoding_types::Base58::from_string(&p.hash)
+            .map(IPFSHash)
+            .map_err(|e| ProtoDecodingError {
+                cause: format!("invalid base58 string in ipfs hash: {:?}", e),
+            })
     }
 
-    #[cfg(test)]
-    pub fn from_string(x: &str) -> Result<IPFSHash, base58::FromBase58Error> {
+    pub fn from_string(x: &str) -> Result<Self, base58::FromBase58Error> {
         encoding_types::Base58::from_string(x).map(Self::from_raw)
     }
 
-    // probably unsafe, but, like, what do I look like, a cop?
-    #[cfg(test)]
     pub fn from_raw(raw: encoding_types::Base58) -> IPFSHash {
         IPFSHash(raw)
     }

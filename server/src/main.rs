@@ -67,5 +67,5 @@ fn main() {
     let span = span!(Level::TRACE, "app"); // todo: put app-level metadata here - port, any relevant config, etc
     let _enter = span.enter();
 
-    server::serve(caps)
+    server::serve(caps, bind_to)
 }

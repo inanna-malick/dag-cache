@@ -55,13 +55,13 @@ message BulkPutIpfsNode {
 }
 
 message ClientSideHash {
-  bytes hash = 1;
+  string hash = 1; // base58 encoded string, to simplify grpc gui interactions
 }
 
 
 
 message IpfsHash {
-  bytes hash = 1;
+  string hash = 1; // base58 encoded string, to simplify grpc gui interactions
 }
 
 message IpfsHeader {

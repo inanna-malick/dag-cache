@@ -14,7 +14,6 @@ impl Base58 {
         Base58(x)
     }
 
-    #[cfg(test)]
     pub fn from_string(x: &str) -> Result<Base58, base58::FromBase58Error> {
         base58::FromBase58::from_base58(x).map(Base58)
     }
