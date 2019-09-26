@@ -1,29 +1,25 @@
-use actix;
-use actix_web::{web, App, HttpServer};
-use lru::LruCache;
-
 mod capabilities;
 
+mod api;
 mod api_types;
 mod batch_fetch;
+mod batch_upload;
+mod cache;
 mod encoding_types;
+mod error_types;
 mod in_mem_types;
 mod ipfs_api;
 mod ipfs_types;
 mod lib;
+mod server;
 
-use cache::Cached;
 use capabilities::Capabilities;
 use ipfs_api::IPFSNode;
-
-mod api;
-mod batch_upload;
-mod cache;
-mod graph_cache;
-
+use std::sync::Arc;
+use structopt::StructOpt;
 use tracing::{info, span, Level};
 
-use structopt::StructOpt;
+// TODO ^ organize/clean inputs/use block
 
 // TODO: provide simple naming standard for dag links - can probably gen somehow from generic Structs
 // TODO: enforce (and parse) naming scheme for node pointers
@@ -46,11 +42,10 @@ struct Opt {
 
     #[structopt(short = "n", long = "max_cache_entries", default_value = "128")]
     // randomly chosen number..
-    max_cache_entries: u64,
+    max_cache_entries: usize,
 }
-// TODO ^ organize/clean inputs/use block
 
-fn main() -> std::result::Result<(), std::io::Error> {
+fn main() {
     let opt = Opt::from_args();
 
     let ipfs_node = format!("http://{}:{}", &opt.ipfs_host, opt.ipfs_port); // TODO: https...
@@ -60,45 +55,17 @@ fn main() -> std::result::Result<(), std::io::Error> {
     )));
     // PROBLEM: provisioning based on number of entities and _not_ number of bytes allocated total
     //          some dag nodes may be small and some may be large.
-    // TODO (fixme): either restore standalone LRU cap (so I can extend response via local nodes) _or_ restrict MVP API to batch put/batch get
-    // NOTE: mb leave eager fetch from cache as TODO - can provide same caps for actual use cases via get_bulk
-    let cached_ipfs = Cached::new(LruCache::new(opt.max_cache_entries), ipfs_node);
 
     let bind_to = format!("127.0.0.1:{}", opt.port);
-
-    let sys = actix::System::new("system"); // <- create Actix system
 
     // initialize and register event/span logging subscriber
     let subscriber = tracing_subscriber::fmt::Subscriber::builder().finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting global default failed");
 
-
-    let caps = web::Data::new(Capabilities::new(graph_cache, cached_ipfs));
+    let caps = Arc::new(Capabilities::new(opt.max_cache_entries, ipfs_node));
 
     let span = span!(Level::TRACE, "app"); // todo: put app-level metadata here - port, any relevant config, etc
     let _enter = span.enter();
 
-    HttpServer::new(move || {
-        info!("initialize app");
-        App::new()
-            .register_data(caps.clone()) // <- register the created data (Arc) - keeps 1 reference to keep it alive, presumably
-            .route(
-                "/object/get/{n}",
-                web::get().to_async(api::get::<Capabilities>),
-            )
-            .route(
-                "/object/put",
-                web::post().to_async(api::put::<Capabilities>),
-            )
-            .route(
-                "/objects/put",
-                web::post().to_async(api::put_many::<Capabilities>),
-            )
-    })
-    .bind(&bind_to)
-    .expect(&format!("Cannot bind to {:?}", bind_to))
-    .start();
-
-    // Run actix system (actually starts all async processes, presumably blocks(?))
-    sys.run()
+    server::serve(caps)
 }

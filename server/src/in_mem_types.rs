@@ -5,21 +5,28 @@ use hashbrown::HashMap;
 
 // ephemeral, used for data structure in memory
 pub struct ValidatedTree {
-    // how 2 make constructor priv but fields pub? just add pub accessors?
-    pub root: ClientSideHash,
+    // how 2 make constructor priv but fields pub? just add pub accessor fns?
+    pub root_node: DagNode,
     pub nodes: HashMap<ClientSideHash, DagNode>,
 }
 
 // TODO: idk, tests?
 impl ValidatedTree {
     pub fn validate(
-        root: ClientSideHash,
+        root_node: DagNode,
         nodes: HashMap<ClientSideHash, DagNode>,
     ) -> Result<ValidatedTree, DagTreeBuildErr> {
         let mut node_visited_count = 0;
         let mut stack = vec![];
 
-        stack.push(root.clone());
+        for node_link in root_node.links.iter() {
+            match node_link {
+                // reference to node in map, must verify
+                DagNodeLink::Local(csh) => stack.push(csh.clone()),
+                // no-op, valid by definition
+                DagNodeLink::Remote(_) => {}
+            }
+        }
 
         while let Some(node_id) = stack.pop() {
             node_visited_count += 1;
@@ -40,7 +47,7 @@ impl ValidatedTree {
 
         if nodes.len() == node_visited_count {
             // all nodes in map visited
-            Ok(ValidatedTree { root, nodes })
+            Ok(ValidatedTree { root_node, nodes })
         } else {
             Err(DagTreeBuildErr::UnreachableNodes) // not all nodes in map are part of tree
         }

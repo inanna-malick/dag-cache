@@ -1,15 +1,16 @@
-use crate::graph_cache::{HasGraphCacheCap, GraphCache};
-use crate::cache::Cached;
+use crate::cache::{Cache, HasCacheCap};
 use crate::ipfs_api::{HasIPFSCap, IPFSNode};
+use lru::LruCache;
 
 pub struct Capabilities {
-    graph_cache: Cached<IPFSNode>,
-    ipfs_node: Cached<IPFSNode>,
+    cache: Cache,
+    ipfs_node: IPFSNode,
 }
 
 impl Capabilities {
-    pub fn new(graph_cache: GraphCache, ipfs_node: Cached<IPFSNode>) -> Capabilities {
-        Capabilities { graph_cache, ipfs_node }
+    pub fn new(max_cache_entries: usize, ipfs_node: IPFSNode) -> Capabilities {
+        let cache = Cache::new(LruCache::new(max_cache_entries));
+        Capabilities { cache, ipfs_node }
     }
 }
 
@@ -21,9 +22,9 @@ impl HasIPFSCap for Capabilities {
     }
 }
 
-impl HasGraphCacheCap for Capabilities {
-    type Output = GraphCache;
-    fn graph_cache_caps(&self) -> &Cache {
-        &self.graph_cache
+impl HasCacheCap for Capabilities {
+    type Output = Cache;
+    fn cache_caps(&self) -> &Cache {
+        &self.cache
     }
 }

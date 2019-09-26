@@ -1,6 +1,7 @@
-use serde::{Deserialize, Serialize};
-
 use crate::encoding_types;
+use crate::error_types::ProtoDecodingError;
+use crate::server::ipfscache as proto;
+use serde::{Deserialize, Serialize};
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct IPFSHeader {
@@ -9,11 +10,43 @@ pub struct IPFSHeader {
     pub size: u64,
 }
 
+impl IPFSHeader {
+    pub fn into_proto(self) -> proto::IpfsHeader {
+        proto::IpfsHeader {
+            name: self.name,
+            hash: Some(self.hash.into_proto()),
+            size: self.size,
+        }
+    }
+
+    pub fn from_proto(p: proto::IpfsHeader) -> Result<Self, ProtoDecodingError> {
+        let hash = p.hash.ok_or(ProtoDecodingError {
+            cause: "hash field not present on IpfsHeader proto".to_string(),
+        })?;
+        let hdr = IPFSHeader {
+            name: p.name,
+            hash: IPFSHash::from_proto(hash),
+            size: p.size,
+        };
+        Ok(hdr)
+    }
+}
+
 // NOTE: would be cool if I knew these were constant size instead of having a vec
 #[derive(Clone, Hash, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct IPFSHash(encoding_types::Base58);
 
 impl IPFSHash {
+    pub fn into_proto(self) -> proto::IpfsHash {
+        let base_58 = self.0;
+        let raw_bytes = base_58.0;
+        proto::IpfsHash { hash: raw_bytes }
+    }
+
+    pub fn from_proto(p: proto::IpfsHash) -> Self {
+        IPFSHash(encoding_types::Base58::from_bytes(p.hash)) // note: no validation
+    }
+
     #[cfg(test)]
     pub fn from_string(x: &str) -> Result<IPFSHash, base58::FromBase58Error> {
         encoding_types::Base58::from_string(x).map(Self::from_raw)
@@ -34,6 +67,38 @@ impl IPFSHash {
 pub struct DagNode {
     pub links: Vec<IPFSHeader>,
     pub data: encoding_types::Base64,
+}
+
+impl DagNode {
+    pub fn into_proto(self) -> proto::IpfsNode {
+        proto::IpfsNode {
+            links: self.links.into_iter().map(IPFSHeader::into_proto).collect(),
+            data: self.data.0,
+        }
+    }
+
+    pub fn from_proto(p: proto::IpfsNode) -> Result<Self, ProtoDecodingError> {
+        let links: Result<Vec<IPFSHeader>, ProtoDecodingError> =
+            p.links.into_iter().map(IPFSHeader::from_proto).collect();
+        let links = links?;
+        let node = DagNode {
+            links: links,
+            data: encoding_types::Base64(p.data),
+        };
+        Ok(node)
+    }
+}
+
+impl DagNodeWithHeader {
+    pub fn into_proto(self) -> proto::IpfsNodeWithHeader {
+        let hdr = self.header.into_proto();
+        let node = self.node.into_proto();
+
+        proto::IpfsNodeWithHeader {
+            header: Some(hdr),
+            node: Some(node),
+        }
+    }
 }
 
 // exists primarily to have better serialized json (tuples result in 2-elem lists)

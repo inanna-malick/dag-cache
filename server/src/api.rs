@@ -1,37 +1,34 @@
-use actix_web::web;
 use futures::future;
 use futures::future::Future;
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use crate::api_types;
+use crate::cache::HasCacheCap;
+use crate::error_types::DagCacheError;
 use crate::in_mem_types::ValidatedTree;
 use crate::ipfs_types;
-use crate::graph_cache::{HasGraphCacheCap};
 
-// use crate::cache::HasGraphCacheCap;
 use crate::ipfs_api::HasIPFSCap;
 use crate::lib::BoxFuture;
 use tracing::{info, span, Level};
 
 use crate::batch_upload;
 
-pub fn get<C: 'static + HasIPFSCap + HasGraphCacheCap>(
-    caps: web::Data<C>,
-    k: web::Path<(ipfs_types::IPFSHash)>,
-) -> Box<dyn Future<Item = web::Json<api_types::get::Resp>, Error = api_types::DagCacheError>> {
-    let caps = caps.into_inner();
-
+pub fn get<C: 'static + HasIPFSCap + HasCacheCap + Send + Sync>(
+    caps: Arc<C>,
+    k: ipfs_types::IPFSHash,
+) -> BoxFuture<api_types::get::Resp, DagCacheError> {
     let span = span!(Level::TRACE, "dag cache get handler");
     let _enter = span.enter();
     info!("attempt cache get");
-    let k = k.into_inner();
     match caps.cache_get(k.clone()) {
         Some(dag_node) => {
             info!("cache hit");
             // see if have any of the referenced subnodes in the local cache
             let resp = extend(caps.as_ref(), dag_node);
-            Box::new(future::ok(web::Json(resp)))
+            Box::new(future::ok(resp))
         }
         None => {
             info!("cache miss");
@@ -42,7 +39,7 @@ pub fn get<C: 'static + HasIPFSCap + HasGraphCacheCap>(
                     caps.cache_put(k.clone(), dag_node.clone());
                     // see if have any of the referenced subnodes in the local cache
                     let resp = extend(caps.as_ref(), dag_node);
-                    Ok(web::Json(resp))
+                    Ok(resp)
                 });
             Box::new(f)
         }
@@ -50,10 +47,7 @@ pub fn get<C: 'static + HasIPFSCap + HasGraphCacheCap>(
 }
 
 // TODO: figure out traversal termination strategy - don't want to return whole cache in one resp
-fn extend<C: 'static + HasGraphCacheCap>(
-    caps: &C,
-    node: ipfs_types::DagNode,
-) -> api_types::get::Resp {
+fn extend<C: 'static + HasCacheCap>(caps: &C, node: ipfs_types::DagNode) -> api_types::get::Resp {
     let mut frontier = VecDeque::new();
     let mut res = Vec::new();
 
@@ -80,47 +74,43 @@ fn extend<C: 'static + HasGraphCacheCap>(
 
     api_types::get::Resp {
         requested_node: node,
-        extra_node_count: res.len(),
+        extra_node_count: res.len() as u64,
         extra_nodes: res,
     }
 }
 
-pub fn put<C: 'static + HasGraphCacheCap + HasIPFSCap>(
-    caps: web::Data<C>,
-    node: web::Json<ipfs_types::DagNode>,
-) -> Box<dyn Future<Item = web::Json<ipfs_types::IPFSHash>, Error = api_types::DagCacheError>> {
+pub fn put<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
+    caps: Arc<C>,
+    node: ipfs_types::DagNode,
+) -> BoxFuture<ipfs_types::IPFSHash, DagCacheError> {
     info!("dag cache put handler");
-    let node = node.into_inner();
 
     let f = caps
         .ipfs_put(node.clone())
         .and_then(move |hp: ipfs_types::IPFSHash| {
             caps.cache_put(hp.clone(), node);
-            Ok(web::Json(hp))
+            Ok(hp)
         });
     Box::new(f)
 }
 
-pub fn put_many<C: 'static + HasGraphCacheCap + HasIPFSCap + Sync + Send>(
-    caps: web::Data<C>,
-    req: web::Json<api_types::bulk_put::Req>,
-) -> BoxFuture<web::Json<ipfs_types::IPFSHeader>, api_types::DagCacheError> {
+pub fn put_many<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
+    caps: Arc<C>,
+    req: api_types::bulk_put::Req,
+) -> BoxFuture<ipfs_types::IPFSHash, DagCacheError> {
     info!("dag cache put handler");
-    let api_types::bulk_put::Req { entry_point, nodes } = req.into_inner();
-    let (root_focus, root_node) = entry_point;
+    let api_types::bulk_put::Req { root_node, nodes } = req;
 
     let mut node_map = hashbrown::HashMap::with_capacity(nodes.len());
 
-    node_map.insert(root_focus.clone(), root_node);
-
-    for (k, v) in nodes.into_iter() {
-        node_map.insert(k, v);
+    for api_types::bulk_put::DagNodeWithHash { hash, node } in nodes.into_iter() {
+        node_map.insert(hash, node);
     }
 
-    let in_mem = ValidatedTree::validate(root_focus, node_map)
-        .expect("todo: handle malformed req case here"); // FIXME
+    let in_mem =
+        ValidatedTree::validate(root_node, node_map).expect("todo: handle malformed req case here"); // FIXME
 
-    let f = batch_upload::ipfs_publish_cata(caps.into_inner(), in_mem).map(web::Json);
+    let f = batch_upload::ipfs_publish_cata(caps, in_mem).map(|(_size, hash)| hash);
 
     Box::new(f)
 }

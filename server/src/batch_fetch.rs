@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use tokio;
 
+use crate::error_types::DagCacheError;
 use crate::ipfs_api::HasIPFSCap;
 use crate::ipfs_types::{DagNode, IPFSHash};
 use std::convert::AsRef;
@@ -30,7 +31,7 @@ use futures::sync::mpsc;
 pub fn ipfs_fetch<C: 'static + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     hash: IPFSHash,
-) -> impl Stream<Item = DagNode, Error = api_types::DagCacheError> + 'static + Send {
+) -> impl Stream<Item = DagNode, Error = DagCacheError> + 'static + Send {
     let (send, receive) = mpsc::channel(128); // randomly chose this channel buffer size..
     let memoizer = Arc::new(CHashMap::new());
 
@@ -52,8 +53,8 @@ pub fn ipfs_fetch<C: 'static + HasIPFSCap + Sync + Send>(
 pub fn ipfs_fetch_ana_internal<C: 'static + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     hash: IPFSHash,
-    resp_chan: mpsc::Sender<Result<DagNode, api_types::DagCacheError>>, // used to send completed nodes (eagerly)
-    to_populate: Arc<CHashMap<IPFSHash, ()>>, // used to memoize async fetches
+    resp_chan: mpsc::Sender<Result<DagNode, DagCacheError>>, // used to send completed nodes (eagerly)
+    to_populate: Arc<CHashMap<IPFSHash, ()>>,                // used to memoize async fetches
 ) {
     let hash2 = hash.clone();
     to_populate.upsert(
@@ -75,7 +76,7 @@ pub fn ipfs_fetch_ana_internal<C: 'static + HasIPFSCap + Sync + Send>(
 fn ipfs_fetch_worker<C: 'static + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     hash: IPFSHash,
-    resp_chan: mpsc::Sender<Result<DagNode, api_types::DagCacheError>>,
+    resp_chan: mpsc::Sender<Result<DagNode, DagCacheError>>,
     to_populate: Arc<CHashMap<IPFSHash, ()>>, // used to memoize async fetches
 ) -> impl Future<Item = (), Error = ()> + 'static + Send {
     let resp_chan_2 = resp_chan.clone(); // FIXME: async/await...

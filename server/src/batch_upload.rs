@@ -9,9 +9,11 @@ use std::sync::Arc;
 
 use tokio;
 
-use crate::api_types::ClientSideHash;
+use crate::api_types::{bulk_put, ClientSideHash};
+use crate::cache::HasCacheCap;
+use crate::error_types::DagCacheError;
 use crate::ipfs_api::HasIPFSCap;
-use crate::ipfs_types::IPFSHeader;
+use crate::ipfs_types::{IPFSHash, IPFSHeader};
 use crate::lib::BoxFuture;
 use std::convert::AsRef;
 use tracing::info;
@@ -22,28 +24,28 @@ use futures::sync::oneshot;
 
 // catamorphism - a consuming change
 // recursively publish DAG node tree to IPFS, starting with leaf nodes
-pub fn ipfs_publish_cata<C: 'static  + HasIPFSCap + Sync + Send>(
+pub fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     tree: in_mem_types::ValidatedTree,
-) -> impl Future<Item = IPFSHeader, Error = api_types::DagCacheError> + 'static + Send {
+) -> impl Future<Item = (u64, IPFSHash), Error = DagCacheError> + 'static + Send {
     // todo use async/await I guess, mb can avoid needing Arc? ugh
-    let focus = tree.root.clone();
+    let focus = tree.root_node.clone();
     let tree = Arc::new(tree);
     ipfs_publish_cata_unsafe(caps, tree, focus)
 }
 
 // unsafe b/c it can take any 'focus' ClientSideHash and not just the root node of tree
-pub fn ipfs_publish_cata_unsafe<C: 'static  + HasIPFSCap + Sync + Send>(
+pub fn ipfs_publish_cata_unsafe<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     tree: Arc<in_mem_types::ValidatedTree>, // todo use async/await I guess, mb can avoid needing Arc? ugh
-    focus: ClientSideHash,
-) -> impl Future<Item = IPFSHeader, Error = api_types::DagCacheError> + 'static + Send {
+    node: bulk_put::DagNode,
+) -> impl Future<Item = (u64, IPFSHash), Error = DagCacheError> + 'static + Send {
     let (send, receive) = oneshot::channel();
 
-    tokio::spawn(ipfs_publish_worker(caps, send, tree, focus));
+    tokio::spawn(ipfs_publish_worker(caps, send, tree, node));
 
     receive
-        .map_err(|_| api_types::DagCacheError::UnexpectedError {
+        .map_err(|_| DagCacheError::UnexpectedError {
             msg: "one shot channel cancelled".to_string(),
         }) // one-shot channel cancelled
         .then(move |x| x)
@@ -54,27 +56,36 @@ pub fn ipfs_publish_cata_unsafe<C: 'static  + HasIPFSCap + Sync + Send>(
 }
 
 // worker thread - uses one-shot channel to return result to avoid unbounded stack growth
-fn ipfs_publish_worker<C: 'static  + HasIPFSCap + Sync + Send>(
+fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
-    chan: oneshot::Sender<Result<IPFSHeader, api_types::DagCacheError>>,
+    chan: oneshot::Sender<Result<(u64, IPFSHash), DagCacheError>>,
     tree: Arc<ValidatedTree>,
-    focus: ClientSideHash,
+    node: bulk_put::DagNode,
 ) -> impl Future<Item = (), Error = ()> + 'static + Send {
-    // NOTE: could be more efficient by removing from node but would break guarantees
-    // unhandled deref failure, known to be safe b/c of validated tree wrapper
-    let api_types::bulk_put::DagNode { data, links } = tree.nodes[&focus].clone();
+    let bulk_put::DagNode { data, links } = node;
 
+    let size = data.0.len() as u64;
+
+    // todo: s/fetches/uploads? yah.
     let link_fetches: Vec<_> = links
         .into_iter()
         .map({
-            |x| -> BoxFuture<IPFSHeader, api_types::DagCacheError> {
+            |x| -> BoxFuture<IPFSHeader, DagCacheError> {
                 match x {
-                    api_types::bulk_put::DagNodeLink::Local(csh) => Box::new(
-                        ipfs_publish_cata_unsafe(caps.clone(), tree.clone(), csh.clone()),
-                    ),
-                    api_types::bulk_put::DagNodeLink::Remote(nh) => {
-                        Box::new(futures::future::ok(nh.clone())) // TODO: stable deref via frozen/elsa? yes.
+                    bulk_put::DagNodeLink::Local(client_side_hash) => {
+                        // NOTE: could be more efficient by removing from node but would break guarantees
+                        // unhandled deref failure, known to be safe b/c of validated tree wrapper
+                        let node = tree.nodes[&client_side_hash].clone();
+
+                        let f = ipfs_publish_cata_unsafe(caps.clone(), tree.clone(), node.clone())
+                            .map(move |(size, hash)| IPFSHeader {
+                                name: client_side_hash.to_string(),
+                                size: size,
+                                hash: hash,
+                            });
+                        Box::new(f)
                     }
+                    bulk_put::DagNodeLink::Remote(nh) => Box::new(futures::future::ok(nh.clone())),
                 }
             }
         })
@@ -83,24 +94,19 @@ fn ipfs_publish_worker<C: 'static  + HasIPFSCap + Sync + Send>(
     let joined_link_fetches = futures::future::join_all(link_fetches);
 
     joined_link_fetches
-        .and_then(|links: Vec<IPFSHeader>| {
-            // might be a bit of an approximation, but w/e
-            let size = data.0.len() as u64 + links.iter().map(|x| x.size).sum::<u64>();
-
+        .and_then(move |links: Vec<IPFSHeader>| {
             let dag_node = ipfs_types::DagNode { data, links };
+
+            // might be a bit of an approximation, but w/e
+            let size = size + dag_node.links.iter().map(|x| x.size).sum::<u64>();
 
             caps.as_ref()
                 .ipfs_put(dag_node.clone())
                 .then(move |res| match res {
-                    Ok(hp) => {
-                        caps.as_ref().cache_put(hp.clone(), dag_node.clone());
-                        let hdr = IPFSHeader {
-                            name: focus.to_string(),
-                            hash: hp,
-                            size: size,
-                        };
+                    Ok(hash) => {
+                        caps.as_ref().cache_put(hash.clone(), dag_node.clone());
 
-                        let chan_send_res = chan.send(Ok(hdr));
+                        let chan_send_res = chan.send(Ok((size, hash)));
                         if let Err(err) = chan_send_res {
                             info!("failed oneshot channel send {:?}", err);
                         };
@@ -121,10 +127,9 @@ fn ipfs_publish_worker<C: 'static  + HasIPFSCap + Sync + Send>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api_types::bulk_put;
-    use crate::api_types::DagCacheError;
     use crate::cache::{CacheCapability, HasCacheCap};
     use crate::encoding_types::{Base58, Base64};
+    use crate::error_types::DagCacheError;
     use crate::in_mem_types::ValidatedTree;
     use crate::ipfs_api::{HasIPFSCap, IPFSCapability};
     use crate::ipfs_types::{DagNode, IPFSHash};

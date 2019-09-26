@@ -10,7 +10,6 @@ impl Base58 {
         base58::ToBase58::to_base58(&self.0[..])
     }
 
-    #[cfg(test)]
     pub fn from_bytes(x: Vec<u8>) -> Base58 {
         Base58(x)
     }

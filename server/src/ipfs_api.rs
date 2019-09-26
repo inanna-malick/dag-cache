@@ -5,8 +5,8 @@ use serde_json;
 use tracing::{event, span, Level};
 use tracing_futures::Instrument; // todo, idk
 
-use crate::api_types::DagCacheError;
 use crate::encoding_types;
+use crate::error_types::DagCacheError;
 use crate::ipfs_types;
 use crate::lib::BoxFuture;
 
