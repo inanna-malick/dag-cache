@@ -1,10 +1,11 @@
-mod capabilities;
+#![deny(warnings, rust_2018_idioms)]
 
 mod api;
 mod api_types;
 mod batch_fetch;
 mod batch_upload;
 mod cache;
+mod capabilities;
 mod encoding_types;
 mod error_types;
 mod in_mem_types;
@@ -67,5 +68,6 @@ fn main() {
     let span = span!(Level::TRACE, "app"); // todo: put app-level metadata here - port, any relevant config, etc
     let _enter = span.enter();
 
+    info!("initializing server on {}", bind_to);
     server::serve(caps, bind_to)
 }

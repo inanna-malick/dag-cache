@@ -52,17 +52,15 @@ impl IPFSHash {
             })
     }
 
+    #[cfg(test)]
     pub fn from_string(x: &str) -> Result<Self, base58::FromBase58Error> {
         encoding_types::Base58::from_string(x).map(Self::from_raw)
     }
 
-    pub fn from_raw(raw: encoding_types::Base58) -> IPFSHash {
-        IPFSHash(raw)
-    }
+    #[cfg(test)]
+    pub fn from_raw(raw: encoding_types::Base58) -> IPFSHash { IPFSHash(raw) }
 
-    pub fn to_string<'a>(&self) -> String {
-        self.0.to_string()
-    }
+    pub fn to_string<'a>(&self) -> String { self.0.to_string() }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug, Deserialize, Serialize)]

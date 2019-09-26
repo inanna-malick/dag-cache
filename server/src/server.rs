@@ -1,7 +1,3 @@
-// #![deny(warnings, rust_2018_idioms)]
-
-use crate::server::ipfscache::{server, BulkPutReq, GetResp, IpfsHash, IpfsHeader, IpfsNode};
-
 use crate::api;
 use crate::api_types;
 use crate::batch_fetch;
@@ -10,14 +6,10 @@ use crate::error_types::DagCacheError;
 use crate::ipfs_api::HasIPFSCap;
 use crate::ipfs_types;
 use crate::lib::BoxFuture;
-
-use futures::sync::mpsc;
-use futures::{future, Future, Sink, Stream};
+use crate::server::ipfscache::{server, BulkPutReq, GetResp, IpfsHash, IpfsNode};
+use futures::{Future, Stream};
 use log::error;
-// use std::collections::HashMap;
-// use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-// use std::time::Instant;
 use tokio::net::TcpListener;
 use tower_grpc::{Request, Response};
 use tower_hyper::server::{Http, Server};

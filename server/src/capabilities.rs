@@ -17,14 +17,10 @@ impl Capabilities {
 //todo: read up on generalized associated types
 impl HasIPFSCap for Capabilities {
     type Output = IPFSNode;
-    fn ipfs_caps(&self) -> &IPFSNode {
-        &self.ipfs_node
-    }
+    fn ipfs_caps(&self) -> &IPFSNode { &self.ipfs_node }
 }
 
 impl HasCacheCap for Capabilities {
     type Output = Cache;
-    fn cache_caps(&self) -> &Cache {
-        &self.cache
-    }
+    fn cache_caps(&self) -> &Cache { &self.cache }
 }

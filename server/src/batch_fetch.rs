@@ -1,37 +1,23 @@
-use futures::future::Future;
-use futures::stream::Stream;
-
-use crate::api_types;
-
-use std::sync::Arc;
-
-use tokio;
-
 use crate::error_types::DagCacheError;
 use crate::ipfs_api::HasIPFSCap;
-use crate::ipfs_types::{DagNode, IPFSHash};
-use std::convert::AsRef;
-use tracing::info;
-
 use crate::ipfs_types::IPFSHeader;
+use crate::ipfs_types::{DagNode, IPFSHash};
 use crate::lib::BoxFuture;
 use chashmap::CHashMap;
+use futures::future::Future;
 use futures::sink::Sink;
+use futures::stream::Stream;
 use futures::sync::mpsc;
-
-// problem: can't meaningfully maintain validated graph structure while building tree via bulk fetch
-// concept: just, like, whatever: run the algorithm, toss stuff into the map, log some weird error if it fails (?)
-// concept: the above is fully mpsc compatible - maybe that's good? just dump everything into a map? lmao idk
-
-// plan: (from talk w/ rain) (note: investigate async memo(ized) - mononoke uses it)
-// use concurrent hash map to memoize. Write to map: future repr'ing result
-// write future to hashmap iff doesn't contain already - chm supports this pattern (insert if not already exist, Fn () -> V)
-// HashMap<IPFSHa
+use std::convert::AsRef;
+use std::sync::Arc;
+use tokio;
+use tracing::info;
 
 pub fn ipfs_fetch<C: 'static + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     hash: IPFSHash,
 ) -> impl Stream<Item = DagNode, Error = DagCacheError> + 'static + Send {
+    info!("starting recursive fetch for root hash {:?}", &hash);
     let (send, receive) = mpsc::channel(128); // randomly chose this channel buffer size..
     let memoizer = Arc::new(CHashMap::new());
 
@@ -41,7 +27,9 @@ pub fn ipfs_fetch<C: 'static + HasIPFSCap + Sync + Send>(
         Ok(Ok(n)) => futures::future::ok(n),
         Ok(Err(e)) => futures::future::err(e),
         Err(()) => {
-            panic!("mpsc receiver stream has error type (), did not expect to actually see error of said type")
+            // this should never happen...
+            let msg = format!("mpsc receiver stream has error type (), did not expect to actually see error of said type");
+            futures::future::err(DagCacheError::UnexpectedError { msg })
         }
     })
 }

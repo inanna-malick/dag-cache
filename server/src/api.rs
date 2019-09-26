@@ -1,20 +1,16 @@
-use futures::future;
-use futures::future::Future;
-
-use std::collections::VecDeque;
-use std::sync::Arc;
-
 use crate::api_types;
+use crate::batch_upload;
 use crate::cache::HasCacheCap;
 use crate::error_types::DagCacheError;
 use crate::in_mem_types::ValidatedTree;
-use crate::ipfs_types;
-
 use crate::ipfs_api::HasIPFSCap;
+use crate::ipfs_types;
 use crate::lib::BoxFuture;
+use futures::future;
+use futures::future::Future;
+use std::collections::VecDeque;
+use std::sync::Arc;
 use tracing::{info, span, Level};
-
-use crate::batch_upload;
 
 pub fn get<C: 'static + HasIPFSCap + HasCacheCap + Send + Sync>(
     caps: Arc<C>,

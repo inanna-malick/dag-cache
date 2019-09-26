@@ -1,32 +1,24 @@
-use futures::future;
-use futures::future::Future;
-
-use crate::api_types;
-use crate::in_mem_types;
-use crate::ipfs_types;
-
-use std::sync::Arc;
-
-use tokio;
-
-use crate::api_types::{bulk_put, ClientSideHash};
+use crate::api_types::bulk_put;
 use crate::cache::HasCacheCap;
 use crate::error_types::DagCacheError;
+use crate::in_mem_types::ValidatedTree;
 use crate::ipfs_api::HasIPFSCap;
+use crate::ipfs_types;
 use crate::ipfs_types::{IPFSHash, IPFSHeader};
 use crate::lib::BoxFuture;
-use std::convert::AsRef;
-use tracing::info;
-
-use crate::in_mem_types::ValidatedTree;
-
+use futures::future;
+use futures::future::Future;
 use futures::sync::oneshot;
+use std::convert::AsRef;
+use std::sync::Arc;
+use tokio;
+use tracing::info;
 
 // catamorphism - a consuming change
 // recursively publish DAG node tree to IPFS, starting with leaf nodes
 pub fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
-    tree: in_mem_types::ValidatedTree,
+    tree: ValidatedTree,
 ) -> impl Future<Item = (u64, IPFSHash), Error = DagCacheError> + 'static + Send {
     // todo use async/await I guess, mb can avoid needing Arc? ugh
     let focus = tree.root_node.clone();
@@ -37,7 +29,7 @@ pub fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
 // unsafe b/c it can take any 'focus' ClientSideHash and not just the root node of tree
 pub fn ipfs_publish_cata_unsafe<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
-    tree: Arc<in_mem_types::ValidatedTree>, // todo use async/await I guess, mb can avoid needing Arc? ugh
+    tree: Arc<ValidatedTree>, // todo use async/await I guess, mb can avoid needing Arc? ugh
     node: bulk_put::DagNode,
 ) -> impl Future<Item = (u64, IPFSHash), Error = DagCacheError> + 'static + Send {
     let (send, receive) = oneshot::channel();
@@ -127,6 +119,7 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api_types::ClientSideHash;
     use crate::cache::{CacheCapability, HasCacheCap};
     use crate::encoding_types::{Base58, Base64};
     use crate::error_types::DagCacheError;
@@ -141,9 +134,7 @@ mod tests {
 
     struct BlackHoleCache;
     impl CacheCapability for BlackHoleCache {
-        fn get(&self, _k: IPFSHash) -> Option<DagNode> {
-            None
-        }
+        fn get(&self, _k: IPFSHash) -> Option<DagNode> { None }
 
         fn put(&self, _k: IPFSHash, _v: DagNode) {}
     }
@@ -173,22 +164,16 @@ mod tests {
 
     impl HasIPFSCap for TestCaps {
         type Output = MockIPFS;
-        fn ipfs_caps(&self) -> &MockIPFS {
-            &self.0
-        }
+        fn ipfs_caps(&self) -> &MockIPFS { &self.0 }
     }
 
     impl HasCacheCap for TestCaps {
         type Output = BlackHoleCache;
-        fn cache_caps(&self) -> &BlackHoleCache {
-            &self.1
-        }
+        fn cache_caps(&self) -> &BlackHoleCache { &self.1 }
     }
 
     #[test]
-    fn test_batch_upload() {
-        lib::run_test(test_batch_upload_worker)
-    }
+    fn test_batch_upload() { lib::run_test(test_batch_upload_worker) }
 
     // uses mock capabilities, does not require local ipfs daemon
     fn test_batch_upload_worker() -> BoxFuture<(), String> {
@@ -225,8 +210,7 @@ mod tests {
         m.insert(client_hashes[1].clone(), t1.clone());
         m.insert(client_hashes[2].clone(), t2.clone());
 
-        let validated_tree =
-            ValidatedTree::validate(t3.clone(), m).expect("static test invalid");
+        let validated_tree = ValidatedTree::validate(t3.clone(), m).expect("static test invalid");
 
         let mock_ipfs = MockIPFS(Mutex::new(HashMap::new()));
         let caps = std::sync::Arc::new(TestCaps(mock_ipfs, BlackHoleCache));
@@ -256,10 +240,10 @@ mod tests {
                     vec!(client_hashes[0].clone(), client_hashes[1].clone()),
                     t2.data
                 ))); // t3 uploaded
-                assert!(&uploaded_values.contains(&(vec!(client_hashes[2].clone()), t3.data))); // t4 uploaded
+                assert!(&uploaded_values.contains(&(vec!(client_hashes[2].clone()), t3.data)));
+                // t4 uploaded
             });
 
         Box::new(f)
     }
-
 }

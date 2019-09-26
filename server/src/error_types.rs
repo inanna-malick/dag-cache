@@ -1,21 +1,11 @@
-use crate::server::ipfscache as proto;
-use failure::Fail;
-use serde::{Deserialize, Serialize};
-
-use crate::encoding_types::Base58;
 use tower_grpc::Code;
 use tower_grpc::Status;
 
-//TODO: remove 'Fail' entirely, see what breaks
-#[derive(Fail, Debug)]
+#[derive(Debug)]
 pub enum DagCacheError {
-    #[fail(display = "ipfs error")]
     IPFSError,
-    #[fail(display = "ipfs json parse error")] // FIXME - does this make sense here?
     IPFSJsonError,
-    #[fail(display = "error decoding input")] // FIXME - does this make sense here?
     ProtoDecodingError(ProtoDecodingError),
-    #[fail(display = "unexpected error: {}", msg)]
     UnexpectedError { msg: String },
 }
 

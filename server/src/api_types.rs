@@ -1,22 +1,16 @@
 use crate::encoding_types;
+use crate::encoding_types::Base58;
 use crate::error_types::ProtoDecodingError;
-use crate::ipfs_types;
 use crate::server::ipfscache as proto;
 use serde::{Deserialize, Serialize};
-
-use crate::encoding_types::Base58;
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug, Serialize, Deserialize)]
 pub struct ClientSideHash(Base58);
 impl ClientSideHash {
     #[cfg(test)]
-    pub fn new(x: Base58) -> ClientSideHash {
-        ClientSideHash(x)
-    }
+    pub fn new(x: Base58) -> ClientSideHash { ClientSideHash(x) }
 
-    pub fn to_string<'a>(&self) -> String {
-        self.0.to_string()
-    }
+    pub fn to_string<'a>(&self) -> String { self.0.to_string() }
 
     pub fn from_proto(p: proto::ClientSideHash) -> Result<Self, ProtoDecodingError> {
         encoding_types::Base58::from_string(&p.hash)

@@ -6,13 +6,10 @@ use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 pub struct Base58(pub Vec<u8>);
 
 impl Base58 {
-    pub fn to_string(&self) -> String {
-        base58::ToBase58::to_base58(&self.0[..])
-    }
+    pub fn to_string(&self) -> String { base58::ToBase58::to_base58(&self.0[..]) }
 
-    pub fn from_bytes(x: Vec<u8>) -> Base58 {
-        Base58(x)
-    }
+    #[cfg(test)]
+    pub fn from_bytes(x: Vec<u8>) -> Base58 { Base58(x) }
 
     pub fn from_string(x: &str) -> Result<Base58, base58::FromBase58Error> {
         base58::FromBase58::from_base58(x).map(Base58)

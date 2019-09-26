@@ -1,14 +1,13 @@
+use crate::encoding_types;
+use crate::error_types::DagCacheError;
+use crate::ipfs_types;
+use crate::lib::BoxFuture;
 use futures::future::Future;
 use reqwest::r#async::{multipart, Client};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use tracing::{event, span, Level};
-use tracing_futures::Instrument; // todo, idk
-
-use crate::encoding_types;
-use crate::error_types::DagCacheError;
-use crate::ipfs_types;
-use crate::lib::BoxFuture;
+use tracing_futures::Instrument;
 
 pub struct IPFSNode(reqwest::Url); //base url, copy mutated to produce specific path. should have no path component
 
@@ -32,9 +31,7 @@ pub trait HasIPFSCap {
 }
 
 impl IPFSNode {
-    pub fn new(a: reqwest::Url) -> Self {
-        IPFSNode(a)
-    }
+    pub fn new(a: reqwest::Url) -> Self { IPFSNode(a) }
 }
 
 impl IPFSCapability for IPFSNode {
@@ -48,7 +45,16 @@ impl IPFSCapability for IPFSNode {
         let f = Client::new()
             .get(url.clone())
             .send()
-            .and_then(|mut x| x.json())
+            .map_err(|e| {
+                event!(Level::ERROR,  msg = "failed getting node from IPFS", response.error = ?e);
+                DagCacheError::IPFSError
+            })
+            .and_then(|mut x| {
+                x.json().map_err(|e| {
+                    event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
+                    DagCacheError::IPFSJsonError
+                })
+            })
             .map(|e: DagNode| ipfs_types::DagNode {
                 data: e.data,
                 links: e
@@ -60,10 +66,6 @@ impl IPFSCapability for IPFSNode {
                         size,
                     })
                     .collect(),
-            })
-            .map_err(|e| {
-                event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
-                DagCacheError::IPFSJsonError
             })
             .instrument(
                 span!(Level::TRACE, "ipfs-get", hash_pointer = k.to_string().as_str(), url = ?url ),
@@ -141,9 +143,7 @@ mod tests {
     use rand::Rng;
 
     #[test]
-    fn test_put_and_get() {
-        lib::run_test(test_put_and_get_worker)
-    }
+    fn test_put_and_get() { lib::run_test(test_put_and_get_worker) }
 
     // NOTE: assumes IPFS daemon running locally at localhost:5001. Daemon can be shared between tests.
     fn test_put_and_get_worker() -> BoxFuture<(), String> {
@@ -194,5 +194,4 @@ mod tests {
 
         Box::new(f)
     }
-
 }
