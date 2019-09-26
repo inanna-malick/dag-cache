@@ -224,10 +224,9 @@ mod tests {
         m.insert(client_hashes[0].clone(), t0.clone());
         m.insert(client_hashes[1].clone(), t1.clone());
         m.insert(client_hashes[2].clone(), t2.clone());
-        m.insert(client_hashes[3].clone(), t3.clone());
 
         let validated_tree =
-            ValidatedTree::validate(client_hashes[3].clone(), m).expect("static test invalid");
+            ValidatedTree::validate(t3.clone(), m).expect("static test invalid");
 
         let mock_ipfs = MockIPFS(Mutex::new(HashMap::new()));
         let caps = std::sync::Arc::new(TestCaps(mock_ipfs, BlackHoleCache));
