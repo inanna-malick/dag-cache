@@ -1,6 +1,6 @@
 use crate::types::encodings::{Base58, Base64};
 use crate::types::errors::ProtoDecodingError;
-use crate::server::ipfscache as proto;
+use crate::types::grpc;
 use serde::{Deserialize, Serialize};
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
@@ -11,15 +11,15 @@ pub struct IPFSHeader {
 }
 
 impl IPFSHeader {
-    pub fn into_proto(self) -> proto::IpfsHeader {
-        proto::IpfsHeader {
+    pub fn into_proto(self) -> grpc::IpfsHeader {
+        grpc::IpfsHeader {
             name: self.name,
             hash: Some(self.hash.into_proto()),
             size: self.size,
         }
     }
 
-    pub fn from_proto(p: proto::IpfsHeader) -> Result<Self, ProtoDecodingError> {
+    pub fn from_proto(p: grpc::IpfsHeader) -> Result<Self, ProtoDecodingError> {
         let hash = p.hash.ok_or(ProtoDecodingError {
             cause: "hash field not present on IpfsHeader proto".to_string(),
         })?;
@@ -38,13 +38,13 @@ impl IPFSHeader {
 pub struct IPFSHash(Base58);
 
 impl IPFSHash {
-    pub fn into_proto(self) -> proto::IpfsHash {
+    pub fn into_proto(self) -> grpc::IpfsHash {
         let base_58 = self.0;
         let raw = base_58.to_string();
-        proto::IpfsHash { hash: raw }
+        grpc::IpfsHash { hash: raw }
     }
 
-    pub fn from_proto(p: proto::IpfsHash) -> Result<Self, ProtoDecodingError> {
+    pub fn from_proto(p: grpc::IpfsHash) -> Result<Self, ProtoDecodingError> {
         Base58::from_string(&p.hash)
             .map(IPFSHash)
             .map_err(|e| ProtoDecodingError {
@@ -70,14 +70,14 @@ pub struct DagNode {
 }
 
 impl DagNode {
-    pub fn into_proto(self) -> proto::IpfsNode {
-        proto::IpfsNode {
+    pub fn into_proto(self) -> grpc::IpfsNode {
+        grpc::IpfsNode {
             links: self.links.into_iter().map(IPFSHeader::into_proto).collect(),
             data: self.data.0,
         }
     }
 
-    pub fn from_proto(p: proto::IpfsNode) -> Result<Self, ProtoDecodingError> {
+    pub fn from_proto(p: grpc::IpfsNode) -> Result<Self, ProtoDecodingError> {
         let links: Result<Vec<IPFSHeader>, ProtoDecodingError> =
             p.links.into_iter().map(IPFSHeader::from_proto).collect();
         let links = links?;
@@ -90,11 +90,11 @@ impl DagNode {
 }
 
 impl DagNodeWithHeader {
-    pub fn into_proto(self) -> proto::IpfsNodeWithHeader {
+    pub fn into_proto(self) -> grpc::IpfsNodeWithHeader {
         let hdr = self.header.into_proto();
         let node = self.node.into_proto();
 
-        proto::IpfsNodeWithHeader {
+        grpc::IpfsNodeWithHeader {
             header: Some(hdr),
             node: Some(node),
         }

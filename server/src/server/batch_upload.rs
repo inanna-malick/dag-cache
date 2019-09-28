@@ -1,10 +1,10 @@
-use crate::types::api::bulk_put;
-use crate::cache::HasCacheCap;
-use crate::types::errors::DagCacheError;
-use crate::types::validated_tree::ValidatedTree;
-use crate::ipfs_api::HasIPFSCap;
-use crate::types::ipfs::{IPFSHash, IPFSHeader, DagNode};
+use crate::capabilities::HasCacheCap;
+use crate::capabilities::HasIPFSCap;
 use crate::lib::BoxFuture;
+use crate::types::api::bulk_put;
+use crate::types::errors::DagCacheError;
+use crate::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
+use crate::types::validated_tree::ValidatedTree;
 use futures::future;
 use futures::future::Future;
 use futures::sync::oneshot;
@@ -118,14 +118,13 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capabilities::{CacheCapability, HasCacheCap, HasIPFSCap, IPFSCapability};
+    use crate::lib;
     use crate::types::api::ClientSideHash;
-    use crate::cache::{CacheCapability, HasCacheCap};
     use crate::types::encodings::{Base58, Base64};
     use crate::types::errors::DagCacheError;
-    use crate::types::validated_tree::ValidatedTree;
-    use crate::ipfs_api::{HasIPFSCap, IPFSCapability};
     use crate::types::ipfs::{DagNode, IPFSHash};
-    use crate::lib;
+    use crate::types::validated_tree::ValidatedTree;
     use hashbrown::HashMap;
     use std::sync::Mutex;
 

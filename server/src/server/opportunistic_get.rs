@@ -1,11 +1,9 @@
-use crate::types::api as api_types;
-use crate::batch_upload;
-use crate::cache::HasCacheCap;
-use crate::types::errors::DagCacheError;
-use crate::types::validated_tree::ValidatedTree;
-use crate::ipfs_api::HasIPFSCap;
-use crate::types::ipfs as ipfs_types;
+use crate::capabilities::HasCacheCap;
+use crate::capabilities::HasIPFSCap;
 use crate::lib::BoxFuture;
+use crate::types::api as api_types;
+use crate::types::errors::DagCacheError;
+use crate::types::ipfs as ipfs_types;
 use futures::future;
 use futures::future::Future;
 use std::collections::VecDeque;
@@ -73,40 +71,4 @@ fn extend<C: 'static + HasCacheCap>(caps: &C, node: ipfs_types::DagNode) -> api_
         extra_node_count: res.len() as u64,
         extra_nodes: res,
     }
-}
-
-pub fn put<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
-    caps: Arc<C>,
-    node: ipfs_types::DagNode,
-) -> BoxFuture<ipfs_types::IPFSHash, DagCacheError> {
-    info!("dag cache put handler");
-
-    let f = caps
-        .ipfs_put(node.clone())
-        .and_then(move |hp: ipfs_types::IPFSHash| {
-            caps.cache_put(hp.clone(), node);
-            Ok(hp)
-        });
-    Box::new(f)
-}
-
-pub fn put_many<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
-    caps: Arc<C>,
-    req: api_types::bulk_put::Req,
-) -> BoxFuture<ipfs_types::IPFSHash, DagCacheError> {
-    info!("dag cache put handler");
-    let api_types::bulk_put::Req { root_node, nodes } = req;
-
-    let mut node_map = hashbrown::HashMap::with_capacity(nodes.len());
-
-    for api_types::bulk_put::DagNodeWithHash { hash, node } in nodes.into_iter() {
-        node_map.insert(hash, node);
-    }
-
-    let in_mem =
-        ValidatedTree::validate(root_node, node_map).expect("todo: handle malformed req case here"); // FIXME
-
-    let f = batch_upload::ipfs_publish_cata(caps, in_mem).map(|(_size, hash)| hash);
-
-    Box::new(f)
 }

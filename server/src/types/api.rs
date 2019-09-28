@@ -1,9 +1,8 @@
 use crate::types::encodings::Base58;
 use crate::types::errors::ProtoDecodingError;
-use crate::server::ipfscache as proto;
-use serde::{Deserialize, Serialize};
+use crate::types::grpc;
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct ClientSideHash(Base58);
 impl ClientSideHash {
     #[cfg(test)]
@@ -11,7 +10,7 @@ impl ClientSideHash {
 
     pub fn to_string<'a>(&self) -> String { self.0.to_string() }
 
-    pub fn from_proto(p: proto::ClientSideHash) -> Result<Self, ProtoDecodingError> {
+    pub fn from_proto(p: grpc::ClientSideHash) -> Result<Self, ProtoDecodingError> {
         Base58::from_string(&p.hash)
             .map(ClientSideHash)
             .map_err(|e| ProtoDecodingError {
@@ -21,25 +20,23 @@ impl ClientSideHash {
 }
 
 pub mod bulk_put {
-    use super::{proto, ClientSideHash, ProtoDecodingError};
+    use super::{grpc, ClientSideHash, ProtoDecodingError};
     use crate::types::encodings::Base64;
     use crate::types::ipfs;
-    use serde::{Deserialize, Serialize};
+    use crate::types::validated_tree::ValidatedTree;
 
     // idea is that a put req will contain some number of nodes, with only client-side blake hashing performed.
     // all hash links in body will solely use blake hash. ipfs is then treated as an implementation detail
     // with parsing-time traverse op to pair each blake hash with the full ipfs hash from the links field
     // of the dag node - dag node link fields would use name = blake2 hash (base58) (same format, why not, eh?)
     // goal of all this is to be able to send fully packed large requests as lists of many nodes w/ just blake2 pointers
-    // (note: needs to be, like, {body, either (blake2hash, ipfshash)} )
-    #[derive(Clone, Debug, Serialize, Deserialize)]
+    #[derive(Debug)]
     pub struct Req {
-        pub root_node: DagNode,
-        pub nodes: Vec<DagNodeWithHash>,
+        pub validated_tree: ValidatedTree,
     }
 
     impl Req {
-        pub fn from_proto(p: proto::BulkPutReq) -> Result<Self, ProtoDecodingError> {
+        pub fn from_proto(p: grpc::BulkPutReq) -> Result<Self, ProtoDecodingError> {
             let root_node = p.root_node.ok_or(ProtoDecodingError {
                 cause: "root node not present on Bulk Put Req proto".to_string(),
             })?;
@@ -52,19 +49,29 @@ pub mod bulk_put {
                 .collect();
             let nodes = nodes?;
 
-            let req = Req { root_node, nodes };
-            Ok(req)
+            let mut node_map = hashbrown::HashMap::with_capacity(nodes.len());
+
+            for DagNodeWithHash { hash, node } in nodes.into_iter() {
+                node_map.insert(hash, node);
+            }
+
+            let validated_tree =
+                ValidatedTree::validate(root_node, node_map).map_err(|e| ProtoDecodingError {
+                    cause: format!("invalid tree provided in Bulk Put Req proto, {:?}", e),
+                })?;
+
+            Ok(Req { validated_tree })
         }
     }
 
-    #[derive(Clone, Debug, Serialize, Deserialize)]
+    #[derive(Clone, Debug)]
     pub struct DagNodeWithHash {
         pub hash: ClientSideHash,
         pub node: DagNode,
     }
 
     impl DagNodeWithHash {
-        pub fn from_proto(p: proto::BulkPutIpfsNodeWithHash) -> Result<Self, ProtoDecodingError> {
+        pub fn from_proto(p: grpc::BulkPutIpfsNodeWithHash) -> Result<Self, ProtoDecodingError> {
             let hash = p.client_side_hash.ok_or(ProtoDecodingError {
                 cause: "client side hash not present on BulkPutIpfsNodeWithHash proto".to_string(),
             })?;
@@ -79,14 +86,14 @@ pub mod bulk_put {
         }
     }
 
-    #[derive(Clone, Debug, Serialize, Deserialize)]
+    #[derive(Clone, Debug)]
     pub struct DagNode {
         pub links: Vec<DagNodeLink>, // list of pointers - either to elems in this bulk req or already-uploaded
         pub data: Base64,            // this node's data
     }
 
     impl DagNode {
-        pub fn from_proto(p: proto::BulkPutIpfsNode) -> Result<Self, ProtoDecodingError> {
+        pub fn from_proto(p: grpc::BulkPutIpfsNode) -> Result<Self, ProtoDecodingError> {
             let data = Base64(p.data);
 
             let links: Result<Vec<DagNodeLink>, ProtoDecodingError> =
@@ -96,19 +103,19 @@ pub mod bulk_put {
         }
     }
 
-    #[derive(Clone, Debug, Serialize, Deserialize)]
+    #[derive(Clone, Debug)]
     pub enum DagNodeLink {
         Local(ClientSideHash),
         Remote(ipfs::IPFSHeader),
     }
 
     impl DagNodeLink {
-        pub fn from_proto(p: proto::BulkPutLink) -> Result<Self, ProtoDecodingError> {
+        pub fn from_proto(p: grpc::BulkPutLink) -> Result<Self, ProtoDecodingError> {
             match p.link {
-                Some(proto::bulk_put_link::Link::InIpfs(hdr)) => {
+                Some(grpc::bulk_put_link::Link::InIpfs(hdr)) => {
                     ipfs::IPFSHeader::from_proto(hdr).map(DagNodeLink::Remote)
                 }
-                Some(proto::bulk_put_link::Link::InReq(csh)) => {
+                Some(grpc::bulk_put_link::Link::InReq(csh)) => {
                     let csh = ClientSideHash::from_proto(csh)?;
                     Ok(DagNodeLink::Local(csh))
                 }
@@ -124,12 +131,11 @@ pub mod bulk_put {
 }
 
 pub mod get {
-    use super::proto;
+    use super::grpc;
     use crate::types::ipfs;
-    use serde::{Deserialize, Serialize};
 
     // ~= NonEmptyList (head, rest struct)
-    #[derive(Clone, Debug, Deserialize, Serialize)]
+    #[derive(Clone, Debug)]
     pub struct Resp {
         pub requested_node: ipfs::DagNode,
         pub extra_node_count: u64,
@@ -137,8 +143,8 @@ pub mod get {
     }
 
     impl Resp {
-        pub fn into_proto(self) -> proto::GetResp {
-            proto::GetResp {
+        pub fn into_proto(self) -> grpc::GetResp {
+            grpc::GetResp {
                 requested_node: Some(self.requested_node.into_proto()),
                 extra_node_count: self.extra_node_count,
                 extra_nodes: self

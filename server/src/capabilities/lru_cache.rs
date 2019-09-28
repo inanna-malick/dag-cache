@@ -1,27 +1,15 @@
+use crate::capabilities::CacheCapability;
 use crate::types::ipfs::{DagNode, IPFSHash};
 use lru::LruCache;
 use std::sync::Mutex;
 
-pub trait CacheCapability {
-    fn get(&self, k: IPFSHash) -> Option<DagNode>;
-
-    fn put(&self, k: IPFSHash, v: DagNode);
-}
-
-pub trait HasCacheCap {
-    type Output: CacheCapability;
-
-    fn cache_caps(&self) -> &Self::Output;
-
-    fn cache_get(&self, k: IPFSHash) -> Option<DagNode> { self.cache_caps().get(k) }
-
-    fn cache_put(&self, k: IPFSHash, v: DagNode) { self.cache_caps().put(k, v) }
-}
-
 pub struct Cache(Mutex<LruCache<IPFSHash, DagNode>>);
 
 impl Cache {
-    pub fn new(cache: LruCache<IPFSHash, DagNode>) -> Self { Cache(Mutex::new(cache)) }
+    pub fn new(max_cache_entries: usize) -> Self {
+        let cache = LruCache::new(max_cache_entries);
+        Cache(Mutex::new(cache))
+    }
 }
 
 impl CacheCapability for Cache {

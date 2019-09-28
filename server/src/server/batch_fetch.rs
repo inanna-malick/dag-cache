@@ -1,17 +1,18 @@
-use crate::types::errors::DagCacheError;
-use crate::ipfs_api::HasIPFSCap;
-use crate::types::ipfs::{DagNode, IPFSHeader, IPFSHash};
+use crate::capabilities::HasIPFSCap;
 use crate::lib::BoxFuture;
+use crate::types::errors::DagCacheError;
+use crate::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
 use chashmap::CHashMap;
 use futures::future::Future;
-use futures::stream::Stream;
 use futures::sink::Sink;
+use futures::stream::Stream;
 use futures::sync::mpsc;
 use std::convert::AsRef;
 use std::sync::Arc;
 use tokio;
 use tracing::info;
 
+// TODO: add fn that does get-and-cache, req's both caps
 pub fn ipfs_fetch<C: 'static + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     hash: IPFSHash,

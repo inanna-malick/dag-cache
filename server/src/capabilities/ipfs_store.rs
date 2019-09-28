@@ -1,7 +1,8 @@
+use crate::capabilities::IPFSCapability;
+use crate::lib::BoxFuture;
 use crate::types::encodings;
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs;
-use crate::lib::BoxFuture;
 use futures::future::Future;
 use reqwest::r#async::{multipart, Client};
 use serde::{Deserialize, Serialize};
@@ -10,25 +11,6 @@ use tracing::{event, span, Level};
 use tracing_futures::Instrument;
 
 pub struct IPFSNode(reqwest::Url); //base url, copy mutated to produce specific path. should have no path component
-
-pub trait IPFSCapability {
-    fn get(&self, k: ipfs::IPFSHash) -> BoxFuture<ipfs::DagNode, DagCacheError>;
-    fn put(&self, v: ipfs::DagNode) -> BoxFuture<ipfs::IPFSHash, DagCacheError>;
-}
-
-pub trait HasIPFSCap {
-    type Output: IPFSCapability;
-
-    fn ipfs_caps(&self) -> &Self::Output;
-
-    fn ipfs_get(&self, k: ipfs::IPFSHash) -> BoxFuture<ipfs::DagNode, DagCacheError> {
-        self.ipfs_caps().get(k)
-    }
-
-    fn ipfs_put(&self, v: ipfs::DagNode) -> BoxFuture<ipfs::IPFSHash, DagCacheError> {
-        self.ipfs_caps().put(v)
-    }
-}
 
 impl IPFSNode {
     pub fn new(a: reqwest::Url) -> Self { IPFSNode(a) }
@@ -60,11 +42,7 @@ impl IPFSCapability for IPFSNode {
                 links: e
                     .links
                     .into_iter()
-                    .map(|IPFSHeader { hash, name, size }| ipfs::IPFSHeader {
-                        hash,
-                        name,
-                        size,
-                    })
+                    .map(|IPFSHeader { hash, name, size }| ipfs::IPFSHeader { hash, name, size })
                     .collect(),
             })
             .instrument(
@@ -136,9 +114,9 @@ pub struct DagNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lib;
     use crate::types::encodings::Base64;
     use crate::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
-    use crate::lib;
     use rand;
     use rand::Rng;
 
