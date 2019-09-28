@@ -1,10 +1,10 @@
+use crate::capabilities::lib::get_and_cache;
 use crate::capabilities::HasCacheCap;
 use crate::capabilities::HasIPFSCap;
 use crate::lib::BoxFuture;
 use crate::types::api as api_types;
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs as ipfs_types;
-use futures::future;
 use futures::future::Future;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -17,27 +17,12 @@ pub fn get<C: 'static + HasIPFSCap + HasCacheCap + Send + Sync>(
     let span = span!(Level::TRACE, "dag cache get handler");
     let _enter = span.enter();
     info!("attempt cache get");
-    match caps.cache_get(k.clone()) {
-        Some(dag_node) => {
-            info!("cache hit");
-            // see if have any of the referenced subnodes in the local cache
-            let resp = extend(caps.as_ref(), dag_node);
-            Box::new(future::ok(resp))
-        }
-        None => {
-            info!("cache miss");
-            let f = caps
-                .ipfs_get(k.clone())
-                .and_then(move |dag_node: ipfs_types::DagNode| {
-                    info!("writing result of post cache miss lookup to cache");
-                    caps.cache_put(k.clone(), dag_node.clone());
-                    // see if have any of the referenced subnodes in the local cache
-                    let resp = extend(caps.as_ref(), dag_node);
-                    Ok(resp)
-                });
-            Box::new(f)
-        }
-    }
+
+    let f = get_and_cache(caps.clone(), k.clone()).map(move |dag_node| {
+        // see if have any of the referenced subnodes in the local cache
+        extend(caps.as_ref(), dag_node)
+    });
+    Box::new(f)
 }
 
 // TODO: figure out traversal termination strategy - don't want to return whole cache in one resp

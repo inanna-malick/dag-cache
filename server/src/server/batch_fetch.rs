@@ -1,5 +1,6 @@
-use crate::capabilities::HasIPFSCap;
+use crate::capabilities::{HasCacheCap, HasIPFSCap};
 use crate::lib::BoxFuture;
+use crate::capabilities::lib::get_and_cache;
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
 use chashmap::CHashMap;
@@ -7,13 +8,12 @@ use futures::future::Future;
 use futures::sink::Sink;
 use futures::stream::Stream;
 use futures::sync::mpsc;
-use std::convert::AsRef;
 use std::sync::Arc;
 use tokio;
 use tracing::info;
 
 // TODO: add fn that does get-and-cache, req's both caps
-pub fn ipfs_fetch<C: 'static + HasIPFSCap + Sync + Send>(
+pub fn ipfs_fetch<C: 'static + HasIPFSCap + HasCacheCap + Sync + Send>(
     caps: Arc<C>,
     hash: IPFSHash,
 ) -> impl Stream<Item = DagNode, Error = DagCacheError> + 'static + Send {
@@ -38,7 +38,7 @@ pub fn ipfs_fetch<C: 'static + HasIPFSCap + Sync + Send>(
 // TODO: can abandon oneshot b/c if I pass an mpsc stream around it auto-closes when dropped (eg, when get tree completes)
 // NOTE: does the return channel give me early failure (and thus, I think, cancellation? TODO: ask rain)
 // anamorphism - an unfolding change
-pub fn ipfs_fetch_ana_internal<C: 'static + HasIPFSCap + Sync + Send>(
+pub fn ipfs_fetch_ana_internal<C: 'static + HasIPFSCap + HasCacheCap + Sync + Send>(
     caps: Arc<C>,
     hash: IPFSHash,
     resp_chan: mpsc::Sender<Result<DagNode, DagCacheError>>, // used to send completed nodes (eagerly)
@@ -61,7 +61,7 @@ pub fn ipfs_fetch_ana_internal<C: 'static + HasIPFSCap + Sync + Send>(
 }
 
 // worker thread - uses one-shot channel to return result to avoid unbounded stack growth
-fn ipfs_fetch_worker<C: 'static + HasIPFSCap + Sync + Send>(
+fn ipfs_fetch_worker<C: 'static + HasIPFSCap + HasCacheCap + Sync + Send>(
     caps: Arc<C>,
     hash: IPFSHash,
     resp_chan: mpsc::Sender<Result<DagNode, DagCacheError>>,
@@ -70,8 +70,7 @@ fn ipfs_fetch_worker<C: 'static + HasIPFSCap + Sync + Send>(
     let resp_chan_2 = resp_chan.clone(); // FIXME: async/await...
     let caps2 = caps.clone();
 
-    caps.as_ref()
-        .ipfs_get(hash.clone())
+    get_and_cache(caps, hash.clone())
         .then(move |res| -> BoxFuture<Vec<IPFSHeader>, ()> {
             match res {
                 Ok(node) => {

@@ -1,5 +1,6 @@
 use crate::capabilities::HasCacheCap;
 use crate::capabilities::HasIPFSCap;
+use crate::capabilities::lib::put_and_cache;
 use crate::lib::BoxFuture;
 use crate::types::api::bulk_put;
 use crate::types::errors::DagCacheError;
@@ -8,7 +9,6 @@ use crate::types::validated_tree::ValidatedTree;
 use futures::future;
 use futures::future::Future;
 use futures::sync::oneshot;
-use std::convert::AsRef;
 use std::sync::Arc;
 use tokio;
 use tracing::info;
@@ -26,7 +26,7 @@ pub fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
 }
 
 // unsafe b/c it can take any 'focus' ClientSideHash and not just the root node of tree
-pub fn ipfs_publish_cata_unsafe<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
+fn ipfs_publish_cata_unsafe<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     tree: Arc<ValidatedTree>, // todo use async/await I guess, mb can avoid needing Arc? ugh
     node: bulk_put::DagNode,
@@ -91,25 +91,15 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
             // might be a bit of an approximation, but w/e
             let size = size + dag_node.links.iter().map(|x| x.size).sum::<u64>();
 
-            caps.as_ref()
-                .ipfs_put(dag_node.clone())
-                .then(move |res| match res {
-                    Ok(hash) => {
-                        caps.as_ref().cache_put(hash.clone(), dag_node.clone());
 
-                        let chan_send_res = chan.send(Ok((size, hash)));
-                        if let Err(err) = chan_send_res {
-                            info!("failed oneshot channel send {:?}", err);
-                        };
-                        futures::future::ok(())
-                    }
-                    Err(err) => {
-                        let chan_send_res = chan.send(Err(err));
-                        if let Err(err) = chan_send_res {
-                            info!("failed oneshot channel send {:?}", err);
-                        };
-                        futures::future::ok(())
-                    }
+            put_and_cache(caps.clone(), dag_node)
+                .then(move |res| {
+                    let chan_send_res = chan.send(res.map(|hash| (size, hash)));
+                    if let Err(err) = chan_send_res {
+                        info!("failed oneshot channel send {:?}", err);
+                    };
+                    futures::future::ok(())
+
                 })
         })
         .map_err(|_| ())

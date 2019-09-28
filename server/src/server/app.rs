@@ -1,5 +1,6 @@
 use crate::capabilities::HasCacheCap;
 use crate::capabilities::HasIPFSCap;
+use crate::capabilities::lib::put_and_cache;
 use crate::lib::BoxFuture;
 use crate::server::batch_fetch;
 use crate::server::batch_upload;
@@ -81,12 +82,7 @@ impl<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static> server::IpfsCache for 
 
                 let caps = self.caps.clone();
 
-                let f = caps
-                    .ipfs_put(domain_node.clone())
-                    .map(move |hp: ipfs::IPFSHash| {
-                        caps.cache_put(hp.clone(), domain_node);
-                        hp
-                    })
+                let f = put_and_cache(caps, domain_node)
                     .map(|hash| {
                         let proto_hash = hash.into_proto();
                         Response::new(proto_hash)

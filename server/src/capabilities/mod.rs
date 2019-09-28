@@ -1,4 +1,5 @@
 pub mod ipfs_store;
+pub mod lib;
 pub mod lru_cache;
 pub mod runtime;
 
