@@ -1,9 +1,9 @@
+use crate::capabilities::lib::put_and_cache;
 use crate::capabilities::HasCacheCap;
 use crate::capabilities::HasIPFSCap;
-use crate::capabilities::lib::put_and_cache;
 use crate::lib::BoxFuture;
-use crate::server::batch_fetch;
-use crate::server::batch_upload;
+use crate::server::batch_get;
+use crate::server::batch_put;
 use crate::server::opportunistic_get;
 use crate::types;
 use crate::types::errors::DagCacheError;
@@ -58,7 +58,7 @@ impl<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static> server::IpfsCache for 
     fn get_nodes(&mut self, request: Request<IpfsHash>) -> Self::GetNodesFuture {
         match ipfs::IPFSHash::from_proto(request.into_inner()) {
             Ok(domain_hash) => {
-                let s = batch_fetch::ipfs_fetch(self.caps.clone(), domain_hash)
+                let s = batch_get::ipfs_fetch(self.caps.clone(), domain_hash)
                     .map(|n: ipfs::DagNode| n.into_proto())
                     .map_err(|domain_err| domain_err.into_status());
                 let resp: Response<Self::GetNodesStream> = Response::new(Box::new(s));
@@ -106,7 +106,7 @@ impl<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static> server::IpfsCache for 
                 info!("dag cache put handler");
                 let caps = self.caps.clone();
 
-                let f = batch_upload::ipfs_publish_cata(caps, bulk_put_req.validated_tree)
+                let f = batch_put::ipfs_publish_cata(caps, bulk_put_req.validated_tree)
                     .map(|(_size, hash)| {
                         let proto_hash = hash.into_proto();
                         Response::new(proto_hash)

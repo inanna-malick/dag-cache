@@ -34,13 +34,10 @@ pub fn put_and_cache<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(
     caps: Arc<C>,
     node: ipfs::DagNode,
 ) -> BoxFuture<ipfs::IPFSHash, DagCacheError> {
-
-    let f = caps
-        .ipfs_put(node.clone())
-        .map(move |hp: ipfs::IPFSHash| {
-            caps.cache_put(hp.clone(), node);
-            hp
-        });
+    let f = caps.ipfs_put(node.clone()).map(move |hp: ipfs::IPFSHash| {
+        caps.cache_put(hp.clone(), node);
+        hp
+    });
 
     Box::new(f)
 }

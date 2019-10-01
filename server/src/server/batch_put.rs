@@ -1,6 +1,6 @@
+use crate::capabilities::lib::put_and_cache;
 use crate::capabilities::HasCacheCap;
 use crate::capabilities::HasIPFSCap;
-use crate::capabilities::lib::put_and_cache;
 use crate::lib::BoxFuture;
 use crate::types::api::bulk_put;
 use crate::types::errors::DagCacheError;
@@ -25,6 +25,7 @@ pub fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     ipfs_publish_cata_unsafe(caps, tree, focus)
 }
 
+
 // unsafe b/c it can take any 'focus' ClientSideHash and not just the root node of tree
 fn ipfs_publish_cata_unsafe<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
@@ -39,7 +40,6 @@ fn ipfs_publish_cata_unsafe<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>
         .map_err(|_| DagCacheError::UnexpectedError {
             msg: "one shot channel cancelled".to_string(),
         }) // one-shot channel cancelled
-        .then(move |x| x)
         .and_then(|res| match res {
             Ok(res) => future::ok(res),
             Err(err) => future::err(err),
@@ -51,20 +51,25 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     chan: oneshot::Sender<Result<(u64, IPFSHash), DagCacheError>>,
     tree: Arc<ValidatedTree>,
+    // TODO: pass around pointers to node in stack frame (hm keys) instead of nodes
+    // OR NOT: struct is quite small, even if the owned-by-it vec of u8/vec of links is big
+    // TODO: ask rain
     node: bulk_put::DagNode,
 ) -> impl Future<Item = (), Error = ()> + 'static + Send {
     let bulk_put::DagNode { data, links } = node;
 
     let size = data.0.len() as u64;
 
-    // todo: s/fetches/uploads? yah.
-    let link_fetches: Vec<_> = links
+    let link_uploads: Vec<_> = links
         .into_iter()
         .map({
             |x| -> BoxFuture<IPFSHeader, DagCacheError> {
                 match x {
                     bulk_put::DagNodeLink::Local(client_side_hash) => {
-                        // NOTE: could be more efficient by removing from node but would break guarantees
+                        // NOTE: could be more efficient by removing node from tree but would break
+                        // guarantees provided by ValidatedTree (by removing nodes)
+                        // NOTE: not possible, really - would need Mut access to the hashmap to do that
+
                         // unhandled deref failure, known to be safe b/c of validated tree wrapper
                         let node = tree.nodes[&client_side_hash].clone();
 
@@ -82,25 +87,22 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
         })
         .collect();
 
-    let joined_link_fetches = futures::future::join_all(link_fetches);
+    let joined_link_uploads = futures::future::join_all(link_uploads);
 
-    joined_link_fetches
+    joined_link_uploads
         .and_then(move |links: Vec<IPFSHeader>| {
             let dag_node = DagNode { data, links };
 
             // might be a bit of an approximation, but w/e
             let size = size + dag_node.links.iter().map(|x| x.size).sum::<u64>();
 
-
-            put_and_cache(caps.clone(), dag_node)
-                .then(move |res| {
-                    let chan_send_res = chan.send(res.map(|hash| (size, hash)));
-                    if let Err(err) = chan_send_res {
-                        info!("failed oneshot channel send {:?}", err);
-                    };
-                    futures::future::ok(())
-
-                })
+            put_and_cache(caps.clone(), dag_node).then(move |res| {
+                let chan_send_res = chan.send(res.map(|hash| (size, hash)));
+                if let Err(err) = chan_send_res {
+                    info!("failed oneshot channel send {:?}", err);
+                };
+                futures::future::ok(())
+            })
         })
         .map_err(|_| ())
 }

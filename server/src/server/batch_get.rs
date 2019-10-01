@@ -1,6 +1,6 @@
+use crate::capabilities::lib::get_and_cache;
 use crate::capabilities::{HasCacheCap, HasIPFSCap};
 use crate::lib::BoxFuture;
-use crate::capabilities::lib::get_and_cache;
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
 use chashmap::CHashMap;

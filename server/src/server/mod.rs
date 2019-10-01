@@ -1,6 +1,6 @@
 pub mod app;
-pub mod batch_fetch;
-pub mod batch_upload;
+pub mod batch_get;
+pub mod batch_put;
 pub mod opportunistic_get;
 
 use crate::capabilities::HasCacheCap;
