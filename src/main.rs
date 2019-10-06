@@ -1,5 +1,4 @@
 #![deny(warnings, rust_2018_idioms)]
-
 mod capabilities;
 mod lib;
 mod opts;
@@ -8,7 +7,16 @@ mod types;
 
 use opts::Opt;
 use structopt::StructOpt;
-use tracing::{info, span, Level};
+use tracing::{error, info, span, Level};
+use crate::capabilities::HasCacheCap;
+use crate::capabilities::HasIPFSCap;
+use crate::server::app;
+use crate::types::grpc::server::IpfsCacheServer;
+use futures::{Future, Stream};
+use std::sync::Arc;
+use tokio::net::TcpListener;
+use tower_hyper::server::{Http, Server};
+
 
 fn main() {
     let opt = Opt::from_args();
@@ -24,5 +32,36 @@ fn main() {
     let _enter = span.enter();
 
     info!("initializing server on {}", bind_to);
-    server::serve(caps, bind_to)
+    serve(caps, bind_to)
+}
+
+fn serve<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(caps: C, bind_to: String) {
+    let app = app::Server {
+        caps: Arc::new(caps),
+    };
+    let new_service = IpfsCacheServer::new(app);
+
+    let mut server = Server::new(new_service);
+    let http = Http::new().http2_only(true).clone();
+
+    let addr = bind_to.parse().unwrap();
+    let bind = TcpListener::bind(&addr).expect("bind");
+
+    info!("listining on {:?}", addr);
+
+    let serve = bind
+        .incoming()
+        .for_each(move |sock| {
+            if let Err(e) = sock.set_nodelay(true) {
+                return Err(e);
+            }
+
+            let serve = server.serve_with(sock, http.clone());
+            tokio::spawn(serve.map_err(|e| error!("h2 error: {:?}", e)));
+
+            Ok(())
+        })
+        .map_err(|e| error!("accept error: {}", e));
+
+    tokio::run(serve);
 }

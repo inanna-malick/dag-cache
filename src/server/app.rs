@@ -14,21 +14,21 @@ use std::sync::Arc;
 use tower_grpc::{Request, Response};
 use tracing::info;
 
-pub struct App<C> {
+pub struct Server<C> {
     pub caps: Arc<C>,
 }
 
 // not sure why but derived Clone was trying to clone C instead of the Arc,
 // this shouldn't really be required as an explicit instance
-impl<C> Clone for App<C> {
+impl<C> Clone for Server<C> {
     fn clone(&self) -> Self {
-        App {
+        Server {
             caps: self.caps.clone(),
         }
     }
 }
 
-impl<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static> server::IpfsCache for App<C> {
+impl<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static> server::IpfsCache for Server<C> {
     type GetNodeFuture = BoxFuture<Response<GetResp>, tower_grpc::Status>;
 
     // note: trait requires mut here? ideally would allow non-mut as impl
