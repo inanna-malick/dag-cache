@@ -5,6 +5,7 @@ use crate::types::api::bulk_put;
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
 use crate::types::validated_tree::ValidatedTree;
+use futures::future::{FutureExt, TryFutureExt};
 use futures01::future;
 use futures01::future::Future;
 use futures01::sync::oneshot;
@@ -73,6 +74,7 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap +
                         // unhandled deref failure, known to be safe b/c of validated tree wrapper
                         let node = tree.nodes[&client_side_hash].clone();
 
+                        // todo: figure out how to get this as 100% async
                         let f = ipfs_publish_cata_unsafe(caps.clone(), tree.clone(), node.clone())
                             .map(move |(size, hash)| IPFSHeader {
                                 name: client_side_hash.to_string(),
@@ -98,13 +100,16 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap +
             // might be a bit of an approximation, but w/e
             let size = size + dag_node.links.iter().map(|x| x.size).sum::<u64>();
 
-            put_and_cache(caps.clone(), dag_node).then(move |res| {
-                let chan_send_res = chan.send(res.map(|hash| (size, hash)));
-                if let Err(err) = chan_send_res {
-                    info!("failed oneshot channel send {:?}", err);
-                };
-                futures01::future::ok(())
-            })
+            put_and_cache(caps.clone(), dag_node)
+                .boxed()
+                .compat()
+                .then(move |res| {
+                    let chan_send_res = chan.send(res.map(|hash| (size, hash)));
+                    if let Err(err) = chan_send_res {
+                        info!("failed oneshot channel send {:?}", err);
+                    };
+                    futures01::future::ok(())
+                })
         })
         .map_err(|_| ())
 }
@@ -112,13 +117,17 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap +
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capabilities::{CacheCapability, HasCacheCap, HasIPFSCap, IPFSCapability, HasTelemetryCap, TelemetryCapability, Event};
+    use crate::capabilities::{
+        CacheCapability, Event, HasCacheCap, HasIPFSCap, HasTelemetryCap, IPFSCapability,
+        TelemetryCapability,
+    };
     use crate::lib;
     use crate::types::api::ClientSideHash;
     use crate::types::encodings::{Base58, Base64};
     use crate::types::errors::DagCacheError;
     use crate::types::ipfs::{DagNode, IPFSHash};
     use crate::types::validated_tree::ValidatedTree;
+    use async_trait::async_trait;
     use hashbrown::HashMap;
     use std::sync::Mutex;
 
@@ -137,15 +146,15 @@ mod tests {
     }
 
     // TODO: separate read/write caps to simplify writing this?
-    // TODO: would probably be easier to mock out if this was a closure instead of a trait
+    #[async_trait]
     impl IPFSCapability for MockIPFS {
-        fn get(&self, k: IPFSHash) -> BoxFuture<DagNode, DagCacheError> {
+        async fn get(&self, k: IPFSHash) -> Result<DagNode, DagCacheError> {
             let map = self.0.lock().unwrap();
             let v = map.get(&k).unwrap(); // fail if not found in map
-            Box::new(futures01::future::ok(v.clone()))
+            Ok(v.clone())
         }
 
-        fn put(&self, v: DagNode) -> BoxFuture<IPFSHash, DagCacheError> {
+        async fn put(&self, v: DagNode) -> Result<IPFSHash, DagCacheError> {
             let mut map = self.0.lock().unwrap(); // fail on mutex poisoned
 
             // use map len (monotonic increasing) to provide unique hash ID
@@ -153,7 +162,7 @@ mod tests {
 
             map.insert(hash.clone(), v);
 
-            Box::new(futures01::future::ok(hash))
+            Ok(hash)
         }
     }
 

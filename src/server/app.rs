@@ -9,11 +9,11 @@ use crate::types::errors::DagCacheError;
 use crate::types::grpc::{server, BulkPutReq, GetResp, IpfsHash, IpfsNode};
 use crate::types::ipfs;
 use futures::future::{FutureExt, TryFutureExt};
+use futures::stream::TryStreamExt;
 use futures01::{Future, Stream};
 use std::sync::Arc;
 use tower_grpc::{Request, Response};
 use tracing::info;
-use futures::stream::TryStreamExt;
 
 pub struct Server<C> {
     pub caps: Arc<C>,
@@ -91,6 +91,8 @@ impl<C: HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send + 'static> serv
                 let caps = self.caps.clone();
 
                 let f = put_and_cache(caps, domain_node)
+                    .boxed()
+                    .compat()
                     .map(|hash| {
                         let proto_hash = hash.into_proto();
                         Response::new(proto_hash)

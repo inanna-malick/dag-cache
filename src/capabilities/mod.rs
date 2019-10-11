@@ -4,27 +4,35 @@ pub mod lru_cache;
 pub mod runtime;
 pub mod telemetry;
 
-use crate::lib::BoxFuture;
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs;
+use async_trait::async_trait;
 
 // remote node store
-pub trait IPFSCapability {
-    fn get(&self, k: ipfs::IPFSHash) -> BoxFuture<ipfs::DagNode, DagCacheError>;
-    fn put(&self, v: ipfs::DagNode) -> BoxFuture<ipfs::IPFSHash, DagCacheError>;
+#[async_trait]
+pub trait IPFSCapability
+where
+    Self: std::marker::Send,
+{
+    async fn get(&self, k: ipfs::IPFSHash) -> Result<ipfs::DagNode, DagCacheError>;
+    async fn put(&self, v: ipfs::DagNode) -> Result<ipfs::IPFSHash, DagCacheError>;
 }
 
-pub trait HasIPFSCap {
-    type Output: IPFSCapability;
+#[async_trait]
+pub trait HasIPFSCap
+where
+    Self: std::marker::Send,
+{
+    type Output: IPFSCapability + Sync;
 
     fn ipfs_caps(&self) -> &Self::Output;
 
-    fn ipfs_get(&self, k: ipfs::IPFSHash) -> BoxFuture<ipfs::DagNode, DagCacheError> {
-        self.ipfs_caps().get(k)
+    async fn ipfs_get(&self, k: ipfs::IPFSHash) -> Result<ipfs::DagNode, DagCacheError> {
+        self.ipfs_caps().get(k).await
     }
 
-    fn ipfs_put(&self, v: ipfs::DagNode) -> BoxFuture<ipfs::IPFSHash, DagCacheError> {
-        self.ipfs_caps().put(v)
+    async fn ipfs_put(&self, v: ipfs::DagNode) -> Result<ipfs::IPFSHash, DagCacheError> {
+        self.ipfs_caps().put(v).await
     }
 }
 

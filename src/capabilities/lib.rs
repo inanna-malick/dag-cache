@@ -1,9 +1,6 @@
 use crate::capabilities::{Event, HasCacheCap, HasIPFSCap, HasTelemetryCap};
-use crate::lib::BoxFuture;
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs;
-use futures::compat::Future01CompatExt;
-use futures01::future::Future;
 use std::sync::Arc;
 use tracing::info;
 
@@ -25,7 +22,7 @@ pub async fn get_and_cache<
                                  // todo: unify w/ tracing span/event code via suscriber
             caps.report_telemetry(Event::CacheMiss(k.clone()));
 
-            let dag_node = caps.ipfs_get(k.clone()).compat().await?;
+            let dag_node = caps.ipfs_get(k.clone()).await?;
 
             info!("writing result of post cache miss lookup to cache");
             caps.cache_put(k.clone(), dag_node.clone());
@@ -36,14 +33,15 @@ pub async fn get_and_cache<
     }
 }
 
-pub fn put_and_cache<C: HasCacheCap + HasIPFSCap + HasTelemetryCap + Sync + Send + 'static>(
+pub async fn put_and_cache<
+    C: HasCacheCap + HasIPFSCap + HasTelemetryCap + Sync + Send + 'static,
+>(
     caps: Arc<C>,
     node: ipfs::DagNode,
-) -> BoxFuture<ipfs::IPFSHash, DagCacheError> {
-    let f = caps.ipfs_put(node.clone()).map(move |hp: ipfs::IPFSHash| {
-        caps.cache_put(hp.clone(), node);
-        hp
-    });
+) -> Result<ipfs::IPFSHash, DagCacheError> {
+    let hash = caps.ipfs_put(node.clone()).await?;
 
-    Box::new(f)
+    caps.cache_put(hash.clone(), node);
+
+    Ok(hash)
 }
