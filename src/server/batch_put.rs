@@ -1,6 +1,5 @@
 use crate::capabilities::lib::put_and_cache;
-use crate::capabilities::HasCacheCap;
-use crate::capabilities::HasIPFSCap;
+use crate::capabilities::{HasCacheCap, HasIPFSCap, HasTelemetryCap};
 use crate::lib::BoxFuture;
 use crate::types::api::bulk_put;
 use crate::types::errors::DagCacheError;
@@ -15,7 +14,7 @@ use tracing::info;
 
 // catamorphism - a consuming change
 // recursively publish DAG node tree to IPFS, starting with leaf nodes
-pub fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
+pub fn ipfs_publish_cata<C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     tree: ValidatedTree,
 ) -> impl Future<Item = (u64, IPFSHash), Error = DagCacheError> + 'static + Send {
@@ -25,9 +24,10 @@ pub fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     ipfs_publish_cata_unsafe(caps, tree, focus)
 }
 
-
 // unsafe b/c it can take any 'focus' ClientSideHash and not just the root node of tree
-fn ipfs_publish_cata_unsafe<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
+fn ipfs_publish_cata_unsafe<
+    C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send,
+>(
     caps: Arc<C>,
     tree: Arc<ValidatedTree>, // todo use async/await I guess, mb can avoid needing Arc? ugh
     node: bulk_put::DagNode,
@@ -47,7 +47,7 @@ fn ipfs_publish_cata_unsafe<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>
 }
 
 // worker thread - uses one-shot channel to return result to avoid unbounded stack growth
-fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
+fn ipfs_publish_worker<C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     chan: oneshot::Sender<Result<(u64, IPFSHash), DagCacheError>>,
     tree: Arc<ValidatedTree>,

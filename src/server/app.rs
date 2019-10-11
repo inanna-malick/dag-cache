@@ -1,6 +1,5 @@
 use crate::capabilities::lib::put_and_cache;
-use crate::capabilities::HasCacheCap;
-use crate::capabilities::HasIPFSCap;
+use crate::capabilities::{HasCacheCap, HasIPFSCap, HasTelemetryCap};
 use crate::lib::BoxFuture;
 use crate::server::batch_get;
 use crate::server::batch_put;
@@ -28,7 +27,9 @@ impl<C> Clone for Server<C> {
     }
 }
 
-impl<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static> server::IpfsCache for Server<C> {
+impl<C: HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send + 'static> server::IpfsCache
+    for Server<C>
+{
     type GetNodeFuture = BoxFuture<Response<GetResp>, tower_grpc::Status>;
 
     // note: trait requires mut here? ideally would allow non-mut as impl

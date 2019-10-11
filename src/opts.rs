@@ -1,6 +1,7 @@
 use crate::capabilities::ipfs_store::IPFSNode;
 use crate::capabilities::lru_cache::Cache;
 use crate::capabilities::runtime::Runtime;
+use crate::capabilities::telemetry::Telemetry;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -18,8 +19,11 @@ pub struct Opt {
     ipfs_port: u64,
 
     #[structopt(short = "n", long = "max_cache_entries", default_value = "128")]
-    // randomly chosen number..
+    // arbitrarily chosen number..
     max_cache_entries: usize,
+
+    #[structopt(short = "h", long = "honeycomb_key")]
+    honeycomb_key: String,
 }
 
 impl Opt {
@@ -31,8 +35,14 @@ impl Opt {
             &ipfs_node
         )));
 
+        let telemetry = Telemetry::new(self.honeycomb_key);
+
         let cache = Cache::new(self.max_cache_entries);
 
-        Runtime { cache, ipfs_node }
+        Runtime {
+            telemetry,
+            cache,
+            ipfs_node,
+        }
     }
 }

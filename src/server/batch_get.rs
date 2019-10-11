@@ -1,5 +1,5 @@
 use crate::capabilities::lib::get_and_cache;
-use crate::capabilities::{HasCacheCap, HasIPFSCap};
+use crate::capabilities::{HasCacheCap, HasIPFSCap, HasTelemetryCap};
 use crate::lib::BoxFuture;
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
@@ -13,7 +13,7 @@ use tokio;
 use tracing::info;
 
 // TODO: add fn that does get-and-cache, req's both caps
-pub fn ipfs_fetch<C: 'static + HasIPFSCap + HasCacheCap + Sync + Send>(
+pub fn ipfs_fetch<C: 'static + HasIPFSCap + HasTelemetryCap + HasCacheCap + Sync + Send>(
     caps: Arc<C>,
     hash: IPFSHash,
 ) -> impl Stream<Item = DagNode, Error = DagCacheError> + 'static + Send {
@@ -38,7 +38,9 @@ pub fn ipfs_fetch<C: 'static + HasIPFSCap + HasCacheCap + Sync + Send>(
 // TODO: can abandon oneshot b/c if I pass an mpsc stream around it auto-closes when dropped (eg, when get tree completes)
 // NOTE: does the return channel give me early failure (and thus, I think, cancellation? TODO: ask rain)
 // anamorphism - an unfolding change
-pub fn ipfs_fetch_ana_internal<C: 'static + HasIPFSCap + HasCacheCap + Sync + Send>(
+pub fn ipfs_fetch_ana_internal<
+    C: 'static + HasIPFSCap + HasTelemetryCap + HasCacheCap + Sync + Send,
+>(
     caps: Arc<C>,
     hash: IPFSHash,
     resp_chan: mpsc::Sender<Result<DagNode, DagCacheError>>, // used to send completed nodes (eagerly)
@@ -61,7 +63,7 @@ pub fn ipfs_fetch_ana_internal<C: 'static + HasIPFSCap + HasCacheCap + Sync + Se
 }
 
 // worker thread - uses one-shot channel to return result to avoid unbounded stack growth
-fn ipfs_fetch_worker<C: 'static + HasIPFSCap + HasCacheCap + Sync + Send>(
+fn ipfs_fetch_worker<C: 'static + HasIPFSCap + HasTelemetryCap + HasCacheCap + Sync + Send>(
     caps: Arc<C>,
     hash: IPFSHash,
     resp_chan: mpsc::Sender<Result<DagNode, DagCacheError>>,
@@ -77,7 +79,6 @@ fn ipfs_fetch_worker<C: 'static + HasIPFSCap + HasCacheCap + Sync + Send>(
                     let links = node.links.clone();
                     // todo: caching should be baked into ipfs cap instead of being managed like this
                     // caps.as_ref().cache_put(hash.clone(), node);
-
                     // this way will only recurse on & traverse links if writing to channel doesn't fail
                     let f = resp_chan.send(Ok(node)).map(|_| links).map_err(|_| {
                         // idk what to do if sending fails here, so just err ()

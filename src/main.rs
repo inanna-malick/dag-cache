@@ -5,18 +5,16 @@ mod opts;
 mod server;
 mod types;
 
-use opts::Opt;
-use structopt::StructOpt;
-use tracing::{error, info, span, Level};
-use crate::capabilities::HasCacheCap;
-use crate::capabilities::HasIPFSCap;
+use crate::capabilities::{HasCacheCap, HasIPFSCap, HasTelemetryCap};
 use crate::server::app;
 use crate::types::grpc::server::IpfsCacheServer;
 use futures::{Future, Stream};
+use opts::Opt;
 use std::sync::Arc;
+use structopt::StructOpt;
 use tokio::net::TcpListener;
 use tower_hyper::server::{Http, Server};
-
+use tracing::{error, info, span, Level};
 
 fn main() {
     let opt = Opt::from_args();
@@ -35,7 +33,10 @@ fn main() {
     serve(caps, bind_to)
 }
 
-fn serve<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(caps: C, bind_to: String) {
+fn serve<C: HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send + 'static>(
+    caps: C,
+    bind_to: String,
+) {
     let app = app::Server {
         caps: Arc::new(caps),
     };
