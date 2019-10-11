@@ -1,27 +1,21 @@
 use crate::capabilities::lib::get_and_cache;
 use crate::capabilities::{HasCacheCap, HasIPFSCap, HasTelemetryCap};
-use crate::lib::BoxFuture;
 use crate::types::api as api_types;
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs as ipfs_types;
-use futures::future::Future;
 use std::collections::VecDeque;
 use std::sync::Arc;
-use tracing::{info, span, Level};
 
-pub fn get<C: 'static + HasIPFSCap + HasTelemetryCap + HasCacheCap + Send + Sync>(
+pub async fn get<C: 'static + HasIPFSCap + HasTelemetryCap + HasCacheCap + Send + Sync>(
     caps: Arc<C>,
     k: ipfs_types::IPFSHash,
-) -> BoxFuture<api_types::get::Resp, DagCacheError> {
-    let span = span!(Level::TRACE, "dag cache get handler");
-    let _enter = span.enter();
-    info!("attempt cache get");
+) -> Result<api_types::get::Resp, DagCacheError> {
+    let dag_node = get_and_cache(caps.clone(), k.clone()).await?;
 
-    let f = get_and_cache(caps.clone(), k.clone()).map(move |dag_node| {
-        // see if have any of the referenced subnodes in the local cache
-        extend(caps.as_ref(), dag_node)
-    });
-    Box::new(f)
+    // use cache to extend DAG node by following links as long as they exist in-memory
+    let extended = extend(caps.as_ref(), dag_node);
+
+    Ok(extended)
 }
 
 // TODO: figure out traversal termination strategy - don't want to return whole cache in one resp

@@ -8,10 +8,12 @@ use crate::types;
 use crate::types::errors::DagCacheError;
 use crate::types::grpc::{server, BulkPutReq, GetResp, IpfsHash, IpfsNode};
 use crate::types::ipfs;
-use futures::{Future, Stream};
+use futures::future::{FutureExt, TryFutureExt};
+use futures01::{Future, Stream};
 use std::sync::Arc;
 use tower_grpc::{Request, Response};
 use tracing::info;
+use futures::stream::TryStreamExt;
 
 pub struct Server<C> {
     pub caps: Arc<C>,
@@ -27,6 +29,24 @@ impl<C> Clone for Server<C> {
     }
 }
 
+async fn get_node_async<C: HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send + 'static>(
+    caps: Arc<C>,
+    request: Request<IpfsHash>,
+) -> Result<Response<GetResp>, tower_grpc::Status> {
+    let request = ipfs::IPFSHash::from_proto(request.into_inner()).map_err(|de| {
+        let e = DagCacheError::ProtoDecodingError(de);
+        e.into_status()
+    })?;
+
+    let resp = opportunistic_get::get(caps, request)
+        .await
+        .map_err(|de| de.into_status())?;
+
+    let resp = resp.into_proto();
+    let resp = Response::new(resp);
+    Ok(resp)
+}
+
 impl<C: HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send + 'static> server::IpfsCache
     for Server<C>
 {
@@ -34,23 +54,9 @@ impl<C: HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send + 'static> serv
 
     // note: trait requires mut here? ideally would allow non-mut as impl
     fn get_node(&mut self, request: Request<IpfsHash>) -> Self::GetNodeFuture {
-        info!("HIT GET NODE");
-        match ipfs::IPFSHash::from_proto(request.into_inner()) {
-            Ok(domain_hash) => {
-                let f = opportunistic_get::get(self.caps.clone(), domain_hash)
-                    .map(|get_resp| {
-                        let proto_get_resp = get_resp.into_proto();
-                        Response::new(proto_get_resp)
-                    })
-                    .map_err(|domain_err| domain_err.into_status());
-                Box::new(f)
-            }
-            Err(de) => {
-                let e = DagCacheError::ProtoDecodingError(de);
-                let f = futures::future::err(e.into_status());
-                Box::new(f)
-            }
-        }
+        // note: boxed() uses box to provide UnPin - not == to Box::new
+        let f = get_node_async(self.caps.clone(), request).boxed().compat();
+        Box::new(f)
     }
 
     type GetNodesStream = Box<dyn Stream<Item = IpfsNode, Error = tower_grpc::Status> + Send>;
@@ -60,15 +66,16 @@ impl<C: HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send + 'static> serv
         match ipfs::IPFSHash::from_proto(request.into_inner()) {
             Ok(domain_hash) => {
                 let s = batch_get::ipfs_fetch(self.caps.clone(), domain_hash)
+                    .compat()
                     .map(|n: ipfs::DagNode| n.into_proto())
                     .map_err(|domain_err| domain_err.into_status());
                 let resp: Response<Self::GetNodesStream> = Response::new(Box::new(s));
-                Box::new(futures::future::ok(resp))
+                Box::new(futures01::future::ok(resp))
             }
 
             Err(de) => {
                 let e = DagCacheError::ProtoDecodingError(de);
-                let f = futures::future::err(e.into_status());
+                let f = futures01::future::err(e.into_status());
                 Box::new(f)
             }
         }
@@ -93,7 +100,7 @@ impl<C: HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send + 'static> serv
             }
             Err(de) => {
                 let e = DagCacheError::ProtoDecodingError(de);
-                let f = futures::future::err(e.into_status());
+                let f = futures01::future::err(e.into_status());
                 Box::new(f)
             }
         }
@@ -118,7 +125,7 @@ impl<C: HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send + 'static> serv
             }
             Err(de) => {
                 let e = DagCacheError::ProtoDecodingError(de);
-                let f = futures::future::err(e.into_status());
+                let f = futures01::future::err(e.into_status());
                 Box::new(f)
             }
         }

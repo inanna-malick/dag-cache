@@ -3,7 +3,9 @@ use crate::lib::BoxFuture;
 use crate::types::encodings;
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs;
-use futures::future::Future;
+use futures::compat::Future01CompatExt;
+use futures::future::{FutureExt, TryFutureExt};
+use futures01::future::Future;
 use reqwest::r#async::{multipart, Client};
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -16,74 +18,90 @@ impl IPFSNode {
     pub fn new(a: reqwest::Url) -> Self { IPFSNode(a) }
 }
 
+async fn get_async(
+    mut url: reqwest::Url,
+    k: ipfs::IPFSHash,
+) -> Result<ipfs::DagNode, DagCacheError> {
+    url.set_path("api/v0/object/get");
+    url.query_pairs_mut()
+        .append_pair("data-encoding", "base64")
+        .append_pair("arg", &k.to_string());
+
+    let f = Client::new()
+        .get(url.clone())
+        .send()
+        .map_err(|e| {
+            event!(Level::ERROR,  msg = "failed getting node from IPFS", response.error = ?e);
+            DagCacheError::IPFSError
+        })
+        .and_then(|mut x| {
+            x.json().map_err(|e| {
+                event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
+                DagCacheError::IPFSJsonError
+            })
+        })
+        .map(|e: DagNode| ipfs::DagNode {
+            data: e.data,
+            links: e
+                .links
+                .into_iter()
+                .map(|IPFSHeader { hash, name, size }| ipfs::IPFSHeader { hash, name, size })
+                .collect(),
+        })
+        .instrument(
+            span!(Level::TRACE, "ipfs-get", hash_pointer = k.to_string().as_str(), url = ?url ),
+        );
+
+    f.compat().await
+}
+
+async fn put_async(
+    mut url: reqwest::Url,
+    v: ipfs::DagNode,
+) -> Result<ipfs::IPFSHash, DagCacheError> {
+    url.set_path("api/v0/object/put");
+    url.query_pairs_mut().append_pair("datafieldenc", "base64");
+
+    let v = DagNode {
+        data: v.data,
+        links: v
+            .links
+            .into_iter()
+            .map(|ipfs::IPFSHeader { hash, name, size }| IPFSHeader { hash, name, size })
+            .collect(),
+    };
+    let bytes = serde_json::to_vec(&v).expect("json _serialize_ failed (should be impossible)");
+
+    event!(Level::DEBUG, ipfs_put_body = ?std::str::from_utf8(&bytes));
+
+    let part = multipart::Part::bytes(bytes).file_name("data"); // or vice versa, idk
+    let form = multipart::Form::new().part("file", part);
+
+    let f = Client::new()
+        .post(url.clone())
+        .multipart(form)
+        .send()
+        .and_then(|mut x| x.json())
+        .map(|IPFSPutResp { hash }| hash)
+        .map_err(|e| {
+            event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
+            DagCacheError::IPFSJsonError
+        })
+        .instrument(span!(Level::TRACE, "ipfs-put", url = ?url ));
+
+    f.compat().await
+}
+
 impl IPFSCapability for IPFSNode {
     fn get(&self, k: ipfs::IPFSHash) -> BoxFuture<ipfs::DagNode, DagCacheError> {
-        let mut url = self.0.clone();
-        url.set_path("api/v0/object/get");
-        url.query_pairs_mut()
-            .append_pair("data-encoding", "base64")
-            .append_pair("arg", &k.to_string());
-
-        let f = Client::new()
-            .get(url.clone())
-            .send()
-            .map_err(|e| {
-                event!(Level::ERROR,  msg = "failed getting node from IPFS", response.error = ?e);
-                DagCacheError::IPFSError
-            })
-            .and_then(|mut x| {
-                x.json().map_err(|e| {
-                    event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
-                    DagCacheError::IPFSJsonError
-                })
-            })
-            .map(|e: DagNode| ipfs::DagNode {
-                data: e.data,
-                links: e
-                    .links
-                    .into_iter()
-                    .map(|IPFSHeader { hash, name, size }| ipfs::IPFSHeader { hash, name, size })
-                    .collect(),
-            })
-            .instrument(
-                span!(Level::TRACE, "ipfs-get", hash_pointer = k.to_string().as_str(), url = ?url ),
-            );
-
+        // note: boxed() uses box to provide UnPin - not == to Box::new
+        let f = get_async(self.0.clone(), k).boxed().compat();
         Box::new(f)
     }
 
     fn put(&self, v: ipfs::DagNode) -> BoxFuture<ipfs::IPFSHash, DagCacheError> {
-        let mut url = self.0.clone();
-        url.set_path("api/v0/object/put");
-        url.query_pairs_mut().append_pair("datafieldenc", "base64");
-
-        let v = DagNode {
-            data: v.data,
-            links: v
-                .links
-                .into_iter()
-                .map(|ipfs::IPFSHeader { hash, name, size }| IPFSHeader { hash, name, size })
-                .collect(),
-        };
-        let bytes = serde_json::to_vec(&v).expect("json _serialize_ failed (should be impossible)");
-
-        event!(Level::DEBUG, ipfs_put_body = ?std::str::from_utf8(&bytes));
-
-        let part = multipart::Part::bytes(bytes).file_name("data"); // or vice versa, idk
-        let form = multipart::Form::new().part("file", part);
-
-        let f = Client::new()
-            .post(url.clone())
-            .multipart(form)
-            .send()
-            .and_then(|mut x| x.json())
-            .map(|IPFSPutResp { hash }| hash)
-            .map_err(|e| {
-                event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
-                DagCacheError::IPFSJsonError
-            })
-            .instrument(span!(Level::TRACE, "ipfs-put", url = ?url ));
-
+        // note: boxed() uses box to provide UnPin - not == to Box::new
+        let f = put_async(self.0.clone(), v).boxed().compat();
         Box::new(f)
     }
 }
@@ -160,9 +178,9 @@ mod tests {
             })
             .and_then(move |output| {
                 if input == output {
-                    futures::future::ok(())
+                    futures01::future::ok(())
                 } else {
-                    futures::future::err(format!("input {:?} != output {:?}", input, output))
+                    futures01::future::err(format!("input {:?} != output {:?}", input, output))
                 }
             })
             .then(|r| {

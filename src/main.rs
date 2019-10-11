@@ -8,7 +8,7 @@ mod types;
 use crate::capabilities::{HasCacheCap, HasIPFSCap, HasTelemetryCap};
 use crate::server::app;
 use crate::types::grpc::server::IpfsCacheServer;
-use futures::{Future, Stream};
+use futures01::{Future, Stream};
 use opts::Opt;
 use std::sync::Arc;
 use structopt::StructOpt;

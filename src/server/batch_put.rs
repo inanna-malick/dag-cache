@@ -5,9 +5,9 @@ use crate::types::api::bulk_put;
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
 use crate::types::validated_tree::ValidatedTree;
-use futures::future;
-use futures::future::Future;
-use futures::sync::oneshot;
+use futures01::future;
+use futures01::future::Future;
+use futures01::sync::oneshot;
 use std::sync::Arc;
 use tokio;
 use tracing::info;
@@ -81,13 +81,15 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap +
                             });
                         Box::new(f)
                     }
-                    bulk_put::DagNodeLink::Remote(nh) => Box::new(futures::future::ok(nh.clone())),
+                    bulk_put::DagNodeLink::Remote(nh) => {
+                        Box::new(futures01::future::ok(nh.clone()))
+                    }
                 }
             }
         })
         .collect();
 
-    let joined_link_uploads = futures::future::join_all(link_uploads);
+    let joined_link_uploads = futures01::future::join_all(link_uploads);
 
     joined_link_uploads
         .and_then(move |links: Vec<IPFSHeader>| {
@@ -101,7 +103,7 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap +
                 if let Err(err) = chan_send_res {
                     info!("failed oneshot channel send {:?}", err);
                 };
-                futures::future::ok(())
+                futures01::future::ok(())
             })
         })
         .map_err(|_| ())
@@ -110,7 +112,7 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap +
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capabilities::{CacheCapability, HasCacheCap, HasIPFSCap, IPFSCapability};
+    use crate::capabilities::{CacheCapability, HasCacheCap, HasIPFSCap, IPFSCapability, HasTelemetryCap, TelemetryCapability, Event};
     use crate::lib;
     use crate::types::api::ClientSideHash;
     use crate::types::encodings::{Base58, Base64};
@@ -129,13 +131,18 @@ mod tests {
         fn put(&self, _k: IPFSHash, _v: DagNode) {}
     }
 
+    struct BlackHoleTelemetry;
+    impl TelemetryCapability for BlackHoleTelemetry {
+        fn report(&self, _: Event) -> () {}
+    }
+
     // TODO: separate read/write caps to simplify writing this?
     // TODO: would probably be easier to mock out if this was a closure instead of a trait
     impl IPFSCapability for MockIPFS {
         fn get(&self, k: IPFSHash) -> BoxFuture<DagNode, DagCacheError> {
             let map = self.0.lock().unwrap();
             let v = map.get(&k).unwrap(); // fail if not found in map
-            Box::new(futures::future::ok(v.clone()))
+            Box::new(futures01::future::ok(v.clone()))
         }
 
         fn put(&self, v: DagNode) -> BoxFuture<IPFSHash, DagCacheError> {
@@ -146,11 +153,11 @@ mod tests {
 
             map.insert(hash.clone(), v);
 
-            Box::new(futures::future::ok(hash))
+            Box::new(futures01::future::ok(hash))
         }
     }
 
-    struct TestCaps(MockIPFS, BlackHoleCache);
+    struct TestCaps(MockIPFS, BlackHoleCache, BlackHoleTelemetry);
 
     impl HasIPFSCap for TestCaps {
         type Output = MockIPFS;
@@ -160,6 +167,11 @@ mod tests {
     impl HasCacheCap for TestCaps {
         type Output = BlackHoleCache;
         fn cache_caps(&self) -> &BlackHoleCache { &self.1 }
+    }
+
+    impl HasTelemetryCap for TestCaps {
+        type Output = BlackHoleTelemetry;
+        fn telemetry_caps(&self) -> &BlackHoleTelemetry { &self.2 }
     }
 
     #[test]
@@ -203,7 +215,7 @@ mod tests {
         let validated_tree = ValidatedTree::validate(t3.clone(), m).expect("static test invalid");
 
         let mock_ipfs = MockIPFS(Mutex::new(HashMap::new()));
-        let caps = std::sync::Arc::new(TestCaps(mock_ipfs, BlackHoleCache));
+        let caps = std::sync::Arc::new(TestCaps(mock_ipfs, BlackHoleCache, BlackHoleTelemetry));
         let caps2 = caps.clone();
 
         let f = ipfs_publish_cata(caps, validated_tree)

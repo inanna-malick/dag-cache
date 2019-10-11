@@ -1,4 +1,4 @@
-use crate::capabilities::{TelemetryCapability, Event};
+use crate::capabilities::{Event, TelemetryCapability};
 use ::libhoney::{json, Value};
 use libhoney::FieldHolder;
 use std::collections::HashMap;
@@ -16,6 +16,9 @@ impl Event {
             }
             Event::CacheMiss(k) => {
                 data.insert("cache_miss".to_string(), json!(k.to_string()));
+            }
+            Event::CachePut(k) => {
+                data.insert("cache_put".to_string(), json!(k.to_string()));
             }
         }
 
