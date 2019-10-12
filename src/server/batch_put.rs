@@ -80,9 +80,7 @@ async fn upload_link<C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + S
 }
 
 // needed to not have async cycle? idk lmao FIXME refactor
-fn ipfs_publish_worker<
-        C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send,
-    >(
+fn ipfs_publish_worker<C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     tree: Arc<ValidatedTree>,
     // TODO: pass around pointers to node in stack frame (hm keys) instead of nodes
@@ -92,13 +90,13 @@ fn ipfs_publish_worker<
     node: bulk_put::DagNode,
 ) -> Box<dyn Future<Output = ()> + Unpin + Send> {
     let f = ipfs_publish_worker_async(caps, tree, node)
-        .map( move |res| {
-
+        .map(move |res| {
             let chan_send_res = chan.send(res);
             if let Err(err) = chan_send_res {
                 error!("failed oneshot channel send {:?}", err);
             };
-        }).boxed();
+        })
+        .boxed();
 
     Box::new(f)
 }
@@ -207,11 +205,11 @@ mod tests {
         fn telemetry_caps(&self) -> &BlackHoleTelemetry { &self.2 }
     }
 
-    #[test]
-    fn test_batch_upload() { lib::run_test(test_batch_upload_worker) }
-
     // uses mock capabilities, does not require local ipfs daemon
-    fn test_batch_upload_worker() -> BoxFuture<(), String> {
+    #[tokio::test]
+    async fn test_batch_upload() {
+        lib::init_test_env(); // tracing subscriber
+
         //build some client side 'hashes' - base58 of 1, 2, 3, 4
         let client_hashes: Vec<ClientSideHash> = (1..=4)
             .map(|x| ClientSideHash::new(Base58::from_bytes(vec![x])))
@@ -249,36 +247,33 @@ mod tests {
 
         let mock_ipfs = MockIPFS(Mutex::new(HashMap::new()));
         let caps = std::sync::Arc::new(TestCaps(mock_ipfs, BlackHoleCache, BlackHoleTelemetry));
-        let caps2 = caps.clone();
 
-        let f = ipfs_publish_cata(caps, validated_tree)
-            .map_err(|e| format!("ipfs publish cata error: {:?}", e))
-            .map(move |_| {
-                let map = (caps2.0).0.lock().unwrap();
+        let _published = ipfs_publish_cata(caps.clone(), validated_tree)
+            .await
+            .expect("ipfs publish cata error");
 
-                let uploaded_values: Vec<(Vec<ClientSideHash>, Base64)> = map
-                    .values()
-                    .map(|DagNode { links, data }| {
-                        (
-                            links
-                                .iter()
-                                .map(|x| ClientSideHash::new(Base58::from_string(&x.name).unwrap()))
-                                .collect(),
-                            data.clone(),
-                        )
-                    })
-                    .collect();
+        let map = (caps.0).0.lock().unwrap();
 
-                assert!(&uploaded_values.contains(&(vec!(), t0.data))); // t1 uploaded
-                assert!(&uploaded_values.contains(&(vec!(), t1.data))); // t2 uploaded
-                assert!(&uploaded_values.contains(&(
-                    vec!(client_hashes[0].clone(), client_hashes[1].clone()),
-                    t2.data
-                ))); // t3 uploaded
-                assert!(&uploaded_values.contains(&(vec!(client_hashes[2].clone()), t3.data)));
-                // t4 uploaded
-            });
+        let uploaded_values: Vec<(Vec<ClientSideHash>, Base64)> = map
+            .values()
+            .map(|DagNode { links, data }| {
+                (
+                    links
+                        .iter()
+                        .map(|x| ClientSideHash::new(Base58::from_string(&x.name).unwrap()))
+                        .collect(),
+                    data.clone(),
+                )
+            })
+            .collect();
 
-        Box::new(f)
+        assert!(&uploaded_values.contains(&(vec!(), t0.data))); // t1 uploaded
+        assert!(&uploaded_values.contains(&(vec!(), t1.data))); // t2 uploaded
+        assert!(&uploaded_values.contains(&(
+            vec!(client_hashes[0].clone(), client_hashes[1].clone()),
+            t2.data
+        ))); // t3 uploaded
+        assert!(&uploaded_values.contains(&(vec!(client_hashes[2].clone()), t3.data)));
+        // t4 uploaded
     }
 }

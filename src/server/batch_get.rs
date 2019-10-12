@@ -36,9 +36,9 @@ fn ipfs_fetch_ana_internal<
     to_populate.clone().upsert(
         hash,
         || {
-            tokio::spawn(async move {
-                ipfs_fetch_worker(caps, hash2, resp_chan, to_populate).await
-            });
+            tokio::spawn(
+                async move { ipfs_fetch_worker(caps, hash2, resp_chan, to_populate).await },
+            );
             ()
         },
         |()| (),

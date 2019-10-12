@@ -3,13 +3,10 @@ use crate::types::encodings;
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs;
 use async_trait::async_trait;
-use futures::compat::Future01CompatExt;
-use futures01::future::Future;
 use reqwest::r#async::{multipart, Client};
 use serde::{Deserialize, Serialize};
 use serde_json;
-use tracing::{event, span, Level};
-use tracing_futures::Instrument;
+use tracing::{event, Level};
 
 pub struct IPFSNode(reqwest::Url); //base url, copy mutated to produce specific path. should have no path component
 
@@ -26,32 +23,28 @@ impl IPFSCapability for IPFSNode {
             .append_pair("data-encoding", "base64")
             .append_pair("arg", &k.to_string());
 
-        let f = Client::new()
-            .get(url.clone())
-            .send()
-            .map_err(|e| {
-                event!(Level::ERROR,  msg = "failed getting node from IPFS", response.error = ?e);
-                DagCacheError::IPFSError
-            })
-            .and_then(|mut x| {
-                x.json().map_err(|e| {
-                    event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
-                    DagCacheError::IPFSJsonError
-                })
-            })
-            .map(|e: DagNode| ipfs::DagNode {
-                data: e.data,
-                links: e
-                    .links
-                    .into_iter()
-                    .map(|IPFSHeader { hash, name, size }| ipfs::IPFSHeader { hash, name, size })
-                    .collect(),
-            })
-            .instrument(
-                span!(Level::TRACE, "ipfs-get", hash_pointer = k.to_string().as_str(), url = ?url ),
-            );
+        // TODO: shared client? mb global in ipfs node? per thread? lmao idk.
+        let resp = Client::new().get(url.clone()).send().await.map_err(|e| {
+            event!(Level::ERROR,  msg = "failed getting node from IPFS", response.error = ?e);
+            DagCacheError::IPFSError
+        })?;
 
-        f.compat().await
+        let node: DagNode = resp.json().await.map_err(|e| {
+            event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
+            // TODO: all domain errors sent as events via telemetry from generic app wrapper
+            DagCacheError::IPFSJsonError
+        })?;
+
+        let node = ipfs::DagNode {
+            data: node.data,
+            links: node
+                .links
+                .into_iter()
+                .map(|IPFSHeader { hash, name, size }| ipfs::IPFSHeader { hash, name, size })
+                .collect(),
+        };
+
+        Ok(node)
     }
 
     async fn put(&self, v: ipfs::DagNode) -> Result<ipfs::IPFSHash, DagCacheError> {
@@ -74,19 +67,22 @@ impl IPFSCapability for IPFSNode {
         let part = multipart::Part::bytes(bytes).file_name("data"); // or vice versa, idk
         let form = multipart::Form::new().part("file", part);
 
-        let f = Client::new()
+        let resp = Client::new()
             .post(url.clone())
             .multipart(form)
             .send()
-            .and_then(|mut x| x.json())
-            .map(|IPFSPutResp { hash }| hash)
+            .await
             .map_err(|e| {
                 event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
-                DagCacheError::IPFSJsonError
-            })
-            .instrument(span!(Level::TRACE, "ipfs-put", url = ?url ));
+                DagCacheError::IPFSError
+            })?;
 
-        f.compat().await
+        let IPFSPutResp { hash } = resp.json().await.map_err(|e| {
+            event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
+            DagCacheError::IPFSJsonError
+        })?;
+
+        Ok(hash)
     }
 }
 
@@ -119,19 +115,13 @@ mod tests {
     use crate::lib;
     use crate::types::encodings::Base64;
     use crate::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
-    use futures::future::{FutureExt, TryFutureExt};
     use rand;
 
-    #[test]
-    fn test_put_and_get() {
-        lib::run_test(|| {
-            let f = test_put_and_get_worker().boxed().compat();
-            Box::new(f)
-        })
-    }
-
     // NOTE: assumes IPFS daemon running locally at localhost:5001. Daemon can be shared between tests.
-    async fn test_put_and_get_worker() -> Result<(), String> {
+    #[tokio::test]
+    async fn test_put_and_get() {
+        lib::init_test_env(); // tracing subscriber
+
         let mut random_bytes = vec![];
 
         for _ in 0..64 {
@@ -151,21 +141,10 @@ mod tests {
 
         let ipfs_node = IPFSNode::new(reqwest::Url::parse("http://localhost:5001").unwrap());
 
-        let input_hash = ipfs_node.put(input.clone()).await.map_err(|e| {
-            println!("error handler for ipfs put");
-            format!("ipfs put error: {:?}", e)
-        })?;
+        let input_hash = ipfs_node.put(input.clone()).await.expect("ipfs put error");
 
-        println!("ipfs put done, running get");
-        let output = ipfs_node
-            .get(input_hash)
-            .await
-            .map_err(|e| format!("ipfs get error: {:?}", e))?;
+        let output = ipfs_node.get(input_hash).await.expect("ipfs get error");
 
-        if input == output {
-            Ok(())
-        } else {
-            Err(format!("input {:?} != output {:?}", input, output))
-        }
+        assert!(input == output);
     }
 }

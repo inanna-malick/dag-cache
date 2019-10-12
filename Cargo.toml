@@ -17,7 +17,7 @@ tracing-subscriber = "0.1"
 lru = "0.1"
 base64 = "0.10.1"
 base58 = "0.1.0"
-reqwest = "0.9"
+reqwest = {version = "0.10.0-alpha.1", features = ["json", "default-tls"]}
 petgraph = "0.4.13" # not currently used, will be used for graph structure cache
 structopt = "0.2"
 chashmap = "2.2"
@@ -25,8 +25,6 @@ hashbrown = "0.6.*"
 
 # switching to async via compat mb?
 futures-preview = { version = "0.3.0-alpha.14", features = ["compat"] }
-# futures01 = { package = "futures", version = "0.1", optional = true }
-futures01 = { package = "futures", version = "0.1"}
 
 bytes = "0.4"
 http = "0.1"
