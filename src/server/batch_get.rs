@@ -6,16 +6,15 @@ use chashmap::CHashMap;
 use futures::channel::mpsc;
 use futures::future::{FutureExt, TryFutureExt};
 use futures::sink::SinkExt;
-use futures::stream::Stream;
 use std::sync::Arc;
 use tokio;
-use tracing::info;
+use tracing::{error, info};
 
 // TODO: add fn that does get-and-cache, req's both caps
 pub fn ipfs_fetch<C: 'static + HasIPFSCap + HasTelemetryCap + HasCacheCap + Sync + Send>(
     caps: Arc<C>,
     hash: IPFSHash,
-) -> impl Stream<Item = Result<DagNode, DagCacheError>> + 'static + Send {
+) -> mpsc::Receiver<Result<DagNode, DagCacheError>> {
     info!("starting recursive fetch for root hash {:?}", &hash);
     let (send, receive) = mpsc::channel(128); // randomly chose this channel buffer size..
     let memoizer = Arc::new(CHashMap::new());
@@ -38,11 +37,9 @@ fn ipfs_fetch_ana_internal<
     to_populate.upsert(
         hash,
         || {
-            tokio::spawn(
-                ipfs_fetch_worker(caps, hash2, resp_chan, to_populate.clone())
-                    .boxed()
-                    .compat(),
-            );
+            tokio::spawn(async {
+                ipfs_fetch_worker(caps, hash2, resp_chan, to_populate.clone()).await
+            });
             ()
         },
         |()| (),
@@ -57,10 +54,7 @@ async fn ipfs_fetch_worker<
     hash: IPFSHash,
     mut resp_chan: mpsc::Sender<Result<DagNode, DagCacheError>>,
     to_populate: Arc<CHashMap<IPFSHash, ()>>, // used to memoize async fetches
-) -> Result<(), ()> {
-    // let resp_chan_2 = resp_chan.clone(); // FIXME: async/await...
-    // let caps2 = caps.clone();
-
+) -> () {
     let res = get_and_cache(caps.clone(), hash.clone()).await;
     match res {
         Ok(node) => {
@@ -71,7 +65,7 @@ async fn ipfs_fetch_worker<
             // short circuit if failure
             // NOTE: should have some way to signal that this is an error instead of just failing?
             //       but the channel's broken so I can't.
-            let sr: Result<(), ()> = resp_chan.send(Ok(node)).await.map_err(|_| ());
+            let sr = resp_chan.send(Ok(node)).await;
 
             // todo: weird type errors (async/await?), refactor later
             match sr {
@@ -84,14 +78,17 @@ async fn ipfs_fetch_worker<
                             to_populate.clone(),
                         );
                     }
-                    Ok(())
                 }
-                Err(()) => Err(()),
+                Err(e) => {
+                    error!("failed sending resp via mpsc due to {:?}", e);
+                }
             }
         }
         Err(e) => {
-            let sr: Result<(), ()> = resp_chan.send(Err(e)).await.map_err(|_| ()); // what err type to use? idk
-            sr
+            let sr = resp_chan.send(Err(e)).await;
+            if let Err(e) = sr {
+                error!("failed sending resp via mpsc due to {:?}", e);
+            };
         }
     }
 }

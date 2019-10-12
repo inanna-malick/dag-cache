@@ -31,10 +31,16 @@ futures01 = { package = "futures", version = "0.1"}
 bytes = "0.4"
 http = "0.1"
 prost = "0.5"
-tokio = "0.1"
+prost-derive = "0.5"
+
+tokio = "0.2.0-alpha.6"
+
+# tokio = "0.1"
 tower-hyper = "0.1"
 hyper = "0.12"
-tower-grpc = { version = "0.1", features = ["tower-hyper"] }
+# tower-grpc = { version = "0.1", features = ["tower-hyper"] }
+tonic = "0.1.0-alpha.3"
+
 tower-service = "0.2"
 tower-util = "0.1"
 
@@ -48,4 +54,5 @@ async-trait = "0.1.13"
 libhoney-rust = "0.1.3"
 
 [build-dependencies]
-tower-grpc-build = { version = "0.1",  features = ["tower-hyper"]  }
+# tower-grpc-build = { version = "0.1",  features = ["tower-hyper"]  }
+tonic-build = "0.1.0-alpha.3"

@@ -1,117 +1,121 @@
 use crate::capabilities::lib::put_and_cache;
 use crate::capabilities::{HasCacheCap, HasIPFSCap, HasTelemetryCap};
-use crate::lib::BoxFuture;
 use crate::types::api::bulk_put;
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
 use crate::types::validated_tree::ValidatedTree;
 use futures::future::{FutureExt, TryFutureExt};
-use futures01::future;
-use futures01::future::Future;
-use futures01::sync::oneshot;
 use std::sync::Arc;
 use tokio;
-use tracing::info;
+use tokio::sync::oneshot;
+use tracing::error;
 
 // catamorphism - a consuming change
 // recursively publish DAG node tree to IPFS, starting with leaf nodes
-pub fn ipfs_publish_cata<C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send>(
+pub async fn ipfs_publish_cata<
+    C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send,
+>(
     caps: Arc<C>,
     tree: ValidatedTree,
-) -> impl Future<Item = (u64, IPFSHash), Error = DagCacheError> + 'static + Send {
-    // todo use async/await I guess, mb can avoid needing Arc? ugh
+) -> Result<(u64, IPFSHash), DagCacheError> {
     let focus = tree.root_node.clone();
     let tree = Arc::new(tree);
-    ipfs_publish_cata_unsafe(caps, tree, focus)
+    ipfs_publish_cata_unsafe(caps, tree, focus).await
 }
 
 // unsafe b/c it can take any 'focus' ClientSideHash and not just the root node of tree
-fn ipfs_publish_cata_unsafe<
+async fn ipfs_publish_cata_unsafe<
     C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send,
 >(
     caps: Arc<C>,
     tree: Arc<ValidatedTree>, // todo use async/await I guess, mb can avoid needing Arc? ugh
     node: bulk_put::DagNode,
-) -> impl Future<Item = (u64, IPFSHash), Error = DagCacheError> + 'static + Send {
+) -> Result<(u64, IPFSHash), DagCacheError> {
     let (send, receive) = oneshot::channel();
 
-    tokio::spawn(ipfs_publish_worker(caps, send, tree, node));
+    tokio::spawn(async move {
+        let res = ipfs_publish_worker(caps, tree, node).await;
+        let chan_send_res = send.send(res);
+        if let Err(err) = chan_send_res {
+            error!("failed oneshot channel send {:?}", err);
+        };
+    });
 
-    receive
-        .map_err(|_| DagCacheError::UnexpectedError {
-            msg: "one shot channel cancelled".to_string(),
-        }) // one-shot channel cancelled
-        .and_then(|res| match res {
-            Ok(res) => future::ok(res),
-            Err(err) => future::err(err),
-        })
+    let recvd = receive.await;
+
+    match recvd {
+        Ok(x) => x,
+        Err(e) => {
+            let e = DagCacheError::UnexpectedError {
+                // todo capture recv error
+                msg: format!("one shot channel cancelled, {:?}", e),
+            }; // one-shot channel cancelled
+            Err(e)
+        }
+    }
+}
+
+async fn upload_link<C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send>(
+    x: bulk_put::DagNodeLink,
+    tree: Arc<ValidatedTree>,
+    caps: Arc<C>,
+) -> Result<IPFSHeader, DagCacheError> {
+    match x {
+        bulk_put::DagNodeLink::Local(client_side_hash) => {
+            // NOTE: could be more efficient by removing node from tree but would break
+            // guarantees provided by ValidatedTree (by removing nodes)
+            // NOTE: not possible, really - would need Mut access to the hashmap to do that
+
+            // unhandled deref failure, known to be safe b/c of validated tree wrapper
+            let node = tree.nodes[&client_side_hash].clone();
+
+            // todo: figure out how to get this as 100% async
+            let (size, hash) =
+                ipfs_publish_cata_unsafe(caps.clone(), tree.clone(), node.clone()).await?;
+            let hdr = IPFSHeader {
+                name: client_side_hash.to_string(),
+                size: size,
+                hash: hash,
+            };
+            Ok(hdr)
+        }
+        bulk_put::DagNodeLink::Remote(hdr) => Ok(hdr.clone()),
+    }
 }
 
 // worker thread - uses one-shot channel to return result to avoid unbounded stack growth
-fn ipfs_publish_worker<C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send>(
+async fn ipfs_publish_worker<
+    C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send,
+>(
     caps: Arc<C>,
-    chan: oneshot::Sender<Result<(u64, IPFSHash), DagCacheError>>,
     tree: Arc<ValidatedTree>,
     // TODO: pass around pointers to node in stack frame (hm keys) instead of nodes
     // OR NOT: struct is quite small, even if the owned-by-it vec of u8/vec of links is big
     // TODO: ask rain
     node: bulk_put::DagNode,
-) -> impl Future<Item = (), Error = ()> + 'static + Send {
+) -> Result<(u64, IPFSHash), DagCacheError> {
     let bulk_put::DagNode { data, links } = node;
 
     let size = data.0.len() as u64;
 
     let link_uploads: Vec<_> = links
         .into_iter()
-        .map({
-            |x| -> BoxFuture<IPFSHeader, DagCacheError> {
-                match x {
-                    bulk_put::DagNodeLink::Local(client_side_hash) => {
-                        // NOTE: could be more efficient by removing node from tree but would break
-                        // guarantees provided by ValidatedTree (by removing nodes)
-                        // NOTE: not possible, really - would need Mut access to the hashmap to do that
-
-                        // unhandled deref failure, known to be safe b/c of validated tree wrapper
-                        let node = tree.nodes[&client_side_hash].clone();
-
-                        // todo: figure out how to get this as 100% async
-                        let f = ipfs_publish_cata_unsafe(caps.clone(), tree.clone(), node.clone())
-                            .map(move |(size, hash)| IPFSHeader {
-                                name: client_side_hash.to_string(),
-                                size: size,
-                                hash: hash,
-                            });
-                        Box::new(f)
-                    }
-                    bulk_put::DagNodeLink::Remote(nh) => {
-                        Box::new(futures01::future::ok(nh.clone()))
-                    }
-                }
-            }
-        })
+        .map(|ln| upload_link(ln, tree.clone(), caps.clone()))
         .collect();
 
-    let joined_link_uploads = futures01::future::join_all(link_uploads);
+    let joined_link_uploads: Vec<Result<IPFSHeader, DagCacheError>> =
+        futures::future::join_all(link_uploads).await;
+    let links: Vec<IPFSHeader> = joined_link_uploads
+        .into_iter()
+        .collect::<Result<Vec<IPFSHeader>, DagCacheError>>()?;
 
-    joined_link_uploads
-        .and_then(move |links: Vec<IPFSHeader>| {
-            let dag_node = DagNode { data, links };
+    let dag_node = DagNode { data, links };
 
-            // might be a bit of an approximation, but w/e
-            let size = size + dag_node.links.iter().map(|x| x.size).sum::<u64>();
+    // might be a bit of an approximation, but w/e
+    let size = size + dag_node.links.iter().map(|x| x.size).sum::<u64>();
 
-            put_and_cache(caps.clone(), dag_node)
-                .boxed()
-                .compat()
-                .then(move |res| {
-                    let chan_send_res = chan.send(res.map(|hash| (size, hash)));
-                    if let Err(err) = chan_send_res {
-                        info!("failed oneshot channel send {:?}", err);
-                    };
-                    futures01::future::ok(())
-                })
-        })
-        .map_err(|_| ())
+    let hash = put_and_cache(caps.clone(), dag_node).await?;
+    Ok((size, hash))
 }
 
 #[cfg(test)]

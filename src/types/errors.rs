@@ -1,5 +1,5 @@
-use tower_grpc::Code;
-use tower_grpc::Status;
+use tonic::Code;
+use tonic::Status;
 
 #[derive(Debug)]
 pub enum DagCacheError {
