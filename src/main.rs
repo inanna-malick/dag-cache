@@ -39,7 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Server::builder()
         .serve(addr, IpfsCacheServer::new(app))
-        .await;
+        .await?;
 
     Ok(())
 }

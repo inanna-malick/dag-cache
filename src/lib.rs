@@ -1,6 +1,3 @@
-use futures01::future::Future;
-
-pub type BoxFuture<Item, Error> = Box<dyn Future<Item = Item, Error = Error> + 'static + Send>;
 
 #[cfg(test)]
 // NOTE: takes Fn b/c it may use tokio::spawn and needs to have a runtime ready

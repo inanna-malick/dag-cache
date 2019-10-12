@@ -4,7 +4,6 @@ use crate::types::errors::DagCacheError;
 use crate::types::ipfs::{DagNode, IPFSHash};
 use chashmap::CHashMap;
 use futures::channel::mpsc;
-use futures::future::{FutureExt, TryFutureExt};
 use futures::sink::SinkExt;
 use std::sync::Arc;
 use tokio;
@@ -34,11 +33,11 @@ fn ipfs_fetch_ana_internal<
     to_populate: Arc<CHashMap<IPFSHash, ()>>,                // used to memoize async fetches
 ) {
     let hash2 = hash.clone();
-    to_populate.upsert(
+    to_populate.clone().upsert(
         hash,
         || {
-            tokio::spawn(async {
-                ipfs_fetch_worker(caps, hash2, resp_chan, to_populate.clone()).await
+            tokio::spawn(async move {
+                ipfs_fetch_worker(caps, hash2, resp_chan, to_populate).await
             });
             ()
         },

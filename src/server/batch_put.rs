@@ -4,7 +4,8 @@ use crate::types::api::bulk_put;
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
 use crate::types::validated_tree::ValidatedTree;
-use futures::future::{FutureExt, TryFutureExt};
+use futures::future::FutureExt;
+use futures::Future;
 use std::sync::Arc;
 use tokio;
 use tokio::sync::oneshot;
@@ -33,13 +34,8 @@ async fn ipfs_publish_cata_unsafe<
 ) -> Result<(u64, IPFSHash), DagCacheError> {
     let (send, receive) = oneshot::channel();
 
-    tokio::spawn(async move {
-        let res = ipfs_publish_worker(caps, tree, node).await;
-        let chan_send_res = send.send(res);
-        if let Err(err) = chan_send_res {
-            error!("failed oneshot channel send {:?}", err);
-        };
-    });
+    let f = ipfs_publish_worker(caps, tree, send, node);
+    tokio::spawn(f);
 
     let recvd = receive.await;
 
@@ -83,8 +79,32 @@ async fn upload_link<C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + S
     }
 }
 
+// needed to not have async cycle? idk lmao FIXME refactor
+fn ipfs_publish_worker<
+        C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send,
+    >(
+    caps: Arc<C>,
+    tree: Arc<ValidatedTree>,
+    // TODO: pass around pointers to node in stack frame (hm keys) instead of nodes
+    // OR NOT: struct is quite small, even if the owned-by-it vec of u8/vec of links is big
+    // TODO: ask rain
+    chan: oneshot::Sender<Result<(u64, IPFSHash), DagCacheError>>,
+    node: bulk_put::DagNode,
+) -> Box<dyn Future<Output = ()> + Unpin + Send> {
+    let f = ipfs_publish_worker_async(caps, tree, node)
+        .map( move |res| {
+
+            let chan_send_res = chan.send(res);
+            if let Err(err) = chan_send_res {
+                error!("failed oneshot channel send {:?}", err);
+            };
+        }).boxed();
+
+    Box::new(f)
+}
+
 // worker thread - uses one-shot channel to return result to avoid unbounded stack growth
-async fn ipfs_publish_worker<
+async fn ipfs_publish_worker_async<
     C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send,
 >(
     caps: Arc<C>,
