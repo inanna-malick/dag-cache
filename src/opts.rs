@@ -14,16 +14,16 @@ pub struct Opt {
     pub port: u64,
 
     #[structopt(long = "ipfs_host", default_value = "localhost")]
-    ipfs_host: String,
+    pub ipfs_host: String,
     #[structopt(long = "ipfs_port", default_value = "5001")]
-    ipfs_port: u64,
+    pub ipfs_port: u64,
 
     #[structopt(short = "n", long = "max_cache_entries", default_value = "128")]
     // arbitrarily chosen number..
-    max_cache_entries: usize,
+    pub max_cache_entries: usize,
 
     #[structopt(short = "h", long = "honeycomb_key")]
-    honeycomb_key: String,
+    pub honeycomb_key: String,
 }
 
 impl Opt {

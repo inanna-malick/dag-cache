@@ -12,7 +12,7 @@ rand = "0.7"
 
 tracing = "0.1.8"
 tracing-core = "0.1"
-tracing-futures = "0.0.1-alpha.1"
+tracing-futures = {version = "0.1.0", features = ["futures-preview", "tokio-alpha"]}
 tracing-subscriber = "0.1"
 
 lru = "0.1"

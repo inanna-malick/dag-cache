@@ -12,6 +12,7 @@ use futures::Stream;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 use tracing::info;
+use tracing_futures::Instrument;
 
 pub struct CacheServer<C> {
     pub caps: Arc<C>,
@@ -32,18 +33,22 @@ impl<C: HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send + 'static> serv
     for CacheServer<C>
 {
     async fn get_node(&self, request: Request<IpfsHash>) -> Result<Response<GetResp>, Status> {
-        let request = ipfs::IPFSHash::from_proto(request.into_inner()).map_err(|de| {
-            let e = DagCacheError::ProtoDecodingError(de);
-            e.into_status()
-        })?;
+        let f = async {
+            let request = ipfs::IPFSHash::from_proto(request.into_inner()).map_err(|de| {
+                let e = DagCacheError::ProtoDecodingError(de);
+                e.into_status()
+            })?;
 
-        let resp = opportunistic_get::get(self.caps.clone(), request)
-            .await
-            .map_err(|de| de.into_status())?;
+            let resp = opportunistic_get::get(self.caps.clone(), request)
+                .await
+                .map_err(|de| de.into_status())?;
 
-        let resp = resp.into_proto();
-        let resp = Response::new(resp);
-        Ok(resp)
+            let resp = resp.into_proto();
+            let resp = Response::new(resp);
+            Ok(resp)
+        };
+
+        f.instrument(tracing::info_span!("get-request")).await
     }
 
     type GetNodesStream = Box<dyn Stream<Item = Result<IpfsNode, Status>> + Unpin + Send + 'static>;

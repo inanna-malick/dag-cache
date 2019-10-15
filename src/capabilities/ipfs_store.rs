@@ -7,6 +7,8 @@ use reqwest::r#async::{multipart, Client};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use tracing::{event, Level};
+use tracing::info;
+use tracing_futures::Instrument;
 
 pub struct IPFSNode(reqwest::Url); //base url, copy mutated to produce specific path. should have no path component
 
@@ -17,6 +19,7 @@ impl IPFSNode {
 #[async_trait]
 impl IPFSCapability for IPFSNode {
     async fn get(&self, k: ipfs::IPFSHash) -> Result<ipfs::DagNode, DagCacheError> {
+        let f = async {
         let mut url = self.0.clone();
         url.set_path("api/v0/object/get");
         url.query_pairs_mut()
@@ -45,6 +48,9 @@ impl IPFSCapability for IPFSNode {
         };
 
         Ok(node)
+        };
+
+        f.instrument(tracing::info_span!("ipfs-get")).await
     }
 
     async fn put(&self, v: ipfs::DagNode) -> Result<ipfs::IPFSHash, DagCacheError> {
