@@ -50,6 +50,7 @@ async-trait = "0.1.13"
 
 # metrics!
 libhoney-rust = "0.1.3"
+chrono = "0.4.9" # used for honeycomb.io timestamp
 
 [build-dependencies]
 # tower-grpc-build = { version = "0.1",  features = ["tower-hyper"]  }
