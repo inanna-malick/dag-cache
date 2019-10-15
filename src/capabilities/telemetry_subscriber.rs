@@ -12,37 +12,10 @@ use tracing::span::{Attributes, Id, Record};
 use tracing::{Event, Metadata, Subscriber};
 use tracing_core::span::Current;
 
-// last stopping point monday night:
-// NOTE: mutex poison makes sense, 'no entry found for key' is almost certainly just a map lookup that failed
-// thread 'tokio-runtime-worker-0' panicked at 'no entry found for key', src/libcore/option.rs:1190:5
-// note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace.
-// thread 'tokio-runtime-worker-0' panicked at 'called `Result::unwrap()` on an `Err` value: "PoisonError { inner: .. }"', src/libcore/result.rs:1165:5
-// stack backtrace:
-//    0:     0x563e507f9b94 - backtrace::backtrace::libunwind::trace::h3c777145747bb537
-//                                at /cargo/registry/src/github.com-1ecc6299db9ec823/backtrace-0.3.37/src/backtrace/libunwind.rs:88
-//    1:     0x563e507f9b94 - backtrace::backtrace::trace_unsynchronized::h66b9e4a5d8dcdac1
-//                                at /cargo/registry/src/github.com-1ecc6299db9ec823/backtrace-0.3.37/src/backtrace/mod.rs:66
-//    2:     0x563e507f9b94 - std::sys_common::backtrace::_print_fmt::h67af8761982571ce
-//                                at src/libstd/sys_common/backtrace.rs:76
-//    3:     0x563e507f9b94 - <std::sys_common::backtrace::_print::DisplayBacktrace as core::fmt::Display>::fmt::hd2414c318764e035
-//                                at src/libstd/sys_common/backtrace.rs:60
-//    4:     0x563e5081bc6c - core::fmt::write::h6b1d9e7d0caf83ef
-//                                at src/libcore/fmt/mod.rs:1030
-//    5:     0x563e507f49b7 - std::io::Write::write_fmt::h7d23ef4c2e86d894
-//                                at src/libstd/io/mod.rs:1412
-//    6:     0x563e507fc0e5 - std::sys_common::backtrace::_print::h95f9ce51820bb860
-//                                at src/libstd/sys_common/backtrace.rs:64
-//    7:     0x563e507fc0e5 - std::sys_common::backtrace::print::h60cdacab02cba05c
-//                                at src/libstd/sys_common/backtrace.rs:49
-//    8:     0x563e507fc0e5 - std::panicking::default_hook::{{closure}}::hd6f0e16d93b9b5c8
-//                                at src/libstd/panicking.rs:196
-//    9:     0x563e507fbdd6 - std::panicking::default_hook::hd45736b469c8d928
-
-
 
 // for tracking current span
 thread_local! {
-    static CURRENT_SPAN: RefCell<Option<Id>> = RefCell::new(None);
+    static CURRENT_SPAN: RefCell<Vec<Id>> = RefCell::new(vec!());
 }
 
 struct SpanData {
@@ -56,15 +29,15 @@ struct SpanData {
 impl SpanData {
     fn into_values(self, id: Id) -> HashMap<String, Value> {
         let mut values = self.values;
-        values.insert(
+        values.insert( // magic honeycomb string (trace.span_id)
             "trace.span_id".to_string(),
             json!(format!("span-{}", id.into_u64())),
         );
-        values.insert(
+        values.insert( // magic honeycomb string (trace.trace_id)
             "trace.trace_id".to_string(),
             json!(format!("trace-{}", &self.trace_id)),
         );
-        values.insert(
+        values.insert( // magic honeycomb string (trace.parent_id)
             "trace.parent_id".to_string(),
             self.parent_id
                 .map(|pid| json!(format!("span-{}", pid.into_u64())))
@@ -72,9 +45,21 @@ impl SpanData {
         );
 
         values.insert(
+            "level".to_string(),
+            json!(format!("{}", self.metadata.level())),
+        );
+
+        values.insert(
             "timestamp".to_string(),
             json!(format!("{}", self.initialized_at.to_rfc3339())),
         );
+
+
+        values.insert("name".to_string(), json!(self.metadata.name()));
+        values.insert("target".to_string(), json!(self.metadata.target())); // not honeycomb-special but tracing-provided
+
+        values.insert("service_name".to_string(), json!("dummy-svc".to_string()));
+
 
         values
     }
@@ -103,8 +88,8 @@ impl<'a> Visit for HoneycombVisitor<'a> {
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         // todo: more granular, per-type, etc
         // TODO: mb don't store 1x field name per span, instead use fmt-style trick w/ field id's by reading metadata..
-        let s = format!("telemetry.{:?}", value); // using 'telemetry.' namespace to disambiguate from system-level names
-        self.0.insert(field.name().to_string(), json!(s));
+        let s = format!("{:?}", value); // using 'telemetry.' namespace to disambiguate from system-level names
+        self.0.insert(format!("telemetry.{}", field.name()), json!(s));
     }
 }
 
@@ -144,8 +129,15 @@ impl TelemetrySubscriber {
         }
     }
 
-    fn get_current_span_raw(&self) -> Option<Id> { CURRENT_SPAN.with(|c| c.borrow().clone()) }
-    fn set_current_span_raw(&self, cid: Option<Id>) { CURRENT_SPAN.with(|c| *c.borrow_mut() = cid) }
+    fn peek_current_span(&self) -> Option<Id> {
+        CURRENT_SPAN.with(|c| c.borrow().last().cloned())
+    }
+    fn pop_current_span(&self) -> Option<Id> {
+        CURRENT_SPAN.with(|c| c.borrow_mut().pop())
+    }
+    fn push_current_span(&self, id: Id) {
+        CURRENT_SPAN.with(|c| c.borrow_mut().push(id))
+    }
 
     // get (trace_id, parent_id). will generate a new trace id if none are available
     fn build_span<T: TelemetryThingy>(&self, t: &T) -> (Id, SpanData) {
@@ -162,30 +154,45 @@ impl TelemetrySubscriber {
         let mut visitor = HoneycombVisitor(&mut values);
         t.t_record(&mut visitor);
 
-        values.insert("name".to_string(), json!(t.t_metadata().name())); // honeycomb-special and also tracing-provided
-        values.insert("target".to_string(), json!(t.t_metadata().target())); // not honeycomb-special but tracing-provided
-        values.insert("service_name".to_string(), json!("dummy-svc".to_string()));
-
         // succeed or die. failure is unrecoverable (mutex poisoned)
         let spans = self.spans.lock().unwrap();
 
         let (trace_id, parent_id) = if let Some(parent_id) = t.t_parent() {
             // explicit parent
+            values.insert(
+                "parent_source".to_string(),
+                json!("explicit".to_string()),
+            );
             // error if parent not in map (need to grab it to get trace id)
             let parent = &spans[&parent_id];
             (parent.trace_id, Some(parent_id.clone()))
         } else if t.t_is_root() {
             // don't bother checking thread local if span is explicitly root according to this fn
+            values.insert(
+                "parent_source".to_string(),
+                json!("explicit_root".to_string()),
+            );
+
             let trace_id = rand::thread_rng().gen();
             (trace_id, None)
-        } else if let Some(parent_id) = self.get_current_span_raw() {
+        } else if let Some(parent_id) = self.peek_current_span() {
             // possible implicit parent from threadlocal ctx
             // TODO: check with, idk, eliza or similar (or run experiment) to see if this is correct
+            values.insert(
+                "parent_source".to_string(),
+                json!("implicit_parent".to_string()),
+            );
+
             let parent = &spans[&parent_id];
             (parent.trace_id, Some(parent_id))
         } else {
             // no parent span, thus this is a root span
             let trace_id = rand::thread_rng().gen();
+            values.insert(
+                "parent_source".to_string(),
+                json!("no_parent".to_string()),
+            );
+
             (trace_id, None)
         };
 
@@ -202,10 +209,12 @@ impl TelemetrySubscriber {
     }
 }
 
+
+// TODO: concept: don't assign trace ids implicitly for new spans (no trace id for, eg, tokio noise).
+// TODO: concept: trace ids generated at web framework edge _or_ passed in for multi-application traces
 impl Subscriber for TelemetrySubscriber {
-    fn enabled(&self, _metadata: &Metadata) -> bool {
-        // not impl'd - site for future optimizations (eg log lvl filtering, etc)
-        true
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        metadata.level() >= &tracing::Level::INFO // simple impl so I can see my app logs as distinct from all the tokio noise
     }
 
     fn new_span(&self, span: &Attributes) -> Id {
@@ -251,18 +260,12 @@ impl Subscriber for TelemetrySubscriber {
         self.telem.report_data(values);
     }
 
-    // used to maintain current span threadlocal, probably
     fn enter(&self, span: &Id) {
-        self.set_current_span_raw(Some(span.clone())); // just set current to that
+        self.push_current_span(span.clone());
     }
     fn exit(&self, span: &Id) {
-        // NOTE: don't bother looking at old current span id, just overwrite via lookup (todo: keep stack?)
-
-        // succeed or die. failure is unrecoverable (mutex poisoned)
-        let spans = self.spans.lock().unwrap();
-        let parent_id = spans[span].parent_id.clone(); // EXPECTATION: span being exited is always in map when exiting
-
-        self.set_current_span_raw(parent_id); // set current span to parent of span we just exited (TODO: check if req'd)
+        // NOTE: assert popped span id == expected (provided span id)
+        self.pop_current_span();
     }
 
     // fn register_callsite( // not impl'd - site for future optimizations
@@ -307,11 +310,11 @@ impl Subscriber for TelemetrySubscriber {
             );
 
             let now = Utc::now();
-            let elapsed = now.timestamp() - dropped.initialized_at.timestamp();
+            let elapsed = now.timestamp_subsec_millis() - dropped.initialized_at.timestamp_subsec_millis();
 
             let mut values = dropped.into_values(id);
 
-            values.insert("duration_ms".to_string(), json!(elapsed));
+            values.insert("duration_ms".to_string(), json!(elapsed)); // NOTE: is fucked
 
             self.telem.report_data(values);
             true
@@ -321,7 +324,7 @@ impl Subscriber for TelemetrySubscriber {
     }
 
     fn current_span(&self) -> Current {
-        if let Some(id) = self.get_current_span_raw() {
+        if let Some(id) = self.peek_current_span() {
             // succeed or die. failure is unrecoverable (mutex poisoned) (TODO: learn better patterns: less mutexes)
             let spans = self.spans.lock().unwrap();
             if let Some(meta) = spans.get(&id).map(|span| span.metadata) {
