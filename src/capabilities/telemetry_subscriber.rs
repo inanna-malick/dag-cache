@@ -334,28 +334,3 @@ impl Subscriber for TelemetrySubscriber {
         Current::none()
     }
 }
-
-// fn test(
-//     caps: &Telemetry,
-//     name: &str,
-//     ms: u64,
-//     sid: &str,         // span id <- TODO: base 58 lmao hell yeah b58 gang
-//     tid: &str,         // trace id
-//     pid: Option<&str>, // parent id
-// ) {
-//     // span as stored in stack on capabilities (cloned anyway for each trace-equivalent)
-//     // same span can be parent of multiple concurrent actions, each of which can step into new spans
-//     // immutable data, yay
-
-//     let mut data: HashMap<String, Value> = HashMap::new();
-//     data.insert("name".to_string(), json!(name));
-//     data.insert("service_name".to_string(), json!("dag-cache-svc"));
-//     data.insert("duration_ms".to_string(), json!(ms));
-//     data.insert("trace.span_id".to_string(), json!(sid));
-//     data.insert("trace.trace_id".to_string(), json!(tid));
-//     data.insert(
-//         "trace.parent_id".to_string(),
-//         pid.map(|e| json!(e)).unwrap_or(json!(null)),
-//     );
-//     caps.report_data(data);
-// }
