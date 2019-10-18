@@ -9,9 +9,9 @@ pub enum DagCacheError {
     UnexpectedError { msg: String },
 }
 
-impl DagCacheError {
-    pub fn into_status(self) -> Status {
-        match self {
+impl From<DagCacheError> for Status {
+    fn from(error: DagCacheError) -> Status {
+        match error {
             DagCacheError::IPFSError => Status::new(Code::Internal, "ipfs error"),
             DagCacheError::IPFSJsonError => Status::new(Code::Internal, "ipfs json error"),
             DagCacheError::ProtoDecodingError(de) => Status::new(
@@ -28,4 +28,8 @@ impl DagCacheError {
 #[derive(Debug)]
 pub struct ProtoDecodingError {
     pub cause: String,
+}
+
+impl From<ProtoDecodingError> for Status {
+    fn from(error: ProtoDecodingError) -> Status { std::convert::From::from(DagCacheError::ProtoDecodingError(error)) }
 }

@@ -8,8 +8,6 @@ impl ClientSideHash {
     #[cfg(test)]
     pub fn new(x: Base58) -> ClientSideHash { ClientSideHash(x) }
 
-    pub fn to_string<'a>(&self) -> String { self.0.to_string() }
-
     pub fn from_proto(p: grpc::ClientSideHash) -> Result<Self, ProtoDecodingError> {
         Base58::from_string(&p.hash)
             .map(ClientSideHash)
@@ -17,6 +15,10 @@ impl ClientSideHash {
                 cause: format!("invalid base58 string in client side hash: {:?}", e),
             })
     }
+}
+
+impl std::fmt::Display for ClientSideHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) }
 }
 
 pub mod bulk_put {
