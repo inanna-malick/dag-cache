@@ -1,5 +1,5 @@
 use crate::capabilities::lib::put_and_cache;
-use crate::capabilities::{HasCacheCap, HasIPFSCap, HasTelemetryCap};
+use crate::capabilities::{HasCacheCap, HasIPFSCap};
 use crate::server::batch_get;
 use crate::server::batch_put;
 use crate::server::opportunistic_get;
@@ -29,7 +29,7 @@ impl<C> Clone for CacheServer<C> {
 }
 
 #[tonic::async_trait]
-impl<C: HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send + 'static> server::IpfsCache
+impl<C: HasCacheCap +  HasIPFSCap + Sync + Send + 'static> server::IpfsCache
     for CacheServer<C>
 {
     async fn get_node(&self, request: Request<IpfsHash>) -> Result<Response<GetResp>, Status> {

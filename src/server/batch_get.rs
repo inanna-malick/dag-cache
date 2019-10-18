@@ -1,5 +1,5 @@
 use crate::capabilities::lib::get_and_cache;
-use crate::capabilities::{HasCacheCap, HasIPFSCap, HasTelemetryCap};
+use crate::capabilities::{HasCacheCap, HasIPFSCap};
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs::{DagNode, IPFSHash};
 use chashmap::CHashMap;
@@ -10,7 +10,7 @@ use tokio;
 use tracing::{error, info};
 
 // TODO: add fn that does get-and-cache, req's both caps
-pub fn ipfs_fetch<C: 'static + HasIPFSCap + HasTelemetryCap + HasCacheCap + Sync + Send>(
+pub fn ipfs_fetch<C: 'static + HasIPFSCap + HasCacheCap + Sync + Send>(
     caps: Arc<C>,
     hash: IPFSHash,
 ) -> mpsc::Receiver<Result<DagNode, DagCacheError>> {
@@ -25,7 +25,7 @@ pub fn ipfs_fetch<C: 'static + HasIPFSCap + HasTelemetryCap + HasCacheCap + Sync
 
 // anamorphism - an unfolding change
 fn ipfs_fetch_ana_internal<
-    C: 'static + HasIPFSCap + HasTelemetryCap + HasCacheCap + Sync + Send,
+    C: 'static + HasIPFSCap + HasCacheCap + Sync + Send,
 >(
     caps: Arc<C>,
     hash: IPFSHash,
@@ -39,7 +39,6 @@ fn ipfs_fetch_ana_internal<
             tokio::spawn(
                 async move { ipfs_fetch_worker(caps, hash2, resp_chan, to_populate).await },
             );
-            ()
         },
         |()| (),
     );
@@ -47,13 +46,13 @@ fn ipfs_fetch_ana_internal<
 
 // worker thread - uses one-shot channel to return result to avoid unbounded stack growth
 async fn ipfs_fetch_worker<
-    C: 'static + HasIPFSCap + HasTelemetryCap + HasCacheCap + Sync + Send,
+    C: 'static + HasIPFSCap + HasCacheCap + Sync + Send,
 >(
     caps: Arc<C>,
     hash: IPFSHash,
     mut resp_chan: mpsc::Sender<Result<DagNode, DagCacheError>>,
     to_populate: Arc<CHashMap<IPFSHash, ()>>, // used to memoize async fetches
-) -> () {
+) {
     let res = get_and_cache(caps.clone(), hash.clone()).await;
     match res {
         Ok(node) => {

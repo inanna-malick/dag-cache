@@ -53,7 +53,7 @@ impl SpanData {
 
         values.insert(
             "timestamp".to_string(),
-            json!(format!("{}", self.initialized_at.to_rfc3339())),
+            json!(self.initialized_at.to_rfc3339()),
         );
 
         values.insert("name".to_string(), json!(self.metadata.name()));
@@ -268,7 +268,7 @@ impl Subscriber for TelemetrySubscriber {
         let mut spans = self.spans.lock().unwrap();
         // should always be present
         if let Some(span_data) = spans.get_mut(id) {
-            span_data.ref_ct = span_data.ref_ct + 1; // increment ref ct
+            span_data.ref_ct +=  1; // increment ref ct
         }
         id.clone() // type sig of this function seems to compel cloning of id (&X -> X)
     }
@@ -281,9 +281,9 @@ impl Subscriber for TelemetrySubscriber {
             // FIXME FIXME FIXME
             let mut spans = self.spans.lock().unwrap();
             if let Some(span_data) = spans.get_mut(&id) {
-                span_data.ref_ct = span_data.ref_ct - 1; // decrement ref ct
+                span_data.ref_ct -= 1; // decrement ref ct
 
-                if span_data.ref_ct <= 0 {
+                if span_data.ref_ct == 0 {
                     spans.remove(&id).map(|e| e.inner) // returns option already, no need for Some wrapper
                 } else {
                     None

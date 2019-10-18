@@ -1,5 +1,5 @@
 use crate::capabilities::lib::get_and_cache;
-use crate::capabilities::{HasCacheCap, HasIPFSCap, HasTelemetryCap};
+use crate::capabilities::{HasCacheCap, HasIPFSCap};
 use crate::types::api as api_types;
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs as ipfs_types;
@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tracing::info;
 use tracing_futures::Instrument;
 
-pub async fn get<C: 'static + HasIPFSCap + HasTelemetryCap + HasCacheCap + Send + Sync>(
+pub async fn get<C: 'static + HasIPFSCap + HasCacheCap + Send + Sync>(
     caps: Arc<C>,
     k: ipfs_types::IPFSHash,
 ) -> Result<api_types::get::Resp, DagCacheError> {

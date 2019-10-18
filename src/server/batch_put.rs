@@ -1,5 +1,5 @@
 use crate::capabilities::lib::put_and_cache;
-use crate::capabilities::{HasCacheCap, HasIPFSCap, HasTelemetryCap};
+use crate::capabilities::{HasCacheCap, HasIPFSCap};
 use crate::types::api::bulk_put;
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
@@ -14,7 +14,7 @@ use tracing::error;
 // catamorphism - a consuming change
 // recursively publish DAG node tree to IPFS, starting with leaf nodes
 pub async fn ipfs_publish_cata<
-    C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send,
+    C: 'static + HasCacheCap  + HasIPFSCap + Sync + Send,
 >(
     caps: Arc<C>,
     tree: ValidatedTree,
@@ -26,7 +26,7 @@ pub async fn ipfs_publish_cata<
 
 // unsafe b/c it can take any 'focus' ClientSideHash and not just the root node of tree
 async fn ipfs_publish_cata_unsafe<
-    C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send,
+    C: 'static + HasCacheCap +  HasIPFSCap + Sync + Send,
 >(
     caps: Arc<C>,
     tree: Arc<ValidatedTree>, // todo use async/await I guess, mb can avoid needing Arc? ugh
@@ -51,7 +51,7 @@ async fn ipfs_publish_cata_unsafe<
     }
 }
 
-async fn upload_link<C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send>(
+async fn upload_link<C: 'static + HasCacheCap +  HasIPFSCap + Sync + Send>(
     x: bulk_put::DagNodeLink,
     tree: Arc<ValidatedTree>,
     caps: Arc<C>,
@@ -70,8 +70,8 @@ async fn upload_link<C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + S
                 ipfs_publish_cata_unsafe(caps.clone(), tree.clone(), node.clone()).await?;
             let hdr = IPFSHeader {
                 name: client_side_hash.to_string(),
-                size: size,
-                hash: hash,
+                size,
+                hash,
             };
             Ok(hdr)
         }
@@ -80,7 +80,7 @@ async fn upload_link<C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + S
 }
 
 // needed to not have async cycle? idk lmao FIXME refactor
-fn ipfs_publish_worker<C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send>(
+fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     tree: Arc<ValidatedTree>,
     // TODO: pass around pointers to node in stack frame (hm keys) instead of nodes
@@ -103,7 +103,7 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap +
 
 // worker thread - uses one-shot channel to return result to avoid unbounded stack growth
 async fn ipfs_publish_worker_async<
-    C: 'static + HasCacheCap + HasTelemetryCap + HasIPFSCap + Sync + Send,
+    C: 'static + HasCacheCap + HasIPFSCap + Sync + Send,
 >(
     caps: Arc<C>,
     tree: Arc<ValidatedTree>,
@@ -140,8 +140,7 @@ async fn ipfs_publish_worker_async<
 mod tests {
     use super::*;
     use crate::capabilities::{
-        CacheCapability, Event, HasCacheCap, HasIPFSCap, HasTelemetryCap, IPFSCapability,
-        TelemetryCapability,
+        CacheCapability, Event, HasCacheCap, HasIPFSCap, IPFSCapability,
     };
     use crate::lib;
     use crate::types::api::ClientSideHash;
@@ -160,11 +159,6 @@ mod tests {
         fn get(&self, _k: IPFSHash) -> Option<DagNode> { None }
 
         fn put(&self, _k: IPFSHash, _v: DagNode) {}
-    }
-
-    struct BlackHoleTelemetry;
-    impl TelemetryCapability for BlackHoleTelemetry {
-        fn report(&self, _: Event) -> () {}
     }
 
     // TODO: separate read/write caps to simplify writing this?
@@ -188,7 +182,7 @@ mod tests {
         }
     }
 
-    struct TestCaps(MockIPFS, BlackHoleCache, BlackHoleTelemetry);
+    struct TestCaps(MockIPFS, BlackHoleCache);
 
     impl HasIPFSCap for TestCaps {
         type Output = MockIPFS;
@@ -198,11 +192,6 @@ mod tests {
     impl HasCacheCap for TestCaps {
         type Output = BlackHoleCache;
         fn cache_caps(&self) -> &BlackHoleCache { &self.1 }
-    }
-
-    impl HasTelemetryCap for TestCaps {
-        type Output = BlackHoleTelemetry;
-        fn telemetry_caps(&self) -> &BlackHoleTelemetry { &self.2 }
     }
 
     // uses mock capabilities, does not require local ipfs daemon
@@ -246,7 +235,7 @@ mod tests {
         let validated_tree = ValidatedTree::validate(t3.clone(), m).expect("static test invalid");
 
         let mock_ipfs = MockIPFS(Mutex::new(HashMap::new()));
-        let caps = std::sync::Arc::new(TestCaps(mock_ipfs, BlackHoleCache, BlackHoleTelemetry));
+        let caps = std::sync::Arc::new(TestCaps(mock_ipfs, BlackHoleCache));
 
         let _published = ipfs_publish_cata(caps.clone(), validated_tree)
             .await

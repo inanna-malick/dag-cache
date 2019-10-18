@@ -53,22 +53,3 @@ pub trait HasCacheCap {
 
     fn cache_put(&self, k: ipfs::IPFSHash, v: ipfs::DagNode) { self.cache_caps().put(k, v) }
 }
-
-/// simple telemetry
-pub enum Event {
-    CacheHit(ipfs::IPFSHash),
-    CacheMiss(ipfs::IPFSHash),
-    CachePut(ipfs::IPFSHash),
-}
-
-pub trait TelemetryCapability {
-    fn report(&self, event: Event) -> ();
-}
-
-pub trait HasTelemetryCap {
-    type Output: TelemetryCapability;
-
-    fn telemetry_caps(&self) -> &Self::Output;
-
-    fn report_telemetry(&self, event: Event) { self.telemetry_caps().report(event) }
-}

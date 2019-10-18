@@ -26,8 +26,8 @@ impl IPFSHeader {
         let hash = IPFSHash::from_proto(hash)?;
         let hdr = IPFSHeader {
             name: p.name,
-            hash: hash,
             size: p.size,
+            hash,
         };
         Ok(hdr)
     }
@@ -59,8 +59,13 @@ impl IPFSHash {
 
     #[cfg(test)]
     pub fn from_raw(raw: Base58) -> IPFSHash { IPFSHash(raw) }
+}
 
-    pub fn to_string<'a>(&self) -> String { self.0.to_string() }
+
+impl std::fmt::Display for IPFSHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug, Deserialize, Serialize)]
@@ -82,8 +87,8 @@ impl DagNode {
             p.links.into_iter().map(IPFSHeader::from_proto).collect();
         let links = links?;
         let node = DagNode {
-            links: links,
             data: Base64(p.data),
+            links,
         };
         Ok(node)
     }

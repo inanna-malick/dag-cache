@@ -15,9 +15,6 @@ impl Cache {
 impl CacheCapability for Cache {
     // TODO: rain says investigate stable deref (given that all refs here are immutable)
     fn get(&self, k: IPFSHash) -> Option<DagNode> {
-        let span = tracing::info_span!("my_span");
-        let _enter = span.enter();
-
         // succeed or die. failure is unrecoverable (mutex poisoned)
         let mut cache = self.0.lock().unwrap();
         let mv = cache.get(&k);
