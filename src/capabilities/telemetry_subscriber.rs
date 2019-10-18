@@ -12,7 +12,6 @@ use tracing::span::{Attributes, Id, Record};
 use tracing::{Event, Metadata, Subscriber};
 use tracing_core::span::Current;
 
-
 // for tracking current span
 thread_local! {
     static CURRENT_SPAN: RefCell<Vec<Id>> = RefCell::new(vec!());
@@ -29,15 +28,18 @@ struct SpanData {
 impl SpanData {
     fn into_values(self, id: Id) -> HashMap<String, Value> {
         let mut values = self.values;
-        values.insert( // magic honeycomb string (trace.span_id)
+        values.insert(
+            // magic honeycomb string (trace.span_id)
             "trace.span_id".to_string(),
             json!(format!("span-{}", id.into_u64())),
         );
-        values.insert( // magic honeycomb string (trace.trace_id)
+        values.insert(
+            // magic honeycomb string (trace.trace_id)
             "trace.trace_id".to_string(),
             json!(format!("trace-{}", &self.trace_id)),
         );
-        values.insert( // magic honeycomb string (trace.parent_id)
+        values.insert(
+            // magic honeycomb string (trace.parent_id)
             "trace.parent_id".to_string(),
             self.parent_id
                 .map(|pid| json!(format!("span-{}", pid.into_u64())))
@@ -54,12 +56,10 @@ impl SpanData {
             json!(format!("{}", self.initialized_at.to_rfc3339())),
         );
 
-
         values.insert("name".to_string(), json!(self.metadata.name()));
         values.insert("target".to_string(), json!(self.metadata.target())); // not honeycomb-special but tracing-provided
 
         values.insert("service_name".to_string(), json!("dummy-svc".to_string()));
-
 
         values
     }
@@ -89,7 +89,8 @@ impl<'a> Visit for HoneycombVisitor<'a> {
         // todo: more granular, per-type, etc
         // TODO: mb don't store 1x field name per span, instead use fmt-style trick w/ field id's by reading metadata..
         let s = format!("{:?}", value); // using 'telemetry.' namespace to disambiguate from system-level names
-        self.0.insert(format!("telemetry.{}", field.name()), json!(s));
+        self.0
+            .insert(format!("telemetry.{}", field.name()), json!(s));
     }
 }
 
@@ -129,15 +130,9 @@ impl TelemetrySubscriber {
         }
     }
 
-    fn peek_current_span(&self) -> Option<Id> {
-        CURRENT_SPAN.with(|c| c.borrow().last().cloned())
-    }
-    fn pop_current_span(&self) -> Option<Id> {
-        CURRENT_SPAN.with(|c| c.borrow_mut().pop())
-    }
-    fn push_current_span(&self, id: Id) {
-        CURRENT_SPAN.with(|c| c.borrow_mut().push(id))
-    }
+    fn peek_current_span(&self) -> Option<Id> { CURRENT_SPAN.with(|c| c.borrow().last().cloned()) }
+    fn pop_current_span(&self) -> Option<Id> { CURRENT_SPAN.with(|c| c.borrow_mut().pop()) }
+    fn push_current_span(&self, id: Id) { CURRENT_SPAN.with(|c| c.borrow_mut().push(id)) }
 
     // get (trace_id, parent_id). will generate a new trace id if none are available
     fn build_span<T: TelemetryThingy>(&self, t: &T) -> (Id, SpanData) {
@@ -159,10 +154,7 @@ impl TelemetrySubscriber {
 
         let (trace_id, parent_id) = if let Some(parent_id) = t.t_parent() {
             // explicit parent
-            values.insert(
-                "parent_source".to_string(),
-                json!("explicit".to_string()),
-            );
+            values.insert("parent_source".to_string(), json!("explicit".to_string()));
             // error if parent not in map (need to grab it to get trace id)
             let parent = &spans[&parent_id];
             (parent.trace_id, Some(parent_id.clone()))
@@ -188,13 +180,15 @@ impl TelemetrySubscriber {
         } else {
             // no parent span, thus this is a root span
             let trace_id = rand::thread_rng().gen();
-            values.insert(
-                "parent_source".to_string(),
-                json!("no_parent".to_string()),
-            );
+            values.insert("parent_source".to_string(), json!("no_parent".to_string()));
 
             (trace_id, None)
         };
+
+        println!(
+            "enter span (or 0-width event span) with  name {}",
+            t.t_metadata().name()
+        );
 
         (
             id,
@@ -209,15 +203,16 @@ impl TelemetrySubscriber {
     }
 }
 
-
 // TODO: concept: don't assign trace ids implicitly for new spans (no trace id for, eg, tokio noise).
 // TODO: concept: trace ids generated at web framework edge _or_ passed in for multi-application traces
 impl Subscriber for TelemetrySubscriber {
-    fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() >= &tracing::Level::INFO // simple impl so I can see my app logs as distinct from all the tokio noise
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+        metadata.level() == &tracing::Level::INFO
+            || metadata.level() == &tracing::Level::WARN
+            || metadata.level() == &tracing::Level::ERROR
     }
 
-    fn new_span(&self, span: &Attributes) -> Id {
+    fn new_span(&self, span: &Attributes<'_>) -> Id {
         let (id, new_span) = self.build_span(span);
 
         // succeed or die. failure is unrecoverable (mutex poisoned)
@@ -238,7 +233,7 @@ impl Subscriber for TelemetrySubscriber {
     }
 
     // record additional values on span map
-    fn record(&self, span: &Id, values: &Record) {
+    fn record(&self, span: &Id, values: &Record<'_>) {
         // succeed or die. failure is unrecoverable (mutex poisoned)
         let mut spans = self.spans.lock().unwrap();
         if let Some(span_data) = spans.get_mut(&span) {
@@ -251,7 +246,7 @@ impl Subscriber for TelemetrySubscriber {
     }
 
     // record event (publish directly to telemetry, not a span)
-    fn event(&self, event: &Event) {
+    fn event(&self, event: &Event<'_>) {
         // report as span with zero-length interval
         let (id, new_span) = self.build_span(event);
 
@@ -260,13 +255,8 @@ impl Subscriber for TelemetrySubscriber {
         self.telem.report_data(values);
     }
 
-    fn enter(&self, span: &Id) {
-        self.push_current_span(span.clone());
-    }
-    fn exit(&self, span: &Id) {
-        // NOTE: assert popped span id == expected (provided span id)
-        self.pop_current_span();
-    }
+    fn enter(&self, span: &Id) { self.push_current_span(span.clone()); }
+    fn exit(&self, _span: &Id) { self.pop_current_span(); }
 
     // fn register_callsite( // not impl'd - site for future optimizations
     //     &self,
@@ -310,7 +300,8 @@ impl Subscriber for TelemetrySubscriber {
             );
 
             let now = Utc::now();
-            let elapsed = now.timestamp_subsec_millis() - dropped.initialized_at.timestamp_subsec_millis();
+            let elapsed =
+                now.timestamp_subsec_millis() - dropped.initialized_at.timestamp_subsec_millis();
 
             let mut values = dropped.into_values(id);
 

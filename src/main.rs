@@ -1,4 +1,4 @@
-// #![deny(warnings, rust_2018_idioms)]
+#![deny(warnings, rust_2018_idioms)]
 #![feature(type_alias_impl_trait)]
 mod capabilities;
 mod lib;

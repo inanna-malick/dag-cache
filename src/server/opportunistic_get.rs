@@ -43,6 +43,10 @@ fn extend<C: 'static + HasCacheCap>(caps: &C, node: ipfs_types::DagNode) -> api_
                 // iter over ref
                 frontier.push_back(hp.clone());
             }
+            info!(
+                "add node with hash {:?} to opportunistic get result",
+                hp.clone()
+            );
             res.push(ipfs_types::DagNodeWithHeader {
                 header: hp,
                 node: dn,

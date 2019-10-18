@@ -67,4 +67,3 @@ impl TelemetryCapability for Telemetry {
         self.report_data(data)
     }
 }
-
