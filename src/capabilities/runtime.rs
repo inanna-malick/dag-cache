@@ -1,6 +1,6 @@
-use crate::capabilities::telemetry::Telemetry;
 use crate::capabilities::ipfs_store::IPFSNode;
 use crate::capabilities::lru_cache::Cache;
+use crate::capabilities::telemetry::Telemetry;
 use crate::capabilities::{HasCacheCap, HasIPFSCap};
 
 pub struct Runtime(pub Telemetry, pub RuntimeCaps);

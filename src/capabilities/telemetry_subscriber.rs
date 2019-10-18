@@ -268,7 +268,7 @@ impl Subscriber for TelemetrySubscriber {
         let mut spans = self.spans.lock().unwrap();
         // should always be present
         if let Some(span_data) = spans.get_mut(id) {
-            span_data.ref_ct +=  1; // increment ref ct
+            span_data.ref_ct += 1; // increment ref ct
         }
         id.clone() // type sig of this function seems to compel cloning of id (&X -> X)
     }

@@ -13,9 +13,7 @@ use tracing::error;
 
 // catamorphism - a consuming change
 // recursively publish DAG node tree to IPFS, starting with leaf nodes
-pub async fn ipfs_publish_cata<
-    C: 'static + HasCacheCap  + HasIPFSCap + Sync + Send,
->(
+pub async fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     tree: ValidatedTree,
 ) -> Result<(u64, IPFSHash), DagCacheError> {
@@ -25,9 +23,7 @@ pub async fn ipfs_publish_cata<
 }
 
 // unsafe b/c it can take any 'focus' ClientSideHash and not just the root node of tree
-async fn ipfs_publish_cata_unsafe<
-    C: 'static + HasCacheCap +  HasIPFSCap + Sync + Send,
->(
+async fn ipfs_publish_cata_unsafe<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     tree: Arc<ValidatedTree>, // todo use async/await I guess, mb can avoid needing Arc? ugh
     node: bulk_put::DagNode,
@@ -51,7 +47,7 @@ async fn ipfs_publish_cata_unsafe<
     }
 }
 
-async fn upload_link<C: 'static + HasCacheCap +  HasIPFSCap + Sync + Send>(
+async fn upload_link<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     x: bulk_put::DagNodeLink,
     tree: Arc<ValidatedTree>,
     caps: Arc<C>,
@@ -102,9 +98,7 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
 }
 
 // worker thread - uses one-shot channel to return result to avoid unbounded stack growth
-async fn ipfs_publish_worker_async<
-    C: 'static + HasCacheCap + HasIPFSCap + Sync + Send,
->(
+async fn ipfs_publish_worker_async<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     tree: Arc<ValidatedTree>,
     // TODO: pass around pointers to node in stack frame (hm keys) instead of nodes
@@ -132,16 +126,14 @@ async fn ipfs_publish_worker_async<
     // might be a bit of an approximation, but w/e
     let size = size + dag_node.links.iter().map(|x| x.size).sum::<u64>();
 
-    let hash = put_and_cache(caps.clone(), dag_node).await?;
+    let hash = put_and_cache(caps.as_ref(), dag_node).await?;
     Ok((size, hash))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capabilities::{
-        CacheCapability, Event, HasCacheCap, HasIPFSCap, IPFSCapability,
-    };
+    use crate::capabilities::{CacheCapability, HasCacheCap, HasIPFSCap, IPFSCapability};
     use crate::lib;
     use crate::types::api::ClientSideHash;
     use crate::types::encodings::{Base58, Base64};

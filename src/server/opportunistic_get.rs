@@ -4,19 +4,18 @@ use crate::types::api as api_types;
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs as ipfs_types;
 use std::collections::VecDeque;
-use std::sync::Arc;
 use tracing::info;
 use tracing_futures::Instrument;
 
 pub async fn get<C: 'static + HasIPFSCap + HasCacheCap + Send + Sync>(
-    caps: Arc<C>,
+    caps: &C,
     k: ipfs_types::IPFSHash,
 ) -> Result<api_types::get::Resp, DagCacheError> {
     let f = async {
-        let dag_node = get_and_cache(caps.clone(), k.clone()).await?;
+        let dag_node = get_and_cache(caps, k).await?;
 
         // use cache to extend DAG node by following links as long as they exist in-memory
-        let extended = extend(caps.as_ref(), dag_node);
+        let extended = extend(caps, dag_node);
 
         Ok(extended)
     };

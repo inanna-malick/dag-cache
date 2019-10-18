@@ -30,19 +30,18 @@ impl Opt {
     /// parse opts into capabilities object, will panic if not configured correctly (TODO: FIXME)
     pub fn into_runtime(self) -> Runtime {
         let ipfs_node = format!("http://{}:{}", &self.ipfs_host, self.ipfs_port); // TODO: https...
-        let ipfs_node = IPFSNode::new(reqwest::Url::parse(&ipfs_node).unwrap_or_else(|_| panic!(
-            "unable to parse provided IPFS host + port ({:?}) as URL",
-            &ipfs_node
-        )));
+        let ipfs_node = IPFSNode::new(reqwest::Url::parse(&ipfs_node).unwrap_or_else(|_| {
+            panic!(
+                "unable to parse provided IPFS host + port ({:?}) as URL",
+                &ipfs_node
+            )
+        }));
 
         let telemetry = Telemetry::new(self.honeycomb_key);
 
         let cache = Cache::new(self.max_cache_entries);
 
-        let rt = RuntimeCaps {
-            cache,
-            ipfs_node,
-        };
+        let rt = RuntimeCaps { cache, ipfs_node };
 
         Runtime(telemetry, rt)
     }

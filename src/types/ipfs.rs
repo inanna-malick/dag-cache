@@ -61,11 +61,8 @@ impl IPFSHash {
     pub fn from_raw(raw: Base58) -> IPFSHash { IPFSHash(raw) }
 }
 
-
 impl std::fmt::Display for IPFSHash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug, Deserialize, Serialize)]

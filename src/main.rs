@@ -5,8 +5,8 @@ mod opts;
 mod server;
 mod types;
 
-use crate::capabilities::telemetry_subscriber::TelemetrySubscriber;
 use crate::capabilities::runtime::Runtime;
+use crate::capabilities::telemetry_subscriber::TelemetrySubscriber;
 use crate::server::app;
 use crate::types::grpc::server::IpfsCacheServer;
 use opts::Opt;

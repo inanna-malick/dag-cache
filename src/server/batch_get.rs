@@ -24,9 +24,7 @@ pub fn ipfs_fetch<C: 'static + HasIPFSCap + HasCacheCap + Sync + Send>(
 }
 
 // anamorphism - an unfolding change
-fn ipfs_fetch_ana_internal<
-    C: 'static + HasIPFSCap + HasCacheCap + Sync + Send,
->(
+fn ipfs_fetch_ana_internal<C: 'static + HasIPFSCap + HasCacheCap + Sync + Send>(
     caps: Arc<C>,
     hash: IPFSHash,
     resp_chan: mpsc::Sender<Result<DagNode, DagCacheError>>, // used to send completed nodes (eagerly)
@@ -45,15 +43,13 @@ fn ipfs_fetch_ana_internal<
 }
 
 // worker thread - uses one-shot channel to return result to avoid unbounded stack growth
-async fn ipfs_fetch_worker<
-    C: 'static + HasIPFSCap + HasCacheCap + Sync + Send,
->(
+async fn ipfs_fetch_worker<C: 'static + HasIPFSCap + HasCacheCap + Sync + Send>(
     caps: Arc<C>,
     hash: IPFSHash,
     mut resp_chan: mpsc::Sender<Result<DagNode, DagCacheError>>,
     to_populate: Arc<CHashMap<IPFSHash, ()>>, // used to memoize async fetches
 ) {
-    let res = get_and_cache(caps.clone(), hash.clone()).await;
+    let res = get_and_cache(caps.as_ref(), hash.clone()).await;
     match res {
         Ok(node) => {
             let links = node.links.clone();
