@@ -12,6 +12,9 @@ use tracing::span::{Attributes, Id, Record};
 use tracing::{Event, Metadata, Subscriber};
 use tracing_core::span::Current;
 
+
+// TODO/FIXME: failing due to (likely) some kind of deadlock bs. not sure how to fix. mb keep tracing ids outside main data structure?
+
 // for tracking current span
 thread_local! {
     static CURRENT_SPAN: RefCell<Vec<Id>> = RefCell::new(vec!());
