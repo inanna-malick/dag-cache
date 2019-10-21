@@ -180,11 +180,6 @@ impl TelemetrySubscriber {
             None
         };
 
-        println!(
-            "enter span (or 0-width event span) with  name {}",
-            t.t_metadata().name()
-        );
-
         (
             id,
             SpanData {
@@ -209,8 +204,6 @@ impl Subscriber for TelemetrySubscriber {
 
     fn new_span(&self, span: &Attributes<'_>) -> Id {
         let (id, new_span) = self.build_span(span);
-
-        println!("initialize span with id {:?}", &id);
 
         // FIXME: what if span id already exists in map? should I handle? assume no overlap possible b/c random?
         // ASSERTION: there should be no collisions here
@@ -250,26 +243,22 @@ impl Subscriber for TelemetrySubscriber {
     fn exit(&self, _span: &Id) { self.pop_current_span(); }
 
     fn clone_span(&self, id: &Id) -> Id {
-        // ref count ++
-        // should always be present
-        println!("clone span with id {:?}", &id);
         if let Some(mut span_data) = self.spans.get_mut(id) {
-            span_data.ref_ct += 1; // increment ref ct
+            // should always be present
+            span_data.ref_ct += 1;
         }
         id.clone() // type sig of this function seems to compel cloning of id (&X -> X)
     }
 
     fn try_close(&self, id: Id) -> bool {
-        println!("try close for span with id {:?}", &id);
-
         let dropped_span: Option<SpanData> = {
             if let Some(mut span_data) = self.spans.get_mut(&id) {
                 span_data.ref_ct -= 1; // decrement ref ct
                 let ref_ct = span_data.ref_ct;
-                drop(span_data); // explicit drop to avoid deadlock on possible subsequent removal
+                drop(span_data); // explicit drop to avoid deadlock on subsequent removal
 
                 if ref_ct == 0 {
-                    self.spans.remove(&id).map(|e| e.inner) // returns option already, no need for Some wrapper
+                    self.spans.remove(&id).map(|e| e.inner)
                 } else {
                     None
                 }
@@ -280,10 +269,10 @@ impl Subscriber for TelemetrySubscriber {
 
         if let Some(mut dropped) = dropped_span {
             // debug logging, not using tracing structured log b/c reentrant
-            println!(
-                "zero outstanding refs to span w/ id {:?}, sending to honeycomb",
-                &id
-            );
+            // println!(
+            //     "zero outstanding refs to span w/ id {:?}, sending to honeycomb",
+            //     &id
+            // );
 
             let now = Utc::now();
             let elapsed =
