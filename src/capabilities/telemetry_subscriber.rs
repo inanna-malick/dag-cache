@@ -1,12 +1,12 @@
 use crate::capabilities::telemetry::Telemetry;
 use ::libhoney::{json, Value};
+use chashmap::CHashMap;
 use chrono::{DateTime, Utc};
 use rand::Rng;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
-use std::sync::Mutex;
 use tracing::field::{Field, Visit};
 use tracing::span::{Attributes, Id, Record};
 use tracing::{Event, Metadata, Subscriber};
@@ -18,7 +18,7 @@ thread_local! {
 }
 
 struct SpanData {
-    trace_id: u128,
+    trace_id: Option<String>, // option used to impl lazy eval
     parent_id: Option<Id>,
     initialized_at: DateTime<Utc>,
     metadata: &'static Metadata<'static>,
@@ -26,7 +26,7 @@ struct SpanData {
 }
 
 impl SpanData {
-    fn into_values(self, id: Id) -> HashMap<String, Value> {
+    fn into_values(self, trace_id: String, id: Id) -> HashMap<String, Value> {
         let mut values = self.values;
         values.insert(
             // magic honeycomb string (trace.span_id)
@@ -36,7 +36,8 @@ impl SpanData {
         values.insert(
             // magic honeycomb string (trace.trace_id)
             "trace.trace_id".to_string(),
-            json!(format!("trace-{}", &self.trace_id)),
+            // using explicit trace id passed in from ctx (req'd for lazy eval)
+            json!(trace_id),
         );
         values.insert(
             // magic honeycomb string (trace.parent_id)
@@ -94,39 +95,54 @@ impl<'a> Visit for HoneycombVisitor<'a> {
     }
 }
 
-trait TelemetryThingy {
-    // event or span atributes
-    fn t_record(&self, visitor: &mut dyn Visit);
-    fn t_metadata(&self) -> &'static Metadata<'static>;
-    fn t_is_root(&self) -> bool;
-    fn t_parent(&self) -> Option<&Id>;
-}
-
-impl<'a> TelemetryThingy for Attributes<'a> {
-    fn t_record(&self, visitor: &mut dyn Visit) { self.record(visitor) }
-    fn t_metadata(&self) -> &'static Metadata<'static> { self.metadata() }
-    fn t_is_root(&self) -> bool { self.is_root() }
-    fn t_parent(&self) -> Option<&Id> { self.parent() }
-}
-
-impl<'a> TelemetryThingy for Event<'a> {
-    fn t_record(&self, visitor: &mut dyn Visit) { self.record(visitor) }
-    fn t_metadata(&self) -> &'static Metadata<'static> { self.metadata() }
-    fn t_is_root(&self) -> bool { self.is_root() }
-    fn t_parent(&self) -> Option<&Id> { self.parent() }
-}
-
 pub struct TelemetrySubscriber {
     telem: Telemetry,
     // TODO: more optimal repr? is mutex bad in this path? idk, find out
-    spans: Mutex<HashMap<Id, RefCt<SpanData>>>,
+    spans: CHashMap<Id, RefCt<SpanData>>,
+}
+
+fn gen_trace_id() -> String {
+    let trace_id: u128 = rand::thread_rng().gen();
+    format!("trace-{}", trace_id)
 }
 
 impl TelemetrySubscriber {
     pub fn new(telem: Telemetry) -> Self {
         TelemetrySubscriber {
-            spans: Mutex::new(HashMap::new()),
+            spans: CHashMap::new(),
             telem,
+        }
+    }
+
+    // FIXME: site of future stack overflow (maybe)
+    // can't think of a better way to manage ownership - want to retain mut borrow over all spans in path while traversing
+    /// this function provides lazy initialization of trace ids (only generated when req'd to observe honeycomb event/span)
+    fn get_or_gen_trace_id(&self, id: &Id) -> String {
+        match self.spans.get_mut(id) {
+            Some(mut span) => {
+                match &span.trace_id {
+                    Some(tid) => tid.clone(),
+                    None => {
+                        let new_trace_id = match &span.parent_id {
+                            Some(parent_id) => {
+                                // recurse
+                                self.get_or_gen_trace_id(parent_id)
+                            }
+                            None => {
+                                // found root span with no trace id, generate trace_id
+                                gen_trace_id()
+                            }
+                        };
+                        span.trace_id = Some(new_trace_id.clone());
+                        new_trace_id
+                    }
+                }
+            }
+            None => {
+                println!("really didn't expect this span parent lookup to fail, generating random trace id");
+                // FIXME - maybe use a specific placeholder value for trace_id to track this case?
+                gen_trace_id()
+            }
         }
     }
 
@@ -149,40 +165,18 @@ impl TelemetrySubscriber {
         let mut visitor = HoneycombVisitor(&mut values);
         t.t_record(&mut visitor);
 
-        // succeed or die. failure is unrecoverable (mutex poisoned)
-        let spans = self.spans.lock().unwrap();
-
-        let (trace_id, parent_id) = if let Some(parent_id) = t.t_parent() {
+        let parent_id = if let Some(parent_id) = t.t_parent() {
             // explicit parent
-            values.insert("parent_source".to_string(), json!("explicit".to_string()));
-            // error if parent not in map (need to grab it to get trace id)
-            let parent = &spans[&parent_id];
-            (parent.trace_id, Some(parent_id.clone()))
+            Some(parent_id.clone())
         } else if t.t_is_root() {
             // don't bother checking thread local if span is explicitly root according to this fn
-            values.insert(
-                "parent_source".to_string(),
-                json!("explicit_root".to_string()),
-            );
-
-            let trace_id = rand::thread_rng().gen();
-            (trace_id, None)
+            None
         } else if let Some(parent_id) = self.peek_current_span() {
-            // possible implicit parent from threadlocal ctx
-            // TODO: check with, idk, eliza or similar (or run experiment) to see if this is correct
-            values.insert(
-                "parent_source".to_string(),
-                json!("implicit_parent".to_string()),
-            );
-
-            let parent = &spans[&parent_id];
-            (parent.trace_id, Some(parent_id))
+            // implicit parent from threadlocal ctx
+            Some(parent_id)
         } else {
             // no parent span, thus this is a root span
-            let trace_id = rand::thread_rng().gen();
-            values.insert("parent_source".to_string(), json!("no_parent".to_string()));
-
-            (trace_id, None)
+            None
         };
 
         println!(
@@ -195,7 +189,7 @@ impl TelemetrySubscriber {
             SpanData {
                 initialized_at: now,
                 metadata: t.t_metadata(),
-                trace_id,
+                trace_id: None, // always lazy
                 parent_id,
                 values,
             },
@@ -215,13 +209,10 @@ impl Subscriber for TelemetrySubscriber {
     fn new_span(&self, span: &Attributes<'_>) -> Id {
         let (id, new_span) = self.build_span(span);
 
-        // succeed or die. failure is unrecoverable (mutex poisoned)
-        let mut spans = self.spans.lock().unwrap();
-
         // FIXME: what if span id already exists in map? should I handle? assume no overlap possible b/c random?
         // ASSERTION: there should be no collisions here
         // insert attributes from span into map
-        spans.insert(
+        self.spans.insert(
             id.clone(),
             RefCt {
                 ref_ct: 1,
@@ -234,23 +225,20 @@ impl Subscriber for TelemetrySubscriber {
 
     // record additional values on span map
     fn record(&self, span: &Id, values: &Record<'_>) {
-        // succeed or die. failure is unrecoverable (mutex poisoned)
-        let mut spans = self.spans.lock().unwrap();
-        if let Some(span_data) = spans.get_mut(&span) {
+        if let Some(mut span_data) = self.spans.get_mut(&span) {
             values.record(&mut HoneycombVisitor(&mut span_data.values)); // record any new values
         }
     }
 
-    fn record_follows_from(&self, _span: &Id, _follows: &Id) {
-        // no-op for now, iirc honeycomb doesn't support this yet
-    }
+    fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
 
     // record event (publish directly to telemetry, not a span)
     fn event(&self, event: &Event<'_>) {
         // report as span with zero-length interval
-        let (id, new_span) = self.build_span(event);
+        let (span_id, new_span) = self.build_span(event);
 
-        let values = new_span.into_values(id);
+        let trace_id = self.get_or_gen_trace_id(&span_id);
+        let values = new_span.into_values(trace_id, span_id);
 
         self.telem.report_data(values);
     }
@@ -258,16 +246,10 @@ impl Subscriber for TelemetrySubscriber {
     fn enter(&self, span: &Id) { self.push_current_span(span.clone()); }
     fn exit(&self, _span: &Id) { self.pop_current_span(); }
 
-    // fn register_callsite( // not impl'd - site for future optimizations
-    //     &self,
-    //     metadata: &'static Metadata<'static>
-    // ) -> Interest { ... }
     fn clone_span(&self, id: &Id) -> Id {
         // ref count ++
-        // succeed or die. failure is unrecoverable (mutex poisoned)
-        let mut spans = self.spans.lock().unwrap();
         // should always be present
-        if let Some(span_data) = spans.get_mut(id) {
+        if let Some(mut span_data) = self.spans.get_mut(id) {
             span_data.ref_ct += 1; // increment ref ct
         }
         id.clone() // type sig of this function seems to compel cloning of id (&X -> X)
@@ -275,16 +257,11 @@ impl Subscriber for TelemetrySubscriber {
 
     fn try_close(&self, id: Id) -> bool {
         let dropped_span: Option<SpanData> = {
-            // succeed or die. failure is unrecoverable (mutex poisoned)
-            // FIXME FIXME FIXME
-            // FIXME FIXME FIXME: not unwind safe, should NOT panic here
-            // FIXME FIXME FIXME
-            let mut spans = self.spans.lock().unwrap();
-            if let Some(span_data) = spans.get_mut(&id) {
+            if let Some(mut span_data) = self.spans.get_mut(&id) {
                 span_data.ref_ct -= 1; // decrement ref ct
 
                 if span_data.ref_ct == 0 {
-                    spans.remove(&id).map(|e| e.inner) // returns option already, no need for Some wrapper
+                    self.spans.remove(&id).map(|e| e.inner) // returns option already, no need for Some wrapper
                 } else {
                     None
                 }
@@ -294,18 +271,20 @@ impl Subscriber for TelemetrySubscriber {
         };
 
         if let Some(dropped) = dropped_span {
-            println!(
-                "zero outstanding refs to span w/ id {:?}, sending to honeycomb",
-                &id
-            );
+            // debug logging, not using tracing structured log b/c reentrant
+            // println!(
+            //     "zero outstanding refs to span w/ id {:?}, sending to honeycomb",
+            //     &id
+            // );
 
             let now = Utc::now();
             let elapsed =
                 now.timestamp_subsec_millis() - dropped.initialized_at.timestamp_subsec_millis();
 
-            let mut values = dropped.into_values(id);
+            let trace_id = self.get_or_gen_trace_id(&id);
+            let mut values = dropped.into_values(trace_id, id);
 
-            values.insert("duration_ms".to_string(), json!(elapsed)); // NOTE: is fucked
+            values.insert("duration_ms".to_string(), json!(elapsed));
 
             self.telem.report_data(values);
             true
@@ -316,12 +295,32 @@ impl Subscriber for TelemetrySubscriber {
 
     fn current_span(&self) -> Current {
         if let Some(id) = self.peek_current_span() {
-            // succeed or die. failure is unrecoverable (mutex poisoned) (TODO: learn better patterns: less mutexes)
-            let spans = self.spans.lock().unwrap();
-            if let Some(meta) = spans.get(&id).map(|span| span.metadata) {
+            if let Some(meta) = self.spans.get(&id).map(|span| span.metadata) {
                 return Current::new(id, meta);
             }
         }
         Current::none()
     }
+}
+
+trait TelemetryThingy {
+    // event or span atributes
+    fn t_record(&self, visitor: &mut dyn Visit);
+    fn t_metadata(&self) -> &'static Metadata<'static>;
+    fn t_is_root(&self) -> bool;
+    fn t_parent(&self) -> Option<&Id>;
+}
+
+impl<'a> TelemetryThingy for Attributes<'a> {
+    fn t_record(&self, visitor: &mut dyn Visit) { self.record(visitor) }
+    fn t_metadata(&self) -> &'static Metadata<'static> { self.metadata() }
+    fn t_is_root(&self) -> bool { self.is_root() }
+    fn t_parent(&self) -> Option<&Id> { self.parent() }
+}
+
+impl<'a> TelemetryThingy for Event<'a> {
+    fn t_record(&self, visitor: &mut dyn Visit) { self.record(visitor) }
+    fn t_metadata(&self) -> &'static Metadata<'static> { self.metadata() }
+    fn t_is_root(&self) -> bool { self.is_root() }
+    fn t_parent(&self) -> Option<&Id> { self.parent() }
 }

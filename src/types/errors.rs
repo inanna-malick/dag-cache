@@ -31,5 +31,7 @@ pub struct ProtoDecodingError {
 }
 
 impl From<ProtoDecodingError> for Status {
-    fn from(error: ProtoDecodingError) -> Status { std::convert::From::from(DagCacheError::ProtoDecodingError(error)) }
+    fn from(error: ProtoDecodingError) -> Status {
+        std::convert::From::from(DagCacheError::ProtoDecodingError(error))
+    }
 }
