@@ -12,9 +12,6 @@ use tracing::span::{Attributes, Id, Record};
 use tracing::{Event, Metadata, Subscriber};
 use tracing_core::span::Current;
 
-
-// TODO/FIXME: failing due to (likely) some kind of deadlock bs. not sure how to fix. mb keep tracing ids outside main data structure?
-
 // for tracking current span
 thread_local! {
     static CURRENT_SPAN: RefCell<Vec<Id>> = RefCell::new(vec!());
@@ -29,19 +26,23 @@ struct SpanData {
 }
 
 impl SpanData {
-    fn into_values(self, trace_id: String, id: Id) -> HashMap<String, Value> {
+    fn into_values(self, trace_id: Option<String>, id: Id) -> HashMap<String, Value> {
         let mut values = self.values;
         values.insert(
             // magic honeycomb string (trace.span_id)
             "trace.span_id".to_string(),
             json!(format!("span-{}", id.into_u64())),
         );
-        values.insert(
-            // magic honeycomb string (trace.trace_id)
-            "trace.trace_id".to_string(),
-            // using explicit trace id passed in from ctx (req'd for lazy eval)
-            json!(trace_id),
-        );
+
+        if let Some(trace_id) = trace_id {
+            values.insert(
+                // magic honeycomb string (trace.trace_id)
+                "trace.trace_id".to_string(),
+                // using explicit trace id passed in from ctx (req'd for lazy eval)
+                json!(trace_id),
+            );
+        };
+
         values.insert(
             // magic honeycomb string (trace.parent_id)
             "trace.parent_id".to_string(),
@@ -63,7 +64,8 @@ impl SpanData {
         values.insert("name".to_string(), json!(self.metadata.name()));
         values.insert("target".to_string(), json!(self.metadata.target())); // not honeycomb-special but tracing-provided
 
-        values.insert("service_name".to_string(), json!("dummy-svc".to_string()));
+        // TODO: configurable?
+        values.insert("service_name".to_string(), json!("ipfs-cache".to_string()));
 
         values
     }
@@ -106,7 +108,9 @@ pub struct TelemetrySubscriber {
 
 fn gen_trace_id() -> String {
     let trace_id: u128 = rand::thread_rng().gen();
-    format!("trace-{}", trace_id)
+    let res = format!("trace-{}", trace_id);
+    println!("result of gen_trace_id call is {}", &res);
+    res
 }
 
 impl TelemetrySubscriber {
@@ -117,34 +121,55 @@ impl TelemetrySubscriber {
         }
     }
 
-    // FIXME: site of future stack overflow (maybe)
-    // can't think of a better way to manage ownership - want to retain mut borrow over all spans in path while traversing
     /// this function provides lazy initialization of trace ids (only generated when req'd to observe honeycomb event/span)
-    fn get_or_gen_trace_id(&self, span: &mut SpanData) -> String {
-        match &span.trace_id {
-            Some(tid) => tid.clone(),
-            None => {
-                let new_trace_id = match &span.parent_id {
-                    Some(parent_id) => {
-                        // recurse
-                        match self.spans.get_mut(parent_id) {
-                            Some(mut span) => self.get_or_gen_trace_id(&mut span),
-                            None => {
-                                println!("didn't expect span parent lookup to fail, gen trace id for parent span with id {:?}", &parent_id);
-                                // FIXME - maybe use a specific placeholder value for trace_id to track this case?
-                                gen_trace_id()
-                            }
+    /// when a span's trace id is requested, that span and any parent spans can have their trace id evaluated and saved
+    /// this function maintains an explicit stack of write guards to ensure no invalid trace id hierarchies result
+    fn get_or_gen_trace_id(&self, target_id: &Id) -> String {
+        let mut path: Vec<chashmap::WriteGuard<Id, RefCt<SpanData>>> = vec![];
+        let mut id = target_id.clone();
+
+        let trace_id = loop {
+            match self.spans.get_mut(&id) {
+                Some(mut span) => {
+                    match &span.trace_id {
+                        Some(tid) => {
+                            // found already-eval'd trace id
+                            break tid.clone();
                         }
-                    }
-                    None => {
-                        // found root span with no trace id, generate trace_id
-                        gen_trace_id()
-                    }
-                };
-                span.trace_id = Some(new_trace_id.clone());
-                new_trace_id
+                        None => {
+                            // span has no trace, must be updated as part of this call
+                            match &span.parent_id {
+                                Some(parent_id) => {
+                                    id = parent_id.clone();
+                                }
+                                None => {
+                                    // found root span with no trace id, generate trace_id
+                                    let trace_id = gen_trace_id();
+                                    println!("found root span {:?} w/ no trace id, gen trace_id resulting in {}", &id, trace_id);
+                                    // subsequent break means we won't push span onto path so just update inline
+                                    span.trace_id = Some(trace_id.clone());
+                                    break trace_id;
+                                }
+                            };
+
+                            path.push(span);
+                        }
+                    };
+                }
+                None => {
+                    println!("did not expect this to happen - id deref fail during parent trace");
+                    break gen_trace_id();
+                }
             }
+        };
+
+        for mut span in path {
+            span.trace_id = Some(trace_id.clone());
         }
+
+        println!("generated (or fetched) trace id {} for span with id {:?}", trace_id, target_id);
+
+        trace_id
     }
 
     fn peek_current_span(&self) -> Option<Id> { CURRENT_SPAN.with(|c| c.borrow().last().cloned()) }
@@ -231,9 +256,13 @@ impl Subscriber for TelemetrySubscriber {
     // record event (publish directly to telemetry, not a span)
     fn event(&self, event: &Event<'_>) {
         // report as span with zero-length interval
-        let (span_id, mut new_span) = self.build_span(event);
+        let (span_id, new_span) = self.build_span(event);
 
-        let trace_id = self.get_or_gen_trace_id(&mut new_span);
+        let trace_id = new_span.parent_id.as_ref().map(|pid| {
+            // TODO: use parent trace id, if it exists
+            self.get_or_gen_trace_id(pid)
+        });
+
         let values = new_span.into_values(trace_id, span_id);
 
         self.telem.report_data(values);
@@ -251,14 +280,16 @@ impl Subscriber for TelemetrySubscriber {
     }
 
     fn try_close(&self, id: Id) -> bool {
-        let dropped_span: Option<SpanData> = {
+        let dropped_span: Option<(SpanData, String)> = {
             if let Some(mut span_data) = self.spans.get_mut(&id) {
                 span_data.ref_ct -= 1; // decrement ref ct
                 let ref_ct = span_data.ref_ct;
                 drop(span_data); // explicit drop to avoid deadlock on subsequent removal
 
                 if ref_ct == 0 {
-                    self.spans.remove(&id).map(|e| e.inner)
+                    // gen trace id before removing.. mild wart...
+                    let trace_id = self.get_or_gen_trace_id(&id);
+                    self.spans.remove(&id).map(move |e| (e.inner, trace_id))
                 } else {
                     None
                 }
@@ -267,19 +298,12 @@ impl Subscriber for TelemetrySubscriber {
             }
         };
 
-        if let Some(mut dropped) = dropped_span {
-            // debug logging, not using tracing structured log b/c reentrant
-            // println!(
-            //     "zero outstanding refs to span w/ id {:?}, sending to honeycomb",
-            //     &id
-            // );
-
+        if let Some((dropped, trace_id)) = dropped_span {
             let now = Utc::now();
             let elapsed =
                 now.timestamp_subsec_millis() - dropped.initialized_at.timestamp_subsec_millis();
 
-            let trace_id = self.get_or_gen_trace_id(&mut dropped);
-            let mut values = dropped.into_values(trace_id, id);
+            let mut values = dropped.into_values(Some(trace_id), id);
 
             values.insert("duration_ms".to_string(), json!(elapsed));
 
