@@ -17,8 +17,12 @@ impl IPFSNode {
 
 #[async_trait]
 impl IPFSCapability for IPFSNode {
+    // TODO TODO FIXME: handle case where id not known to IPFS via means other than indefinite timeout...
+    // FIXME FIXME FIXME
     async fn get(&self, k: ipfs::IPFSHash) -> Result<ipfs::DagNode, DagCacheError> {
         let f = async {
+            println!("ipfs get start");
+
             let mut url = self.0.clone();
             url.set_path("api/v0/object/get");
             url.query_pairs_mut()
@@ -46,6 +50,8 @@ impl IPFSCapability for IPFSNode {
                     .collect(),
             };
 
+            println!("ipfs get done");
+
             Ok(node)
         };
 
@@ -53,6 +59,8 @@ impl IPFSCapability for IPFSNode {
     }
 
     async fn put(&self, v: ipfs::DagNode) -> Result<ipfs::IPFSHash, DagCacheError> {
+        println!("ipfs put start");
+
         let mut url = self.0.clone();
         url.set_path("api/v0/object/put");
         url.query_pairs_mut().append_pair("datafieldenc", "base64");
@@ -86,6 +94,8 @@ impl IPFSCapability for IPFSNode {
             event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
             DagCacheError::IPFSJsonError
         })?;
+
+        println!("ipfs put done");
 
         Ok(hash)
     }

@@ -117,31 +117,29 @@ impl TelemetrySubscriber {
     // FIXME: site of future stack overflow (maybe)
     // can't think of a better way to manage ownership - want to retain mut borrow over all spans in path while traversing
     /// this function provides lazy initialization of trace ids (only generated when req'd to observe honeycomb event/span)
-    fn get_or_gen_trace_id(&self, id: &Id) -> String {
-        match self.spans.get_mut(id) {
-            Some(mut span) => {
-                match &span.trace_id {
-                    Some(tid) => tid.clone(),
-                    None => {
-                        let new_trace_id = match &span.parent_id {
-                            Some(parent_id) => {
-                                // recurse
-                                self.get_or_gen_trace_id(parent_id)
-                            }
+    fn get_or_gen_trace_id(&self, span: &mut SpanData) -> String {
+        match &span.trace_id {
+            Some(tid) => tid.clone(),
+            None => {
+                let new_trace_id = match &span.parent_id {
+                    Some(parent_id) => {
+                        // recurse
+                        match self.spans.get_mut(parent_id) {
+                            Some(mut span) => self.get_or_gen_trace_id(&mut span),
                             None => {
-                                // found root span with no trace id, generate trace_id
+                                println!("didn't expect span parent lookup to fail, gen trace id for parent span with id {:?}", &parent_id);
+                                // FIXME - maybe use a specific placeholder value for trace_id to track this case?
                                 gen_trace_id()
                             }
-                        };
-                        span.trace_id = Some(new_trace_id.clone());
-                        new_trace_id
+                        }
                     }
-                }
-            }
-            None => {
-                println!("really didn't expect this span parent lookup to fail, generating random trace id");
-                // FIXME - maybe use a specific placeholder value for trace_id to track this case?
-                gen_trace_id()
+                    None => {
+                        // found root span with no trace id, generate trace_id
+                        gen_trace_id()
+                    }
+                };
+                span.trace_id = Some(new_trace_id.clone());
+                new_trace_id
             }
         }
     }
@@ -209,6 +207,8 @@ impl Subscriber for TelemetrySubscriber {
     fn new_span(&self, span: &Attributes<'_>) -> Id {
         let (id, new_span) = self.build_span(span);
 
+        println!("initialize span with id {:?}", &id);
+
         // FIXME: what if span id already exists in map? should I handle? assume no overlap possible b/c random?
         // ASSERTION: there should be no collisions here
         // insert attributes from span into map
@@ -235,9 +235,9 @@ impl Subscriber for TelemetrySubscriber {
     // record event (publish directly to telemetry, not a span)
     fn event(&self, event: &Event<'_>) {
         // report as span with zero-length interval
-        let (span_id, new_span) = self.build_span(event);
+        let (span_id, mut new_span) = self.build_span(event);
 
-        let trace_id = self.get_or_gen_trace_id(&span_id);
+        let trace_id = self.get_or_gen_trace_id(&mut new_span);
         let values = new_span.into_values(trace_id, span_id);
 
         self.telem.report_data(values);
@@ -249,6 +249,7 @@ impl Subscriber for TelemetrySubscriber {
     fn clone_span(&self, id: &Id) -> Id {
         // ref count ++
         // should always be present
+        println!("clone span with id {:?}", &id);
         if let Some(mut span_data) = self.spans.get_mut(id) {
             span_data.ref_ct += 1; // increment ref ct
         }
@@ -256,13 +257,17 @@ impl Subscriber for TelemetrySubscriber {
     }
 
     fn try_close(&self, id: Id) -> bool {
+        println!("try close for span with id {:?}", &id);
+
         let dropped_span: Option<SpanData> = {
             if let Some(mut span_data) = self.spans.get_mut(&id) {
                 span_data.ref_ct -= 1; // decrement ref ct
 
                 if span_data.ref_ct == 0 {
+                    println!("drop span with id {:?}", &id);
                     self.spans.remove(&id).map(|e| e.inner) // returns option already, no need for Some wrapper
                 } else {
+                    println!("span with id {:?} has {} remaining refs, not removing", &id, span_data.ref_ct);
                     None
                 }
             } else {
@@ -270,18 +275,18 @@ impl Subscriber for TelemetrySubscriber {
             }
         };
 
-        if let Some(dropped) = dropped_span {
+        if let Some(mut dropped) = dropped_span {
             // debug logging, not using tracing structured log b/c reentrant
-            // println!(
-            //     "zero outstanding refs to span w/ id {:?}, sending to honeycomb",
-            //     &id
-            // );
+            println!(
+                "zero outstanding refs to span w/ id {:?}, sending to honeycomb",
+                &id
+            );
 
             let now = Utc::now();
             let elapsed =
                 now.timestamp_subsec_millis() - dropped.initialized_at.timestamp_subsec_millis();
 
-            let trace_id = self.get_or_gen_trace_id(&id);
+            let trace_id = self.get_or_gen_trace_id(&mut dropped);
             let mut values = dropped.into_values(trace_id, id);
 
             values.insert("duration_ms".to_string(), json!(elapsed));
