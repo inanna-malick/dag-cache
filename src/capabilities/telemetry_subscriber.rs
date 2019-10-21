@@ -265,12 +265,12 @@ impl Subscriber for TelemetrySubscriber {
         let dropped_span: Option<SpanData> = {
             if let Some(mut span_data) = self.spans.get_mut(&id) {
                 span_data.ref_ct -= 1; // decrement ref ct
+                let ref_ct = span_data.ref_ct;
+                drop(span_data); // explicit drop to avoid deadlock on possible subsequent removal
 
-                if span_data.ref_ct == 0 {
-                    println!("drop span with id {:?}", &id);
+                if ref_ct == 0 {
                     self.spans.remove(&id).map(|e| e.inner) // returns option already, no need for Some wrapper
                 } else {
-                    println!("span with id {:?} has {} remaining refs, not removing", &id, span_data.ref_ct);
                     None
                 }
             } else {
