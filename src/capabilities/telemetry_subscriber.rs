@@ -18,7 +18,7 @@ thread_local! {
 }
 
 struct SpanData {
-    trace_id: Option<String>, // option used to impl lazy eval
+    trace_id: Option<u64>, // option used to impl lazy eval
     parent_id: Option<Id>,
     initialized_at: DateTime<Utc>,
     metadata: &'static Metadata<'static>,
@@ -26,7 +26,7 @@ struct SpanData {
 }
 
 impl SpanData {
-    fn into_values(self, trace_id: Option<String>, id: Id) -> HashMap<String, Value> {
+    fn into_values(self, trace_id: Option<u64>, id: Id) -> HashMap<String, Value> {
         let mut values = self.values;
         values.insert(
             // magic honeycomb string (trace.span_id)
@@ -39,7 +39,7 @@ impl SpanData {
                 // magic honeycomb string (trace.trace_id)
                 "trace.trace_id".to_string(),
                 // using explicit trace id passed in from ctx (req'd for lazy eval)
-                json!(trace_id),
+                json!(format!("trace-{}", trace_id)),
             );
         };
 
@@ -87,30 +87,43 @@ impl<T> DerefMut for RefCt<T> {
 }
 
 // just clone values into telemetry-appropriate hash map
-struct HoneycombVisitor<'a>(&'a mut HashMap<String, Value>);
+struct HoneycombVisitor<'a> {
+    accumulator: &'a mut HashMap<String, Value>,
+    explicit_trace_id: Option<u64>,
+}
 
 impl<'a> Visit for HoneycombVisitor<'a> {
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        println!(">> record u64");
+        if field.name() == "trace_id".to_string() {
+            println!("found explicit trace id {}", &value);
+            self.explicit_trace_id = Some(value);
+        } else {
+            self.accumulator
+                .insert(format!("telemetry.{}", field.name()), json!(value));
+        }
+    }
+
     // TODO: special visitors for various formats that honeycomb.io supports
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+        println!(">> record debug for {}", &field.name());
         // todo: more granular, per-type, etc
         // TODO: mb don't store 1x field name per span, instead use fmt-style trick w/ field id's by reading metadata..
         let s = format!("{:?}", value); // using 'telemetry.' namespace to disambiguate from system-level names
-        self.0
+        self.accumulator
             .insert(format!("telemetry.{}", field.name()), json!(s));
     }
 }
 
 pub struct TelemetrySubscriber {
     telem: Telemetry,
-    // TODO: more optimal repr? is mutex bad in this path? idk, find out
     spans: CHashMap<Id, RefCt<SpanData>>,
 }
 
-fn gen_trace_id() -> String {
-    let trace_id: u128 = rand::thread_rng().gen();
-    let res = format!("trace-{}", trace_id);
-    println!("result of gen_trace_id call is {}", &res);
-    res
+fn gen_trace_id() -> u64 {
+    // NOTE: using u64 for trace id's b/c tracing has a u64-specific handler but not u128
+    // TODO: impl u128 specific handler (maybe)
+    rand::thread_rng().gen()
 }
 
 impl TelemetrySubscriber {
@@ -124,7 +137,7 @@ impl TelemetrySubscriber {
     /// this function provides lazy initialization of trace ids (only generated when req'd to observe honeycomb event/span)
     /// when a span's trace id is requested, that span and any parent spans can have their trace id evaluated and saved
     /// this function maintains an explicit stack of write guards to ensure no invalid trace id hierarchies result
-    fn get_or_gen_trace_id(&self, target_id: &Id) -> String {
+    fn get_or_gen_trace_id(&self, target_id: &Id) -> u64 {
         let mut path: Vec<chashmap::WriteGuard<Id, RefCt<SpanData>>> = vec![];
         let mut id = target_id.clone();
 
@@ -147,7 +160,7 @@ impl TelemetrySubscriber {
                                     let trace_id = gen_trace_id();
                                     println!("found root span {:?} w/ no trace id, gen trace_id resulting in {}", &id, trace_id);
                                     // subsequent break means we won't push span onto path so just update inline
-                                    span.trace_id = Some(trace_id.clone());
+                                    span.trace_id = Some(trace_id);
                                     break trace_id;
                                 }
                             };
@@ -167,7 +180,10 @@ impl TelemetrySubscriber {
             span.trace_id = Some(trace_id.clone());
         }
 
-        println!("generated (or fetched) trace id {} for span with id {:?}", trace_id, target_id);
+        println!(
+            "generated (or fetched) trace id {} for span with id {:?}",
+            trace_id, target_id
+        );
 
         trace_id
     }
@@ -188,7 +204,10 @@ impl TelemetrySubscriber {
         let id = Id::from_u64(u);
 
         let mut values = HashMap::new();
-        let mut visitor = HoneycombVisitor(&mut values);
+        let mut visitor = HoneycombVisitor {
+            accumulator: &mut values,
+            explicit_trace_id: None,
+        };
         t.t_record(&mut visitor);
 
         let parent_id = if let Some(parent_id) = t.t_parent() {
@@ -210,7 +229,7 @@ impl TelemetrySubscriber {
             SpanData {
                 initialized_at: now,
                 metadata: t.t_metadata(),
-                trace_id: None, // always lazy
+                trace_id: visitor.explicit_trace_id, // lazy, unless explicit trace id provided
                 parent_id,
                 values,
             },
@@ -218,8 +237,6 @@ impl TelemetrySubscriber {
     }
 }
 
-// TODO: concept: don't assign trace ids implicitly for new spans (no trace id for, eg, tokio noise).
-// TODO: concept: trace ids generated at web framework edge _or_ passed in for multi-application traces
 impl Subscriber for TelemetrySubscriber {
     fn enabled(&self, metadata: &Metadata<'_>) -> bool {
         metadata.level() == &tracing::Level::INFO
@@ -246,8 +263,24 @@ impl Subscriber for TelemetrySubscriber {
 
     // record additional values on span map
     fn record(&self, span: &Id, values: &Record<'_>) {
+        println!("subscriber fn record for span with id {:?}", &span);
         if let Some(mut span_data) = self.spans.get_mut(&span) {
-            values.record(&mut HoneycombVisitor(&mut span_data.values)); // record any new values
+            let mut visitor = HoneycombVisitor {
+                accumulator: &mut span_data.values,
+                explicit_trace_id: None,
+            };
+            values.record(&mut visitor);
+
+            if let Some(explicit_trace_id) = visitor.explicit_trace_id {
+                match span_data.trace_id {
+                    Some(preexisting) => {
+                        println!("trying to set trace id to {} for span which already has one, {}, no-op", &explicit_trace_id, &preexisting);
+                    }
+                    None => {
+                        span_data.trace_id = Some(explicit_trace_id);
+                    }
+                }
+            }
         }
     }
 
@@ -280,7 +313,7 @@ impl Subscriber for TelemetrySubscriber {
     }
 
     fn try_close(&self, id: Id) -> bool {
-        let dropped_span: Option<(SpanData, String)> = {
+        let dropped_span: Option<(SpanData, u64)> = {
             if let Some(mut span_data) = self.spans.get_mut(&id) {
                 span_data.ref_ct -= 1; // decrement ref ct
                 let ref_ct = span_data.ref_ct;
@@ -300,8 +333,11 @@ impl Subscriber for TelemetrySubscriber {
 
         if let Some((dropped, trace_id)) = dropped_span {
             let now = Utc::now();
-            let elapsed =
-                now.timestamp_subsec_millis() - dropped.initialized_at.timestamp_subsec_millis();
+            let now = now.timestamp_subsec_millis();
+            let init_at = dropped.initialized_at.timestamp_subsec_millis();
+            println!("find elapsed, now={}, init at={}", &now, &init_at);
+            let elapsed = now - init_at;
+                // lmao what the fuck how does this panic ^
 
             let mut values = dropped.into_values(Some(trace_id), id);
 
