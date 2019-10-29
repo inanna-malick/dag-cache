@@ -94,7 +94,6 @@ struct HoneycombVisitor<'a> {
 
 impl<'a> Visit for HoneycombVisitor<'a> {
     fn record_u64(&mut self, field: &Field, value: u64) {
-        println!(">> record u64");
         if field.name() == "trace_id".to_string() {
             println!("found explicit trace id {}", &value);
             self.explicit_trace_id = Some(value);
@@ -106,7 +105,6 @@ impl<'a> Visit for HoneycombVisitor<'a> {
 
     // TODO: special visitors for various formats that honeycomb.io supports
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-        println!(">> record debug for {}", &field.name());
         // todo: more granular, per-type, etc
         // TODO: mb don't store 1x field name per span, instead use fmt-style trick w/ field id's by reading metadata..
         let s = format!("{:?}", value); // using 'telemetry.' namespace to disambiguate from system-level names
@@ -247,6 +245,8 @@ impl Subscriber for TelemetrySubscriber {
     fn new_span(&self, span: &Attributes<'_>) -> Id {
         let (id, new_span) = self.build_span(span);
 
+        println!(":: build new span with id {:?} for {:?}", id, span);
+
         // FIXME: what if span id already exists in map? should I handle? assume no overlap possible b/c random?
         // ASSERTION: there should be no collisions here
         // insert attributes from span into map
@@ -263,7 +263,6 @@ impl Subscriber for TelemetrySubscriber {
 
     // record additional values on span map
     fn record(&self, span: &Id, values: &Record<'_>) {
-        println!("subscriber fn record for span with id {:?}", &span);
         if let Some(mut span_data) = self.spans.get_mut(&span) {
             let mut visitor = HoneycombVisitor {
                 accumulator: &mut span_data.values,
@@ -301,8 +300,14 @@ impl Subscriber for TelemetrySubscriber {
         self.telem.report_data(values);
     }
 
-    fn enter(&self, span: &Id) { self.push_current_span(span.clone()); }
-    fn exit(&self, _span: &Id) { self.pop_current_span(); }
+    fn enter(&self, span: &Id) {
+        println!(":: enter span {:?}", span);
+        self.push_current_span(span.clone());
+    }
+    fn exit(&self, span: &Id) {
+        println!(":: exit span {:?}", span);
+        self.pop_current_span();
+    }
 
     fn clone_span(&self, id: &Id) -> Id {
         if let Some(mut span_data) = self.spans.get_mut(id) {
@@ -337,7 +342,9 @@ impl Subscriber for TelemetrySubscriber {
             let init_at = dropped.initialized_at.timestamp_subsec_millis();
             println!("find elapsed, now={}, init at={}", &now, &init_at);
             let elapsed = now - init_at;
-                // lmao what the fuck how does this panic ^
+            // lmao what the fuck how does this panic ^ (note: not happening any more?)
+
+            println!(":: span with id {:?} dropped, sending report", &id);
 
             let mut values = dropped.into_values(Some(trace_id), id);
 

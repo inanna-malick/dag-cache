@@ -2,12 +2,11 @@ use crate::capabilities::IPFSCapability;
 use crate::types::encodings;
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs;
-use async_trait::async_trait;
 use reqwest::r#async::{multipart, Client};
 use serde::{Deserialize, Serialize};
 use serde_json;
+use tracing::instrument;
 use tracing::{event, Level};
-use tracing_futures::Instrument;
 
 pub struct IPFSNode(reqwest::Url); //base url, copy mutated to produce specific path. should have no path component
 
@@ -15,50 +14,47 @@ impl IPFSNode {
     pub fn new(a: reqwest::Url) -> Self { IPFSNode(a) }
 }
 
-#[async_trait]
-impl IPFSCapability for IPFSNode {
+impl IPFSNode {
     // TODO TODO FIXME: handle case where id not known to IPFS via means other than indefinite timeout...
     // FIXME FIXME FIXME
-    async fn get(&self, k: ipfs::IPFSHash) -> Result<ipfs::DagNode, DagCacheError> {
-        let f = async {
-            println!("ipfs get start");
+    #[instrument]
+    async fn get_(&self, hash: ipfs::IPFSHash) -> Result<ipfs::DagNode, DagCacheError> {
+        println!("ipfs get start");
 
-            let mut url = self.0.clone();
-            url.set_path("api/v0/object/get");
-            url.query_pairs_mut()
-                .append_pair("data-encoding", "base64")
-                .append_pair("arg", &k.to_string());
+        let mut url = self.0.clone();
+        url.set_path("api/v0/object/get");
+        url.query_pairs_mut()
+            .append_pair("data-encoding", "base64")
+            .append_pair("arg", &hash.to_string());
 
-            // TODO: shared client? mb global in ipfs node? per thread? lmao idk.
-            let resp = Client::new().get(url.clone()).send().await.map_err(|e| {
-                event!(Level::ERROR,  msg = "failed getting node from IPFS", response.error = ?e);
-                DagCacheError::IPFSError
-            })?;
+        // TODO: shared client? mb global in ipfs node? per thread? lmao idk.
+        let resp = Client::new().get(url.clone()).send().await.map_err(|e| {
+            event!(Level::ERROR,  msg = "failed getting node from IPFS", response.error = ?e);
+            DagCacheError::IPFSError
+        })?;
 
-            let node: DagNode = resp.json().await.map_err(|e| {
-                event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
-                // TODO: all domain errors sent as events via telemetry from generic app wrapper
-                DagCacheError::IPFSJsonError
-            })?;
+        let node: DagNode = resp.json().await.map_err(|e| {
+            event!(Level::ERROR,  msg = "failed parsing json", response.error = ?e);
+            // TODO: all domain errors sent as events via telemetry from generic app wrapper
+            DagCacheError::IPFSJsonError
+        })?;
 
-            let node = ipfs::DagNode {
-                data: node.data,
-                links: node
-                    .links
-                    .into_iter()
-                    .map(|IPFSHeader { hash, name, size }| ipfs::IPFSHeader { hash, name, size })
-                    .collect(),
-            };
-
-            println!("ipfs get done");
-
-            Ok(node)
+        let node = ipfs::DagNode {
+            data: node.data,
+            links: node
+                .links
+                .into_iter()
+                .map(|IPFSHeader { hash, name, size }| ipfs::IPFSHeader { hash, name, size })
+                .collect(),
         };
 
-        f.instrument(tracing::info_span!("ipfs-get")).await
+        println!("ipfs get done");
+
+        Ok(node)
     }
 
-    async fn put(&self, v: ipfs::DagNode) -> Result<ipfs::IPFSHash, DagCacheError> {
+    #[instrument(skip(v))]
+    async fn put_(&self, v: ipfs::DagNode) -> Result<ipfs::IPFSHash, DagCacheError> {
         println!("ipfs put start");
 
         let mut url = self.0.clone();
@@ -98,6 +94,17 @@ impl IPFSCapability for IPFSNode {
         println!("ipfs put done");
 
         Ok(hash)
+    }
+}
+
+#[tonic::async_trait]
+impl IPFSCapability for IPFSNode {
+    async fn get(&self, hash: ipfs::IPFSHash) -> Result<ipfs::DagNode, DagCacheError> {
+        self.get_(hash).await
+    }
+
+    async fn put(&self, v: ipfs::DagNode) -> Result<ipfs::IPFSHash, DagCacheError> {
+        self.put_(v).await
     }
 }
 

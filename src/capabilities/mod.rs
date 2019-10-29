@@ -7,10 +7,9 @@ pub mod telemetry_subscriber;
 
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs;
-use async_trait::async_trait;
 
 // remote node store
-#[async_trait]
+#[tonic::async_trait]
 pub trait IPFSCapability
 where
     Self: std::marker::Send,
@@ -19,7 +18,7 @@ where
     async fn put(&self, v: ipfs::DagNode) -> Result<ipfs::IPFSHash, DagCacheError>;
 }
 
-#[async_trait]
+#[tonic::async_trait]
 pub trait HasIPFSCap
 where
     Self: std::marker::Send,

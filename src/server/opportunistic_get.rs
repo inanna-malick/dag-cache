@@ -5,22 +5,19 @@ use crate::types::errors::DagCacheError;
 use crate::types::ipfs as ipfs_types;
 use std::collections::VecDeque;
 use tracing::info;
-use tracing_futures::Instrument;
+use tracing::instrument;
 
+#[instrument(skip(caps, k))]
 pub async fn get<C: 'static + HasIPFSCap + HasCacheCap + Send + Sync>(
     caps: &C,
     k: ipfs_types::IPFSHash,
 ) -> Result<api_types::get::Resp, DagCacheError> {
-    let f = async {
-        let dag_node = get_and_cache(caps, k).await?;
+    let dag_node = get_and_cache(caps, k).await?;
 
-        // use cache to extend DAG node by following links as long as they exist in-memory
-        let extended = extend(caps, dag_node);
+    // use cache to extend DAG node by following links as long as they exist in-memory
+    let extended = extend(caps, dag_node);
 
-        Ok(extended)
-    };
-
-    f.instrument(tracing::info_span!("opportunistic-get")).await
+    Ok(extended)
 }
 
 // TODO: figure out traversal termination strategy - don't want to return whole cache in one resp

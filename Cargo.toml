@@ -10,10 +10,12 @@ edition = "2018"
 # test only
 rand = "0.7"
 
-tracing = "0.1.8"
-tracing-core = "0.1"
+tracing = "0.1.9"
+tracing-core = "0.1.7"
 tracing-futures = {version = "0.1.0", features = ["futures-preview", "tokio-alpha"]}
 tracing-subscriber = "0.1"
+tracing-attributes = "0.1.4"
+
 
 lru = "0.1"
 base64 = "0.10.1"
@@ -37,7 +39,6 @@ tokio = "0.2.0-alpha.6"
 # tokio = "0.1"
 tower-hyper = "0.1"
 hyper = "0.12"
-# tower-grpc = { version = "0.1", features = ["tower-hyper"] }
 tonic = "0.1.0-alpha.3"
 
 tower-service = "0.2"
@@ -45,9 +46,6 @@ tower-util = "0.1"
 
 serde = { version = "1.0.91", features = ["derive"] }
 serde_json = "1.0.39"
-
-# provides nice layer of async fn on trait support until impl'd
-async-trait = "0.1.13"
 
 # metrics!
 libhoney-rust = "0.1.3"

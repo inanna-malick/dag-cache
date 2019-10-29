@@ -1,5 +1,4 @@
-use tonic::Code;
-use tonic::Status;
+use tonic::{Code, Status};
 
 #[derive(Debug)]
 pub enum DagCacheError {
