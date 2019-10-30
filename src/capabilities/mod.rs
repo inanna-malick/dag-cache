@@ -2,8 +2,6 @@ pub mod ipfs_store;
 pub mod lib;
 pub mod lru_cache;
 pub mod runtime;
-pub mod telemetry;
-pub mod telemetry_subscriber;
 
 use crate::types::errors::DagCacheError;
 use crate::types::ipfs;

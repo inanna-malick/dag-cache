@@ -8,57 +8,31 @@ use crate::types::grpc::{server, BulkPutReq, GetResp, IpfsHash, IpfsNode};
 use crate::types::ipfs;
 use futures::stream::StreamExt;
 use futures::Stream;
-use std::convert::TryInto;
+use honeycomb_tracing::TraceId;
 use std::sync::Arc;
 use tonic::{Code, Request, Response, Status};
-use tracing::info;
 use tracing::instrument;
+use tracing::{event, info, Level};
 
 pub struct CacheServer<C> {
     pub caps: Arc<C>,
 }
 
-// for parsing out tracing id from binary metadata (if I still end up doing that)
-fn read_be_u64(input: &mut &[u8]) -> Result<u64, std::array::TryFromSliceError> {
-    let (int_bytes, rest) = input.split_at(std::mem::size_of::<u64>());
-    *input = rest;
-    let int_bytes = int_bytes.try_into()?;
-    Ok(u64::from_be_bytes(int_bytes))
-}
 
-// janky fn name.. code smell..
-fn extract_or_gen_tracing_id_and_record(
-    meta: &tonic::metadata::MetadataMap,
-) -> Result<(), Status> {
+/// Extract a tracing id from the provided metadata
+fn extract_tracing_id_and_record(meta: &tonic::metadata::MetadataMap) -> Result<(), Status> {
     match meta.get("trace_id") {
         Some(s) => {
-            let valid_string =  s.to_str().map_err(|e| {
-                    Status::new(
-                        Code::InvalidArgument,
-                        format!("unable to parse trace_id header as ascii string: {:?}", e),
-                    )
-            })?;
-
-            let decoded_bytes = base58::FromBase58::from_base58(valid_string).map_err(|e| {
+            let tracing_id = s.to_str().map_err(|e| {
+                event!(Level::ERROR, msg = "unable to parse trace_id header as ascii string", error = ?e);
                 Status::new(
                     Code::InvalidArgument,
-                    format!("unable to parse trace_id header as base58: {:?}", e),
+                    format!("unable to parse trace_id header as ascii string: {:?}", e),
                 )
             })?;
 
-            // FIXME: weird double-pointer thing here.. investigate read_be_u64 in detail..
-            let tracing_id = read_be_u64(&mut &decoded_bytes[..]).map_err(|e| {
-                Status::new(
-                    Code::InvalidArgument,
-                    format!(
-                        "unable to convert provided base58 trace_id header into u64: {}", e
-                    ),
-                )
-            })?;
-
-            // let tracing_id = u64::from_be_bytes(u8_bytes);
-
-            tracing::Span::current().record("trace_id", &tracing_id);
+            let tracing_id = TraceId::new(tracing_id.to_string());
+            tracing_id.record_on_current_span(); // record on current span using magic downcast_ref
 
             Ok(())
         }
@@ -66,15 +40,19 @@ fn extract_or_gen_tracing_id_and_record(
     }
 }
 
-#[instrument(skip(caps))]
+// NOTE: ahhaha crap I missed that I need to declare all record'd field names explicitly
+#[instrument(skip(caps), MAGIC_TRACING_ID_FIELD_NAME)]
 async fn get_node_handler<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(
     caps: &C,
     request: Request<IpfsHash>,
 ) -> Result<Response<GetResp>, Status> {
     // extract explicit tracing id (if any)
-    extract_or_gen_tracing_id_and_record(request.metadata())?;
+    extract_tracing_id_and_record(request.metadata())?;
 
-    let request = ipfs::IPFSHash::from_proto(request.into_inner())?;
+    let request = ipfs::IPFSHash::from_proto(request.into_inner()).map_err( |e| {
+        event!(Level::ERROR, msg = "unable to parse request proto as valid domain object", error = ?e);
+        e
+    })?;
 
     let resp = opportunistic_get::get(caps, request).await?;
 
@@ -92,9 +70,12 @@ async fn get_nodes_handler<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(
     Status,
 > {
     // extract explicit tracing id (if any)
-    extract_or_gen_tracing_id_and_record(request.metadata())?;
+    extract_tracing_id_and_record(request.metadata())?;
 
-    let domain_hash = ipfs::IPFSHash::from_proto(request.into_inner())?;
+    let domain_hash = ipfs::IPFSHash::from_proto(request.into_inner()).map_err( |e| {
+        event!(Level::ERROR, msg = "unable to parse request proto as valid domain object", error = ?e);
+        e
+    })?;
 
     // TODO: wrapper that holds span, instrument, basically - should be possible! maybe build inline?
     let s = batch_get::ipfs_fetch(caps, domain_hash)
@@ -115,9 +96,13 @@ async fn put_node_handler<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(
     request: Request<IpfsNode>,
 ) -> Result<Response<IpfsHash>, Status> {
     // extract explicit tracing id (if any)
-    extract_or_gen_tracing_id_and_record(request.metadata())?;
+    extract_tracing_id_and_record(request.metadata())?;
 
-    let domain_node = ipfs::DagNode::from_proto(request.into_inner())?;
+    let domain_node = ipfs::DagNode::from_proto(request.into_inner()).map_err( |e| {
+        event!(Level::ERROR, msg = "unable to parse request proto as valid domain object", error = ?e);
+        e
+    })?;
+
     info!("dag cache put handler"); //TODO,, better msgs
 
     let hash = put_and_cache(caps, domain_node).await?;
@@ -132,9 +117,13 @@ async fn put_nodes_handler<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(
     request: Request<BulkPutReq>,
 ) -> Result<Response<IpfsHash>, Status> {
     // extract explicit tracing id (if any)
-    extract_or_gen_tracing_id_and_record(request.metadata())?;
+    extract_tracing_id_and_record(request.metadata())?;
 
-    let bulk_put_req = types::api::bulk_put::Req::from_proto(request.into_inner())?;
+    let bulk_put_req = types::api::bulk_put::Req::from_proto(request.into_inner()).map_err( |e| {
+        event!(Level::ERROR, msg = "unable to parse request proto as valid domain object", error = ?e);
+        e
+    })?;
+
     info!("dag cache put handler");
     let (_size, hash) = batch_put::ipfs_publish_cata(caps, bulk_put_req.validated_tree).await?;
 

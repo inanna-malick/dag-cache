@@ -2,7 +2,7 @@ use base58;
 use base64;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 
-#[derive(Clone, Hash, PartialEq, Eq, Debug)]
+#[derive(Clone, Hash, PartialEq, Eq)]
 pub struct Base58(pub Vec<u8>);
 
 impl Base58 {
@@ -12,6 +12,12 @@ impl Base58 {
 
     #[cfg(test)]
     pub fn from_bytes(x: Vec<u8>) -> Base58 { Base58(x) }
+}
+
+impl std::fmt::Debug for Base58 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", base58::ToBase58::to_base58(&self.0[..]))
+    }
 }
 
 impl std::fmt::Display for Base58 {

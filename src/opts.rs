@@ -1,7 +1,7 @@
 use crate::capabilities::ipfs_store::IPFSNode;
 use crate::capabilities::lru_cache::Cache;
 use crate::capabilities::runtime::{Runtime, RuntimeCaps};
-use crate::capabilities::telemetry::Telemetry;
+use honeycomb_tracing::Telemetry;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -37,7 +37,16 @@ impl Opt {
             )
         }));
 
-        let telemetry = Telemetry::new(self.honeycomb_key);
+        let honeycomb_config = libhoney::Config {
+            options: libhoney::client::Options {
+                api_key: self.honeycomb_key,
+                dataset: "dag-cache".to_string(),
+                ..libhoney::client::Options::default()
+            },
+            transmission_options: libhoney::transmission::Options::default(),
+        };
+
+        let telemetry = Telemetry::new(honeycomb_config);
 
         let cache = Cache::new(self.max_cache_entries);
 
