@@ -1,7 +1,6 @@
 use crate::capabilities::ipfs_store::IPFSNode;
 use crate::capabilities::lru_cache::Cache;
-use crate::capabilities::runtime::{Runtime, RuntimeCaps};
-use honeycomb_tracing::Telemetry;
+use crate::capabilities::runtime::RuntimeCaps;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -28,7 +27,7 @@ pub struct Opt {
 
 impl Opt {
     /// parse opts into capabilities object, will panic if not configured correctly (TODO: FIXME)
-    pub fn into_runtime(self) -> Runtime {
+    pub fn into_runtime(self) -> (RuntimeCaps, libhoney::Config) {
         let ipfs_node = format!("http://{}:{}", &self.ipfs_host, self.ipfs_port); // TODO: https...
         let ipfs_node = IPFSNode::new(reqwest::Url::parse(&ipfs_node).unwrap_or_else(|_| {
             panic!(
@@ -46,12 +45,10 @@ impl Opt {
             transmission_options: libhoney::transmission::Options::default(),
         };
 
-        let telemetry = Telemetry::new(honeycomb_config);
-
         let cache = Cache::new(self.max_cache_entries);
 
         let rt = RuntimeCaps { cache, ipfs_node };
 
-        Runtime(telemetry, rt)
+        (rt, honeycomb_config)
     }
 }

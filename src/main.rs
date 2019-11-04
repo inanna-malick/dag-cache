@@ -5,7 +5,6 @@ mod opts;
 mod server;
 mod types;
 
-use crate::capabilities::runtime::Runtime;
 use crate::server::app;
 use crate::types::grpc::server::IpfsCacheServer;
 use honeycomb_tracing::TelemetrySubscriber;
@@ -20,9 +19,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // TODO: move addr parsing _into_ opts
     let bind_to = format!("127.0.0.1:{}", &opt.port);
-    let Runtime(telemetry, runtime_caps) = opt.into_runtime();
+    let (runtime_caps, honeycomb_config) = opt.into_runtime();
 
-    let subscriber = TelemetrySubscriber::new("ipfs_dag_cache".to_string(), telemetry);
+    let subscriber = TelemetrySubscriber::new("ipfs_dag_cache".to_string(), honeycomb_config);
     tracing::subscriber::set_global_default(subscriber).expect("setting global default failed");
 
     let app = app::CacheServer {
