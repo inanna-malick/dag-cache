@@ -10,14 +10,14 @@ pub struct ValidatedTree {
     pub nodes: HashMap<ClientSideHash, DagNode>,
 }
 
-// TODO: idk, tests?
+// TODO: tests
 impl ValidatedTree {
     pub fn validate(
         root_node: DagNode,
         nodes: HashMap<ClientSideHash, DagNode>,
     ) -> Result<ValidatedTree, DagTreeBuildErr> {
         let mut node_visited_count = 0;
-        let mut stack = vec![];
+        let mut stack = Vec::new();
 
         for node_link in root_node.links.iter() {
             match node_link {
