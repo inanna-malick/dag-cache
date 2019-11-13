@@ -1,5 +1,5 @@
 use crate::capabilities::CacheCapability;
-use crate::types::ipfs::{DagNode, IPFSHash};
+use dag_cache_types::types::ipfs::{DagNode, IPFSHash};
 use lru::LruCache;
 use std::sync::Mutex;
 

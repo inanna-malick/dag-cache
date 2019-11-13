@@ -1,8 +1,8 @@
 use crate::capabilities::lib::get_and_cache;
 use crate::capabilities::{HasCacheCap, HasIPFSCap};
-use crate::types::errors::DagCacheError;
-use crate::types::ipfs::{DagNode, IPFSHash};
 use chashmap::CHashMap;
+use dag_cache_types::types::errors::DagCacheError;
+use dag_cache_types::types::ipfs::{DagNode, IPFSHash};
 use futures::channel::mpsc;
 use futures::sink::SinkExt;
 use std::sync::Arc;

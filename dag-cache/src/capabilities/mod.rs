@@ -3,8 +3,8 @@ pub mod lib;
 pub mod lru_cache;
 pub mod runtime;
 
-use crate::types::errors::DagCacheError;
-use crate::types::ipfs;
+use dag_cache_types::types::errors::DagCacheError;
+use dag_cache_types::types::ipfs;
 
 // remote node store
 #[tonic::async_trait]

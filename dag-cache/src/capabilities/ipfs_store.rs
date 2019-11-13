@@ -1,7 +1,7 @@
 use crate::capabilities::IPFSCapability;
-use crate::types::encodings;
-use crate::types::errors::DagCacheError;
-use crate::types::ipfs;
+use dag_cache_types::types::encodings;
+use dag_cache_types::types::errors::DagCacheError;
+use dag_cache_types::types::ipfs;
 use reqwest::r#async::{multipart, Client};
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -134,9 +134,9 @@ pub struct DagNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::encodings::Base64;
-    use crate::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
     use crate::utils;
+    use dag_cache_types::types::encodings::Base64;
+    use dag_cache_types::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
     use rand;
 
     // NOTE: assumes IPFS daemon running locally at localhost:5001. Daemon can be shared between tests.

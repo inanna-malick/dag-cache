@@ -1,3 +1,4 @@
+#[cfg(feature = "grpc" )]
 use tonic::{Code, Status};
 
 #[derive(Debug)]
@@ -8,6 +9,7 @@ pub enum DagCacheError {
     UnexpectedError { msg: String },
 }
 
+#[cfg(feature = "grpc" )]
 impl From<DagCacheError> for Status {
     fn from(error: DagCacheError) -> Status {
         match error {
@@ -33,6 +35,7 @@ impl std::fmt::Display for ProtoDecodingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{:?}", self) }
 }
 
+#[cfg(feature = "grpc" )]
 impl From<ProtoDecodingError> for Status {
     fn from(error: ProtoDecodingError) -> Status {
         std::convert::From::from(DagCacheError::ProtoDecodingError(error))

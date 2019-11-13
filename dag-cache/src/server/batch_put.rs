@@ -1,9 +1,9 @@
 use crate::capabilities::lib::put_and_cache;
 use crate::capabilities::{HasCacheCap, HasIPFSCap};
-use crate::types::api::bulk_put;
-use crate::types::errors::DagCacheError;
-use crate::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
-use crate::types::validated_tree::ValidatedTree;
+use dag_cache_types::types::api::bulk_put;
+use dag_cache_types::types::errors::DagCacheError;
+use dag_cache_types::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
+use dag_cache_types::types::validated_tree::ValidatedTree;
 use futures::future::FutureExt;
 use futures::Future;
 use std::sync::Arc;
@@ -135,12 +135,12 @@ mod tests {
     use super::*;
     use crate::capabilities::{CacheCapability, HasCacheCap, HasIPFSCap, IPFSCapability};
     use crate::lib;
-    use crate::types::api::ClientSideHash;
-    use crate::types::encodings::{Base58, Base64};
-    use crate::types::errors::DagCacheError;
-    use crate::types::ipfs::{DagNode, IPFSHash};
-    use crate::types::validated_tree::ValidatedTree;
     use async_trait::async_trait;
+    use dag_cache_types::types::api::ClientSideHash;
+    use dag_cache_types::types::encodings::{Base58, Base64};
+    use dag_cache_types::types::errors::DagCacheError;
+    use dag_cache_types::types::ipfs::{DagNode, IPFSHash};
+    use dag_cache_types::types::validated_tree::ValidatedTree;
     use hashbrown::HashMap;
     use std::sync::Mutex;
 

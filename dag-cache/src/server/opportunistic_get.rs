@@ -1,8 +1,8 @@
 use crate::capabilities::lib::get_and_cache;
 use crate::capabilities::{HasCacheCap, HasIPFSCap};
-use crate::types::api as api_types;
-use crate::types::errors::DagCacheError;
-use crate::types::ipfs as ipfs_types;
+use dag_cache_types::types::api as api_types;
+use dag_cache_types::types::errors::DagCacheError;
+use dag_cache_types::types::ipfs as ipfs_types;
 use std::collections::VecDeque;
 use tracing::info;
 use tracing::instrument;

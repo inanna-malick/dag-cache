@@ -1,11 +1,11 @@
 use crate::capabilities::lib::put_and_cache;
 use crate::capabilities::{HasCacheCap, HasIPFSCap};
-use crate::generated_grpc_bindings as grpc;
 use crate::server::batch_get;
 use crate::server::batch_put;
 use crate::server::opportunistic_get;
-use crate::types;
-use crate::types::ipfs;
+use dag_cache_types::types;
+use dag_cache_types::types::grpc;
+use dag_cache_types::types::ipfs;
 use futures::stream::StreamExt;
 use futures::Stream;
 use grpc::{server, BulkPutReq, GetResp, IpfsHash, IpfsNode};

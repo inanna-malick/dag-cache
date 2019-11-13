@@ -1,7 +1,8 @@
-use crate::generated_grpc_bindings as grpc;
 use crate::types::encodings::Base58;
 use crate::types::errors::ProtoDecodingError;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "grpc" )]
+use crate::types::grpc;
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct ClientSideHash(Base58);
@@ -9,6 +10,7 @@ impl ClientSideHash {
     #[cfg(test)]
     pub fn new(x: Base58) -> ClientSideHash { ClientSideHash(x) }
 
+    #[cfg(feature = "grpc" )]
     pub fn from_proto(p: grpc::ClientSideHash) -> Result<Self, ProtoDecodingError> {
         Base58::from_string(&p.hash)
             .map(ClientSideHash)
@@ -23,7 +25,7 @@ impl std::fmt::Display for ClientSideHash {
 }
 
 pub mod bulk_put {
-    use super::{grpc, ClientSideHash, ProtoDecodingError};
+    use super::*;
     use crate::types::encodings::Base64;
     use crate::types::ipfs;
     use crate::types::validated_tree::ValidatedTree;
@@ -39,6 +41,7 @@ pub mod bulk_put {
     }
 
     impl Req {
+        #[cfg(feature = "grpc" )]
         pub fn from_proto(p: grpc::BulkPutReq) -> Result<Self, ProtoDecodingError> {
             let root_node = p.root_node.ok_or(ProtoDecodingError {
                 cause: "root node not present on Bulk Put Req proto".to_string(),
@@ -74,6 +77,7 @@ pub mod bulk_put {
     }
 
     impl DagNodeWithHash {
+        #[cfg(feature = "grpc" )]
         pub fn from_proto(p: grpc::BulkPutIpfsNodeWithHash) -> Result<Self, ProtoDecodingError> {
             let hash = p.client_side_hash.ok_or(ProtoDecodingError {
                 cause: "client side hash not present on BulkPutIpfsNodeWithHash proto".to_string(),
@@ -96,6 +100,7 @@ pub mod bulk_put {
     }
 
     impl DagNode {
+        #[cfg(feature = "grpc" )]
         pub fn from_proto(p: grpc::BulkPutIpfsNode) -> Result<Self, ProtoDecodingError> {
             let data = Base64(p.data);
 
@@ -113,6 +118,7 @@ pub mod bulk_put {
     }
 
     impl DagNodeLink {
+        #[cfg(feature = "grpc" )]
         pub fn from_proto(p: grpc::BulkPutLink) -> Result<Self, ProtoDecodingError> {
             match p.link {
                 Some(grpc::bulk_put_link::Link::InIpfs(hdr)) => {
@@ -143,6 +149,7 @@ pub mod get {
     }
 
     impl Resp {
+        #[cfg(feature = "grpc" )]
         pub fn from_proto(p: grpc::GetResp) -> Result<Self, ProtoDecodingError> {
             let extra_nodes: Result<Vec<ipfs::DagNodeWithHeader>, ProtoDecodingError> = p
                 .extra_nodes
@@ -164,6 +171,7 @@ pub mod get {
             Ok(res)
         }
 
+        #[cfg(feature = "grpc" )]
         pub fn into_proto(self) -> grpc::GetResp {
             grpc::GetResp {
                 requested_node: Some(self.requested_node.into_proto()),

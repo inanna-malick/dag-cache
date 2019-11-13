@@ -1,11 +1,11 @@
 // #![deny(warnings)]
 
-use dag_cache::generated_grpc_bindings::{self as grpc, client::IpfsCacheClient};
-use dag_cache::types::api::get;
-use std::str::FromStr;
-use warp::{reject, Filter, Rejection, Reply};
+use dag_cache_types::types::api::get;
+use dag_cache_types::types::grpc::{self, client::IpfsCacheClient};
 use futures::future::FutureExt;
-use serde::{Serialize};
+use serde::Serialize;
+use std::str::FromStr;
+use warp::{reject, Filter};
 
 // TODO: struct w/ domain types & etc
 #[derive(Debug)]
@@ -38,20 +38,25 @@ async fn main() {
             let f = async move {
                 println!("parsed hash {} from path", raw_hash);
 
-                let mut client = IpfsCacheClient::connect("http://localhost:8088").await.map_err(|e| Box::new(e))?;
+                let mut client = IpfsCacheClient::connect("http://localhost:8088")
+                    .await
+                    .map_err(|e| Box::new(e))?;
 
                 let request = tonic::Request::new(grpc::IpfsHash { hash: raw_hash });
 
                 let response = client.get_node(request).await.map_err(|e| Box::new(e))?;
 
-                let response = get::Resp::from_proto(response.into_inner()).map_err(|e| Box::new(e))?;
+                let response =
+                    get::Resp::from_proto(response.into_inner()).map_err(|e| Box::new(e))?;
 
                 let resp = warp::reply::json(&response);
                 Ok::<_, Box<dyn std::error::Error + Send + Sync + 'static>>(resp)
             };
 
-            f.map(|x| x.map_err(|e| reject::custom::<Error>(Error(e)) ))
+            f.map(|x| x.map_err(|e| reject::custom::<Error>(Error(e))))
         });
+
+    // TODO: impl put via the above w/ addition of parsing body as json - also wire into frontend
 
     // note: first path segment duplicated
     // let post_route = warp::post()

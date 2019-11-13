@@ -1,13 +1,11 @@
 // #![deny(warnings)]
 mod capabilities;
-mod generated_grpc_bindings;
 mod opts;
 mod server;
-mod types;
 mod utils;
 
-use crate::generated_grpc_bindings::server::IpfsCacheServer;
 use crate::server::app;
+use dag_cache_types::types::grpc::server::IpfsCacheServer;
 use honeycomb_tracing::TelemetrySubscriber;
 use opts::Opt;
 use std::sync::Arc;

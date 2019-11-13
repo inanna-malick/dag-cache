@@ -1,6 +1,6 @@
 use crate::capabilities::{HasCacheCap, HasIPFSCap};
-use crate::types::errors::DagCacheError;
-use crate::types::ipfs;
+use dag_cache_types::types::errors::DagCacheError;
+use dag_cache_types::types::ipfs;
 use tracing::info;
 use tracing::instrument;
 
