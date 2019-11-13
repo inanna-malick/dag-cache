@@ -5,16 +5,13 @@ authors = ["pk <pkinsky@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-gotham = "0.4"
-gotham_derive = "0.4"
+dag-cache = { path = "../dag-cache" }
 
-hyper = "0.12"
-mime = "0.3"
+warp = { git = "https://github.com/seanmonstar/warp" }
+tokio = "0.2.0-alpha.6"
+tokio-executor = "=0.2.0-alpha.6"
+tonic = "0.1.0-alpha.6"
 serde = "1.0"
 serde_json = "1.0"
-serde_derive = "1.0"
-tokio = "0.2.0-alpha.6"
-futures-preview = { version = "0.3.0-alpha.14", features = ["compat"] }
 
-tonic = "0.1.0-alpha.6"
-dag-cache = { path = "../dag-cache" }
+futures-preview = { version = "0.3.0-alpha.14", features = ["compat"] }

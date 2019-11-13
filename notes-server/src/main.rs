@@ -1,111 +1,70 @@
-//! A basic example showing the request components
-
-extern crate futures;
-extern crate gotham;
-#[macro_use]
-extern crate gotham_derive;
-extern crate hyper;
-extern crate mime;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-extern crate tokio;
-
-use futures::{stream, Future, Stream};
-use std::time::{Duration, Instant};
-
-use gotham::extractor::PathExtractor;
-
-use futures::future::{FutureExt, TryFutureExt};
-use gotham::handler::{HandlerError, HandlerFuture, IntoHandlerError};
-use gotham::helpers::http::response::create_response;
-use gotham::router::builder::DefineSingleRoute;
-use gotham::router::builder::{build_simple_router, DrawRoutes};
-use gotham::router::Router;
-use gotham::state::{FromState, State};
-use hyper::{Body, Response, StatusCode};
-use tokio::timer::Delay;
+// #![deny(warnings)]
 
 use dag_cache::generated_grpc_bindings::{self as grpc, client::IpfsCacheClient};
 use dag_cache::types::api::get;
-use std::error::Error;
-use futures::compat::Future01CompatExt;
+use std::str::FromStr;
+use warp::{reject, Filter, Rejection, Reply};
+use futures::future::FutureExt;
+use serde::{Serialize};
 
-#[derive(Deserialize, StateData, StaticResponseExtender)]
-struct HashExtractor {
-    raw_hash: String,
+// TODO: struct w/ domain types & etc
+#[derive(Debug)]
+struct Error(Box<dyn std::error::Error + Send + Sync + 'static>);
+
+impl reject::Reject for Error {}
+
+/// A serialized message to report in JSON format.
+#[derive(Serialize)]
+struct ErrorMessage<'a> {
+    code: u16,
+    message: &'a str,
 }
 
-fn get_handler(mut state: State) -> Box<HandlerFuture> {
-    // seems a bit odd, could use on any request w/o type error?
-    let hash = HashExtractor::take_from(&mut state); // lmao ugh, TODO: new framework?
+/// A newtype to enforce our maximum allowed seconds.
+struct HashParam(String);
 
-    let f = async move {
-        println!("async block");
-
-        // todo: cache, maybe per thread?
-        let mut client = IpfsCacheClient::connect("http://localhost:8088")
-            .await
-            .map_err(|e| e.into_handler_error())?;
-
-        println!("PRE grpc send");
-        let request = tonic::Request::new(grpc::IpfsHash {
-            hash: hash.raw_hash.clone(),
-        });
-
-        let response = client
-            .get_node(request)
-            .await
-            .map_err(|e| e.into_handler_error())?;
-
-        let response =
-            get::Resp::from_proto(response.into_inner()).map_err(|e| e.into_handler_error())?;
-
-        let vec = serde_json::to_vec(&response).map_err(|e| e.into_handler_error())?;
-
-        Ok(vec)
-    };
-
-    let f = {
-        use crate::hyper::rt::Future;
-
-        f.boxed()
-            .compat()
-            .then(move |res: Result<Vec<u8>, HandlerError>| match res {
-                Ok(bytes) => {
-                    let resp = create_response(&state, StatusCode::OK, mime::APPLICATION_JSON, bytes);
-                    Ok((state, resp))
-                },
-                Err(err) => {
-                    println!("got err {:?}", &err);
-                    Err((state, err))
-                },
-            })
-    };
-
-    Box::new(f)
-}
-
-/// Create a `Router`.
-fn router() -> Router {
-    build_simple_router(|route| {
-        route
-            .get("/node/:raw_hash")
-            .with_path_extractor::<HashExtractor>()
-            .to(get_handler);
-    })
+impl FromStr for HashParam {
+    type Err = ();
+    fn from_str(src: &str) -> Result<Self, Self::Err> {
+        Ok(HashParam(src.to_string())) // todo: full base58 validation
+    }
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let addr = "127.0.0.1:7878";
-    println!("Listening for requests at http://{}", addr);
-    // let f = gotham::init_server(addr, router());
-    // f.compat().await;
+async fn main() {
+    let get_route = warp::path("node")
+        .and(warp::path::param::<String>())
+        .and_then(|raw_hash| {
+            let f = async move {
+                println!("parsed hash {} from path", raw_hash);
 
-    gotham::start(addr, router());
-    Ok(())
+                let mut client = IpfsCacheClient::connect("http://localhost:8088").await.map_err(|e| Box::new(e))?;
+
+                let request = tonic::Request::new(grpc::IpfsHash { hash: raw_hash });
+
+                let response = client.get_node(request).await.map_err(|e| Box::new(e))?;
+
+                let response = get::Resp::from_proto(response.into_inner()).map_err(|e| Box::new(e))?;
+
+                let resp = warp::reply::json(&response);
+                Ok::<_, Box<dyn std::error::Error + Send + Sync + 'static>>(resp)
+            };
+
+            f.map(|x| x.map_err(|e| reject::custom::<Error>(Error(e)) ))
+        });
+
+    // note: first path segment duplicated
+    // let post_route = warp::post()
+    //     .and(warp::path("node"))
+    //     .and(warp::body::content_length_limit(1024 * 16)) // arbitrary?
+    //     .and(warp::body::json())
+    //     .and_then(|rate, mut employee: Employee| {
+
+    //         employee.rate = rate;
+    //         warp::reply::json(&employee)
+    //     });
+
+    // let routes = get_route.or(post_route);
+
+    warp::serve(get_route).run(([127, 0, 0, 1], 3030)).await;
 }
-
-
-
