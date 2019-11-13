@@ -17,7 +17,7 @@ impl IPFSNode {
 impl IPFSNode {
     // TODO TODO FIXME: handle case where id not known to IPFS via means other than indefinite timeout...
     // FIXME FIXME FIXME
-    #[instrument]
+    #[instrument(skip(self))]
     async fn get_(&self, hash: ipfs::IPFSHash) -> Result<ipfs::DagNode, DagCacheError> {
         println!("ipfs get start");
 
@@ -53,7 +53,7 @@ impl IPFSNode {
         Ok(node)
     }
 
-    #[instrument(skip(v))]
+    #[instrument(skip(self, v))]
     async fn put_(&self, v: ipfs::DagNode) -> Result<ipfs::IPFSHash, DagCacheError> {
         println!("ipfs put start");
 
@@ -134,15 +134,15 @@ pub struct DagNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lib;
     use crate::types::encodings::Base64;
     use crate::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
+    use crate::utils;
     use rand;
 
     // NOTE: assumes IPFS daemon running locally at localhost:5001. Daemon can be shared between tests.
     #[tokio::test]
     async fn test_put_and_get() {
-        lib::init_test_env(); // tracing subscriber
+        utils::init_test_env(); // tracing subscriber
 
         let mut random_bytes = vec![];
 

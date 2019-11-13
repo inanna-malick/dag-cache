@@ -1,6 +1,6 @@
+use crate::generated_grpc_bindings as grpc;
 use crate::types::encodings::{Base58, Base64};
 use crate::types::errors::ProtoDecodingError;
-use crate::types::grpc;
 use serde::{Deserialize, Serialize};
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
@@ -100,6 +100,18 @@ impl DagNodeWithHeader {
             header: Some(hdr),
             node: Some(node),
         }
+    }
+
+    pub fn from_proto(p: grpc::IpfsNodeWithHeader) -> Result<Self, ProtoDecodingError> {
+        let header = p.header.ok_or(ProtoDecodingError {
+            cause: "missing header".to_string(),
+        })?;
+        let header = IPFSHeader::from_proto(header)?;
+        let node = p.node.ok_or(ProtoDecodingError {
+            cause: "missing node".to_string(),
+        })?;
+        let node = DagNode::from_proto(node)?;
+        Ok(Self { header, node })
     }
 }
 

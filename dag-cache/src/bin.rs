@@ -1,12 +1,13 @@
-// #![deny(warnings, rust_2018_idioms)]
+// #![deny(warnings)]
 mod capabilities;
-mod lib;
+mod generated_grpc_bindings;
 mod opts;
 mod server;
 mod types;
+mod utils;
 
+use crate::generated_grpc_bindings::server::IpfsCacheServer;
 use crate::server::app;
-use crate::types::grpc::server::IpfsCacheServer;
 use honeycomb_tracing::TelemetrySubscriber;
 use opts::Opt;
 use std::sync::Arc;
@@ -31,7 +32,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = bind_to.parse().unwrap();
 
     Server::builder()
-        .serve(addr, IpfsCacheServer::new(app))
+        .add_service(IpfsCacheServer::new(app))
+        .serve(addr)
         .await?;
 
     Ok(())

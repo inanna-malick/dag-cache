@@ -1,6 +1,7 @@
+use crate::generated_grpc_bindings as grpc;
 use crate::types::encodings::Base58;
 use crate::types::errors::ProtoDecodingError;
-use crate::types::grpc;
+use serde::{Deserialize, Serialize};
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct ClientSideHash(Base58);
@@ -125,19 +126,16 @@ pub mod bulk_put {
                     cause: "no value for bulk put link oneof".to_string(),
                 }),
             }
-            // let hash = ClientSideHash::from_proto(p.hash)?;
-            // let node = DagNode::from_proto(p.node)?;
-            // Ok(DagNodeWithHash{hash, node})
         }
     }
 }
 
 pub mod get {
-    use super::grpc;
+    use super::*;
     use crate::types::ipfs;
 
     // ~= NonEmptyList (head, rest struct)
-    #[derive(Clone, Debug)]
+    #[derive(Serialize, Deserialize, Clone, Debug)]
     pub struct Resp {
         pub requested_node: ipfs::DagNode,
         pub extra_node_count: u64,
@@ -145,6 +143,27 @@ pub mod get {
     }
 
     impl Resp {
+        pub fn from_proto(p: grpc::GetResp) -> Result<Self, ProtoDecodingError> {
+            let extra_nodes: Result<Vec<ipfs::DagNodeWithHeader>, ProtoDecodingError> = p
+                .extra_nodes
+                .into_iter()
+                .map(|n| ipfs::DagNodeWithHeader::from_proto(n))
+                .collect();
+            let extra_nodes = extra_nodes?;
+
+            let requested_node = p.requested_node.ok_or(ProtoDecodingError {
+                cause: "missing requested_node".to_string(),
+            })?;
+            let requested_node = ipfs::DagNode::from_proto(requested_node)?;
+
+            let res = Self {
+                extra_node_count: p.extra_node_count,
+                requested_node,
+                extra_nodes,
+            };
+            Ok(res)
+        }
+
         pub fn into_proto(self) -> grpc::GetResp {
             grpc::GetResp {
                 requested_node: Some(self.requested_node.into_proto()),

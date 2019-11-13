@@ -5,7 +5,6 @@ use hashbrown::HashMap;
 // ephemeral, used for data structure in memory
 #[derive(Debug)]
 pub struct ValidatedTree {
-    // how 2 make constructor priv but fields pub? just add pub accessor fns?
     pub root_node: DagNode,
     pub nodes: HashMap<ClientSideHash, DagNode>,
 }

@@ -1,13 +1,14 @@
 use crate::capabilities::lib::put_and_cache;
 use crate::capabilities::{HasCacheCap, HasIPFSCap};
+use crate::generated_grpc_bindings as grpc;
 use crate::server::batch_get;
 use crate::server::batch_put;
 use crate::server::opportunistic_get;
 use crate::types;
-use crate::types::grpc::{server, BulkPutReq, GetResp, IpfsHash, IpfsNode};
 use crate::types::ipfs;
 use futures::stream::StreamExt;
 use futures::Stream;
+use grpc::{server, BulkPutReq, GetResp, IpfsHash, IpfsNode};
 use honeycomb_tracing::TraceId;
 use std::sync::Arc;
 use tonic::{Code, Request, Response, Status};
@@ -18,30 +19,7 @@ pub struct CacheServer<C> {
     pub caps: Arc<C>,
 }
 
-
-/// Extract a tracing id from the provided metadata
-fn extract_tracing_id_and_record(meta: &tonic::metadata::MetadataMap) -> Result<(), Status> {
-    match meta.get("trace_id") {
-        Some(s) => {
-            let tracing_id = s.to_str().map_err(|e| {
-                event!(Level::ERROR, msg = "unable to parse trace_id header as ascii string", error = ?e);
-                Status::new(
-                    Code::InvalidArgument,
-                    format!("unable to parse trace_id header as ascii string: {:?}", e),
-                )
-            })?;
-
-            let tracing_id = TraceId::new(tracing_id.to_string());
-            tracing_id.record_on_current_span(); // record on current span using magic downcast_ref
-
-            Ok(())
-        }
-        None => Ok(()), // no-op if header not present
-    }
-}
-
-// NOTE: ahhaha crap I missed that I need to declare all record'd field names explicitly
-#[instrument(skip(caps), MAGIC_TRACING_ID_FIELD_NAME)]
+#[instrument(skip(caps))]
 async fn get_node_handler<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(
     caps: &C,
     request: Request<IpfsHash>,
@@ -61,14 +39,14 @@ async fn get_node_handler<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(
     Ok(resp)
 }
 
+type GetNodesStream =
+    Box<dyn Stream<Item = Result<IpfsNode, Status>> + Unpin + Send + Sync + 'static>;
+
 #[instrument(skip(caps))]
 async fn get_nodes_handler<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(
     caps: Arc<C>,
     request: Request<IpfsHash>,
-) -> Result<
-    Response<Box<dyn Stream<Item = Result<IpfsNode, Status>> + Unpin + Send + 'static>>,
-    Status,
-> {
+) -> Result<Response<GetNodesStream>, Status> {
     // extract explicit tracing id (if any)
     extract_tracing_id_and_record(request.metadata())?;
 
@@ -85,7 +63,7 @@ async fn get_nodes_handler<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(
             Ok(n) => Ok(n.into_proto()),
             Err(de) => Err(std::convert::From::from(de)),
         });
-    let s: Box<dyn Stream<Item = Result<IpfsNode, Status>> + Unpin + Send + 'static> = Box::new(s);
+    let s: GetNodesStream = Box::new(s);
     let resp = Response::new(s);
     Ok(resp)
 }
@@ -139,7 +117,7 @@ impl<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static> server::IpfsCache for 
         get_node_handler(self.caps.as_ref(), request).await
     }
 
-    type GetNodesStream = Box<dyn Stream<Item = Result<IpfsNode, Status>> + Unpin + Send + 'static>;
+    type GetNodesStream = GetNodesStream;
 
     async fn get_nodes(
         &self,
@@ -154,5 +132,26 @@ impl<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static> server::IpfsCache for 
 
     async fn put_nodes(&self, request: Request<BulkPutReq>) -> Result<Response<IpfsHash>, Status> {
         put_nodes_handler(self.caps.clone(), request).await
+    }
+}
+
+/// Extract a tracing id from the provided metadata
+fn extract_tracing_id_and_record(meta: &tonic::metadata::MetadataMap) -> Result<(), Status> {
+    match meta.get("trace_id") {
+        Some(s) => {
+            let tracing_id = s.to_str().map_err(|e| {
+                event!(Level::ERROR, msg = "unable to parse trace_id header as ascii string", error = ?e);
+                Status::new(
+                    Code::InvalidArgument,
+                    format!("unable to parse trace_id header as ascii string: {:?}", e),
+                )
+            })?;
+
+            let tracing_id = TraceId::new(tracing_id.to_string());
+            tracing_id.record_on_current_span(); // record on current span using magic downcast_ref
+
+            Ok(())
+        }
+        None => Ok(()), // no-op if header not present
     }
 }
