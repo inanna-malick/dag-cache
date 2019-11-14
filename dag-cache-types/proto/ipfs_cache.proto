@@ -36,12 +36,12 @@ message BulkPutReq {
 message BulkPutLink {
   oneof link {
     IpfsHeader in_ipfs = 1;
-    ClientSideHash in_req = 2;
+    ClientId in_req = 2;
   }
 }
 
 message BulkPutIpfsNodeWithHash {
-  ClientSideHash client_side_hash = 1;
+  ClientId client_side_hash = 1;
   BulkPutIpfsNode node = 2;
 }
 
@@ -50,8 +50,8 @@ message BulkPutIpfsNode {
   repeated BulkPutLink links = 2;
 }
 
-message ClientSideHash {
-  string hash = 1; // base58 encoded string, to simplify grpc gui interactions
+message ClientId {
+  string hash = 1; // some string, should be unique id (eg u128 uuid)
 }
 
 

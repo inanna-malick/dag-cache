@@ -22,7 +22,7 @@ pub async fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Se
     ipfs_publish_cata_unsafe(caps, tree, focus).await
 }
 
-// unsafe b/c it can take any 'focus' ClientSideHash and not just the root node of tree
+// unsafe b/c it can take any 'focus' ClientId and not just the root node of tree
 async fn ipfs_publish_cata_unsafe<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     tree: Arc<ValidatedTree>, // todo use async/await I guess, mb can avoid needing Arc? ugh
@@ -136,7 +136,7 @@ mod tests {
     use crate::capabilities::{CacheCapability, HasCacheCap, HasIPFSCap, IPFSCapability};
     use crate::lib;
     use async_trait::async_trait;
-    use dag_cache_types::types::api::ClientSideHash;
+    use dag_cache_types::types::api::ClientId;
     use dag_cache_types::types::encodings::{Base58, Base64};
     use dag_cache_types::types::errors::DagCacheError;
     use dag_cache_types::types::ipfs::{DagNode, IPFSHash};
@@ -192,8 +192,8 @@ mod tests {
         lib::init_test_env(); // tracing subscriber
 
         //build some client side 'hashes' - base58 of 1, 2, 3, 4
-        let client_hashes: Vec<ClientSideHash> = (1..=4)
-            .map(|x| ClientSideHash::new(Base58::from_bytes(vec![x])))
+        let client_hashes: Vec<ClientId> = (1..=4)
+            .map(|x| ClientId::new(Base58::from_bytes(vec![x])))
             .collect();
 
         let t0 = bulk_put::DagNode {
@@ -235,13 +235,13 @@ mod tests {
 
         let map = (caps.0).0.lock().unwrap();
 
-        let uploaded_values: Vec<(Vec<ClientSideHash>, Base64)> = map
+        let uploaded_values: Vec<(Vec<ClientId>, Base64)> = map
             .values()
             .map(|DagNode { links, data }| {
                 (
                     links
                         .iter()
-                        .map(|x| ClientSideHash::new(Base58::from_string(&x.name).unwrap()))
+                        .map(|x| ClientId::new(Base58::from_string(&x.name).unwrap()))
                         .collect(),
                     data.clone(),
                 )

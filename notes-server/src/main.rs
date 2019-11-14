@@ -1,10 +1,10 @@
 // #![deny(warnings)]
 
+use dag_cache_types::types::ipfs;
 use dag_cache_types::types::api::get;
 use dag_cache_types::types::grpc::{self, client::IpfsCacheClient};
 use futures::future::FutureExt;
 use serde::Serialize;
-use std::str::FromStr;
 use warp::{reject, Filter};
 
 // TODO: struct w/ domain types & etc
@@ -20,21 +20,11 @@ struct ErrorMessage<'a> {
     message: &'a str,
 }
 
-/// A newtype to enforce our maximum allowed seconds.
-struct HashParam(String);
-
-impl FromStr for HashParam {
-    type Err = ();
-    fn from_str(src: &str) -> Result<Self, Self::Err> {
-        Ok(HashParam(src.to_string())) // todo: full base58 validation
-    }
-}
-
 #[tokio::main]
 async fn main() {
     let get_route = warp::path("node")
         .and(warp::path::param::<String>())
-        .and_then(|raw_hash| {
+        .and_then(|raw_hash: String| {
             let f = async move {
                 println!("parsed hash {} from path", raw_hash);
 
@@ -42,12 +32,15 @@ async fn main() {
                     .await
                     .map_err(|e| Box::new(e))?;
 
+                // TODO: validate base58 here
                 let request = tonic::Request::new(grpc::IpfsHash { hash: raw_hash });
 
                 let response = client.get_node(request).await.map_err(|e| Box::new(e))?;
 
                 let response =
                     get::Resp::from_proto(response.into_inner()).map_err(|e| Box::new(e))?;
+
+                let response = notes_types::GetResp::from_generic(response)?;
 
                 let resp = warp::reply::json(&response);
                 Ok::<_, Box<dyn std::error::Error + Send + Sync + 'static>>(resp)
@@ -59,17 +52,37 @@ async fn main() {
     // TODO: impl put via the above w/ addition of parsing body as json - also wire into frontend
 
     // note: first path segment duplicated
-    // let post_route = warp::post()
-    //     .and(warp::path("node"))
-    //     .and(warp::body::content_length_limit(1024 * 16)) // arbitrary?
-    //     .and(warp::body::json())
-    //     .and_then(|rate, mut employee: Employee| {
+    let post_route = warp::post()
+        .and(warp::path("node"))
+        .and(warp::body::content_length_limit(1024 * 16)) // arbitrary?
+        .and(warp::body::json())
+        .and_then(|put_req: notes_types::PutReq| {
+            let f = async move {
+                println!("got req {:?} body", put_req);
 
-    //         employee.rate = rate;
-    //         warp::reply::json(&employee)
-    //     });
+                let put_req = put_req.into_generic()?;
 
-    // let routes = get_route.or(post_route);
+                // TODO: better mgmt for grpc port/host
+                let mut client = IpfsCacheClient::connect("http://localhost:8088")
+                    .await
+                    .map_err(|e| Box::new(e))?;
 
-    warp::serve(get_route).run(([127, 0, 0, 1], 3030)).await;
+                // TODO: validate base58 here
+                let request = tonic::Request::new(put_req.into_proto());
+
+                let response = client.put_nodes(request).await.map_err(|e| Box::new(e))?;
+
+                let response =
+                    ipfs::IPFSHash::from_proto(response.into_inner()).map_err(|e| Box::new(e))?;
+
+                let resp = warp::reply::json(&response);
+                Ok::<_, Box<dyn std::error::Error + Send + Sync + 'static>>(resp)
+            };
+
+            f.map(|x| x.map_err(|e| reject::custom::<Error>(Error(e))))
+        });
+
+    let routes = get_route.or(post_route);
+
+    warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 }

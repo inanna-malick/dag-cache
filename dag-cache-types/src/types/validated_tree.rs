@@ -1,19 +1,19 @@
 use crate::types::api::bulk_put::{DagNode, DagNodeLink};
-use crate::types::api::ClientSideHash;
-use hashbrown::HashMap;
+use crate::types::api::ClientId;
+use std::collections::HashMap;
 
 // ephemeral, used for data structure in memory
 #[derive(Debug)]
 pub struct ValidatedTree {
     pub root_node: DagNode,
-    pub nodes: HashMap<ClientSideHash, DagNode>,
+    pub nodes: HashMap<ClientId, DagNode>,
 }
 
 // TODO: tests
 impl ValidatedTree {
     pub fn validate(
         root_node: DagNode,
-        nodes: HashMap<ClientSideHash, DagNode>,
+        nodes: HashMap<ClientId, DagNode>,
     ) -> Result<ValidatedTree, DagTreeBuildErr> {
         let mut node_visited_count = 0;
         let mut stack = Vec::new();
@@ -55,6 +55,18 @@ impl ValidatedTree {
 
 #[derive(Debug)]
 pub enum DagTreeBuildErr {
-    InvalidLink(ClientSideHash),
+    InvalidLink(ClientId),
     UnreachableNodes,
+}
+
+impl std::fmt::Display for DagTreeBuildErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self) // TODO: more idiomatic way of doing this
+    }
+}
+
+impl std::error::Error for DagTreeBuildErr {
+    fn description(&self) -> &str { "dag cache build error" }
+
+    fn cause(&self) -> Option<&dyn std::error::Error> { None }
 }

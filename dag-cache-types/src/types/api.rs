@@ -1,26 +1,27 @@
-use crate::types::encodings::Base58;
 use crate::types::errors::ProtoDecodingError;
-use serde::{Deserialize, Serialize};
-#[cfg(feature = "grpc" )]
+#[cfg(feature = "grpc")]
 use crate::types::grpc;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
-pub struct ClientSideHash(Base58);
-impl ClientSideHash {
+pub struct ClientId(pub String); // string? u128? idk
+impl ClientId {
     #[cfg(test)]
-    pub fn new(x: Base58) -> ClientSideHash { ClientSideHash(x) }
+    pub fn new(x: String) -> ClientId { ClientId(x) }
 
-    #[cfg(feature = "grpc" )]
-    pub fn from_proto(p: grpc::ClientSideHash) -> Result<Self, ProtoDecodingError> {
-        Base58::from_string(&p.hash)
-            .map(ClientSideHash)
-            .map_err(|e| ProtoDecodingError {
-                cause: format!("invalid base58 string in client side hash: {:?}", e),
-            })
+    #[cfg(feature = "grpc")]
+    pub fn from_proto(p: grpc::ClientId) -> Result<Self, ProtoDecodingError> {
+        Ok(ClientId(p.hash)) // TODO: validation?
+    }
+
+    #[cfg(feature = "grpc")]
+    pub fn into_proto(self) -> grpc::ClientId {
+        grpc::ClientId{hash: self.0}
     }
 }
 
-impl std::fmt::Display for ClientSideHash {
+impl std::fmt::Display for ClientId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) }
 }
 
@@ -41,7 +42,28 @@ pub mod bulk_put {
     }
 
     impl Req {
-        #[cfg(feature = "grpc" )]
+        #[cfg(feature = "grpc")]
+        pub fn into_proto(self) -> grpc::BulkPutReq {
+            let root_node = self.validated_tree.root_node.into_proto();
+
+            let nodes = self
+                .validated_tree
+                .nodes
+                .into_iter()
+                .map(|(id, n)| grpc::BulkPutIpfsNodeWithHash{
+                    node: Some(n.into_proto()),
+                    client_side_hash: Some(id.into_proto()),
+                })
+                .collect();
+
+            grpc::BulkPutReq {
+                root_node: Some(root_node),
+                nodes,
+            }
+        }
+
+
+        #[cfg(feature = "grpc")]
         pub fn from_proto(p: grpc::BulkPutReq) -> Result<Self, ProtoDecodingError> {
             let root_node = p.root_node.ok_or(ProtoDecodingError {
                 cause: "root node not present on Bulk Put Req proto".to_string(),
@@ -55,7 +77,7 @@ pub mod bulk_put {
                 .collect();
             let nodes = nodes?;
 
-            let mut node_map = hashbrown::HashMap::with_capacity(nodes.len());
+            let mut node_map = HashMap::with_capacity(nodes.len());
 
             for DagNodeWithHash { hash, node } in nodes.into_iter() {
                 node_map.insert(hash, node);
@@ -72,18 +94,18 @@ pub mod bulk_put {
 
     #[derive(Clone, Debug)]
     pub struct DagNodeWithHash {
-        pub hash: ClientSideHash,
+        pub hash: ClientId,
         pub node: DagNode,
     }
 
     impl DagNodeWithHash {
-        #[cfg(feature = "grpc" )]
+        #[cfg(feature = "grpc")]
         pub fn from_proto(p: grpc::BulkPutIpfsNodeWithHash) -> Result<Self, ProtoDecodingError> {
             let hash = p.client_side_hash.ok_or(ProtoDecodingError {
                 cause: "client side hash not present on BulkPutIpfsNodeWithHash proto".to_string(),
             })?;
 
-            let hash = ClientSideHash::from_proto(hash)?;
+            let hash = ClientId::from_proto(hash)?;
 
             let node = p.node.ok_or(ProtoDecodingError {
                 cause: "node not present on BulkPutIpfsNodeWithHash proto".to_string(),
@@ -99,8 +121,8 @@ pub mod bulk_put {
         pub data: Base64,            // this node's data
     }
 
+    #[cfg(feature = "grpc")]
     impl DagNode {
-        #[cfg(feature = "grpc" )]
         pub fn from_proto(p: grpc::BulkPutIpfsNode) -> Result<Self, ProtoDecodingError> {
             let data = Base64(p.data);
 
@@ -109,23 +131,45 @@ pub mod bulk_put {
             let links = links?;
             Ok(DagNode { links, data })
         }
+
+        pub fn into_proto(self) -> grpc::BulkPutIpfsNode {
+            grpc::BulkPutIpfsNode {
+                data: self.data.0,
+                links: self.links.into_iter().map( |x| x.into_proto()).collect(),
+            }
+        }
     }
 
     #[derive(Clone, Debug)]
     pub enum DagNodeLink {
-        Local(ClientSideHash),
+        Local(ClientId),
         Remote(ipfs::IPFSHeader),
     }
 
+    #[cfg(feature = "grpc")]
     impl DagNodeLink {
-        #[cfg(feature = "grpc" )]
+        pub fn into_proto(self) -> grpc::BulkPutLink {
+            let link = match self {
+                DagNodeLink::Local(id) => {
+                    grpc::bulk_put_link::Link::InReq(id.into_proto())
+                }
+
+                DagNodeLink::Remote(hdr) => {
+                    grpc::bulk_put_link::Link::InIpfs(hdr.into_proto())
+                }
+            };
+            grpc::BulkPutLink{ link: Some(link) }
+
+        }
+
+
         pub fn from_proto(p: grpc::BulkPutLink) -> Result<Self, ProtoDecodingError> {
             match p.link {
                 Some(grpc::bulk_put_link::Link::InIpfs(hdr)) => {
                     ipfs::IPFSHeader::from_proto(hdr).map(DagNodeLink::Remote)
                 }
                 Some(grpc::bulk_put_link::Link::InReq(csh)) => {
-                    let csh = ClientSideHash::from_proto(csh)?;
+                    let csh = ClientId::from_proto(csh)?;
                     Ok(DagNodeLink::Local(csh))
                 }
                 None => Err(ProtoDecodingError {
@@ -149,7 +193,7 @@ pub mod get {
     }
 
     impl Resp {
-        #[cfg(feature = "grpc" )]
+        #[cfg(feature = "grpc")]
         pub fn from_proto(p: grpc::GetResp) -> Result<Self, ProtoDecodingError> {
             let extra_nodes: Result<Vec<ipfs::DagNodeWithHeader>, ProtoDecodingError> = p
                 .extra_nodes
@@ -171,7 +215,7 @@ pub mod get {
             Ok(res)
         }
 
-        #[cfg(feature = "grpc" )]
+        #[cfg(feature = "grpc")]
         pub fn into_proto(self) -> grpc::GetResp {
             grpc::GetResp {
                 requested_node: Some(self.requested_node.into_proto()),

@@ -1,8 +1,8 @@
 use crate::types::encodings::{Base58, Base64};
 use crate::types::errors::ProtoDecodingError;
-use serde::{Deserialize, Serialize};
-#[cfg(feature = "grpc" )]
+#[cfg(feature = "grpc")]
 use crate::types::grpc;
+use serde::{Deserialize, Serialize};
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct IPFSHeader {
@@ -12,7 +12,7 @@ pub struct IPFSHeader {
 }
 
 impl IPFSHeader {
-    #[cfg(feature = "grpc" )]
+    #[cfg(feature = "grpc")]
     pub fn into_proto(self) -> grpc::IpfsHeader {
         grpc::IpfsHeader {
             name: self.name,
@@ -21,7 +21,7 @@ impl IPFSHeader {
         }
     }
 
-    #[cfg(feature = "grpc" )]
+    #[cfg(feature = "grpc")]
     pub fn from_proto(p: grpc::IpfsHeader) -> Result<Self, ProtoDecodingError> {
         let hash = p.hash.ok_or(ProtoDecodingError {
             cause: "hash field not present on IpfsHeader proto".to_string(),
@@ -41,14 +41,14 @@ impl IPFSHeader {
 pub struct IPFSHash(Base58);
 
 impl IPFSHash {
-    #[cfg(feature = "grpc" )]
+    #[cfg(feature = "grpc")]
     pub fn into_proto(self) -> grpc::IpfsHash {
         let base_58 = self.0;
         let raw = base_58.to_string();
         grpc::IpfsHash { hash: raw }
     }
 
-    #[cfg(feature = "grpc" )]
+    #[cfg(feature = "grpc")]
     pub fn from_proto(p: grpc::IpfsHash) -> Result<Self, ProtoDecodingError> {
         Base58::from_string(&p.hash)
             .map(IPFSHash)
@@ -77,7 +77,7 @@ pub struct DagNode {
 }
 
 impl DagNode {
-    #[cfg(feature = "grpc" )]
+    #[cfg(feature = "grpc")]
     pub fn into_proto(self) -> grpc::IpfsNode {
         grpc::IpfsNode {
             links: self.links.into_iter().map(IPFSHeader::into_proto).collect(),
@@ -85,7 +85,7 @@ impl DagNode {
         }
     }
 
-    #[cfg(feature = "grpc" )]
+    #[cfg(feature = "grpc")]
     pub fn from_proto(p: grpc::IpfsNode) -> Result<Self, ProtoDecodingError> {
         let links: Result<Vec<IPFSHeader>, ProtoDecodingError> =
             p.links.into_iter().map(IPFSHeader::from_proto).collect();
@@ -98,8 +98,15 @@ impl DagNode {
     }
 }
 
+// exists primarily to have better serialized json (tuples result in 2-elem lists)
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DagNodeWithHeader {
+    pub header: IPFSHeader,
+    pub node: DagNode,
+}
+
 impl DagNodeWithHeader {
-    #[cfg(feature = "grpc" )]
+    #[cfg(feature = "grpc")]
     pub fn into_proto(self) -> grpc::IpfsNodeWithHeader {
         let hdr = self.header.into_proto();
         let node = self.node.into_proto();
@@ -110,7 +117,7 @@ impl DagNodeWithHeader {
         }
     }
 
-    #[cfg(feature = "grpc" )]
+    #[cfg(feature = "grpc")]
     pub fn from_proto(p: grpc::IpfsNodeWithHeader) -> Result<Self, ProtoDecodingError> {
         let header = p.header.ok_or(ProtoDecodingError {
             cause: "missing header".to_string(),
@@ -122,11 +129,4 @@ impl DagNodeWithHeader {
         let node = DagNode::from_proto(node)?;
         Ok(Self { header, node })
     }
-}
-
-// exists primarily to have better serialized json (tuples result in 2-elem lists)
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct DagNodeWithHeader {
-    pub header: IPFSHeader,
-    pub node: DagNode,
 }
