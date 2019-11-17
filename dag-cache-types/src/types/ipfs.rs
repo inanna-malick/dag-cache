@@ -1,4 +1,5 @@
 use crate::types::encodings::{Base58, Base64};
+#[cfg(feature = "grpc")]
 use crate::types::errors::ProtoDecodingError;
 #[cfg(feature = "grpc")]
 use crate::types::grpc;

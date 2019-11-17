@@ -1,10 +1,12 @@
+#[cfg(feature = "grpc")]
 use crate::types::errors::ProtoDecodingError;
 #[cfg(feature = "grpc")]
 use crate::types::grpc;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "grpc")]
 use std::collections::HashMap;
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+#[derive(PartialEq, Hash, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct ClientId(pub String); // string? u128? idk
 impl ClientId {
     #[cfg(test)]
@@ -31,6 +33,58 @@ pub mod bulk_put {
     use crate::types::ipfs;
     use crate::types::validated_tree::ValidatedTree;
 
+
+    #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+    pub struct Resp {
+        pub root_hash: ipfs::IPFSHash,
+        pub additional_uploaded: Vec<(ClientId, ipfs::IPFSHash)>,
+    }
+
+    #[cfg(feature = "grpc")]
+    impl Resp {
+        pub fn into_proto(self) -> grpc::BulkPutResp {
+
+            grpc::BulkPutResp {
+                root_hash: Some(self.root_hash.into_proto()),
+                additional_uploaded: self.additional_uploaded.into_iter().map( |x| {
+                    grpc::BulkPutRespPair {
+                        client_id: Some(x.0.into_proto()),
+                        hash: Some(x.1.into_proto()),
+                    }
+                }).collect(),
+            }
+        }
+
+        pub fn from_proto(p: grpc::BulkPutResp) -> Result<Self, ProtoDecodingError> {
+            let root_hash = p.root_hash.ok_or(ProtoDecodingError {
+                cause: "root hash not present on Bulk Put Resp proto".to_string(),
+            })?;
+            let root_hash = ipfs::IPFSHash::from_proto(root_hash)?;
+
+            let additional_uploaded: Result<Vec<(ClientId, ipfs::IPFSHash)>, ProtoDecodingError> = p
+                .additional_uploaded
+                .into_iter()
+                .map(|bp| {
+
+                    let client_id = bp.client_id.ok_or(ProtoDecodingError {
+                        cause: "client_id not present on Bulk Put Resp proto pair".to_string(),
+                    })?;
+                    let client_id = ClientId::from_proto(client_id)?;
+
+                    let hash = bp.hash.ok_or(ProtoDecodingError {
+                        cause: "hash not present on Bulk Put Resp proto pair".to_string(),
+                    })?;
+                    let hash = ipfs::IPFSHash::from_proto(hash)?;
+                    Ok((client_id, hash))
+                })
+                .collect();
+            let additional_uploaded = additional_uploaded?;
+
+            Ok(Resp { root_hash, additional_uploaded })
+        }
+    }
+
+
     // idea is that a put req will contain some number of nodes, with only client-side blake hashing performed.
     // all hash links in body will solely use blake hash. ipfs is then treated as an implementation detail
     // with parsing-time traverse op to pair each blake hash with the full ipfs hash from the links field
@@ -41,8 +95,8 @@ pub mod bulk_put {
         pub validated_tree: ValidatedTree,
     }
 
+    #[cfg(feature = "grpc")]
     impl Req {
-        #[cfg(feature = "grpc")]
         pub fn into_proto(self) -> grpc::BulkPutReq {
             let root_node = self.validated_tree.root_node.into_proto();
 
@@ -62,8 +116,6 @@ pub mod bulk_put {
             }
         }
 
-
-        #[cfg(feature = "grpc")]
         pub fn from_proto(p: grpc::BulkPutReq) -> Result<Self, ProtoDecodingError> {
             let root_node = p.root_node.ok_or(ProtoDecodingError {
                 cause: "root node not present on Bulk Put Req proto".to_string(),

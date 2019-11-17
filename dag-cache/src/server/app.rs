@@ -8,7 +8,7 @@ use dag_cache_types::types::grpc;
 use dag_cache_types::types::ipfs;
 use futures::stream::StreamExt;
 use futures::Stream;
-use grpc::{server, BulkPutReq, GetResp, IpfsHash, IpfsNode};
+use grpc::{server, BulkPutReq, BulkPutResp, GetResp, IpfsHash, IpfsNode};
 use honeycomb_tracing::TraceId;
 use std::sync::Arc;
 use tonic::{Code, Request, Response, Status};
@@ -93,7 +93,7 @@ async fn put_node_handler<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(
 async fn put_nodes_handler<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(
     caps: Arc<C>,
     request: Request<BulkPutReq>,
-) -> Result<Response<IpfsHash>, Status> {
+) -> Result<Response<BulkPutResp>, Status> {
     // extract explicit tracing id (if any)
     extract_tracing_id_and_record(request.metadata())?;
 
@@ -103,10 +103,9 @@ async fn put_nodes_handler<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(
     })?;
 
     info!("dag cache put handler");
-    let (_size, hash) = batch_put::ipfs_publish_cata(caps, bulk_put_req.validated_tree).await?;
+    let resp = batch_put::ipfs_publish_cata(caps, bulk_put_req.validated_tree).await?;
 
-    let proto_hash = hash.into_proto();
-    let resp = Response::new(proto_hash);
+    let resp = Response::new(resp.into_proto());
     Ok(resp)
 }
 
@@ -130,7 +129,7 @@ impl<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static> server::IpfsCache for 
         put_node_handler(self.caps.as_ref(), request).await
     }
 
-    async fn put_nodes(&self, request: Request<BulkPutReq>) -> Result<Response<IpfsHash>, Status> {
+    async fn put_nodes(&self, request: Request<BulkPutReq>) -> Result<Response<BulkPutResp>, Status> {
         put_nodes_handler(self.caps.clone(), request).await
     }
 }

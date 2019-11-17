@@ -12,7 +12,7 @@ pub struct NodeId(pub u128);
 
 impl NodeId {
     pub fn from_generic(g: String) -> Result<Self> {
-        let id = u128::from_str_radix(&g, 10)?;
+        let id = u128::from_str_radix(&g, 10)?; // panics if invalid...
         Ok(NodeId(id))
     }
 
@@ -41,9 +41,27 @@ pub struct RemoteNodeRef(pub NodeId, pub IPFSHash);
 
 #[derive(PartialEq, Eq, Clone, Serialize, Deserialize, Debug)]
 pub struct Node<T> {
+    pub parent: Option<NodeId>, // _not_ T, constant type. NOTE: enforces that this is a TREE and not a DAG
     pub children: Vec<T>,
     pub header: String,
     pub body: String,
+}
+
+impl<T> Node<T> {
+    pub fn map_mut<F: Fn(&mut T)>(&mut self, f: F) {
+        for x in self.children.iter_mut() {
+            f(x)
+        }
+    }
+
+    pub fn map<X, F: Fn(T) -> X>(self, f: F) -> Node<X> {
+        Node {
+            parent: self.parent,
+            children: self.children.into_iter().map(f).collect(),
+            header: self.header,
+            body: self.body,
+        }
+    }
 }
 
 // cannonical format
@@ -87,6 +105,7 @@ impl Node<RemoteNodeRef> {
         let node_children: Vec<RemoteNodeRef> = node_children?;
 
         let node = Node {
+            parent: node.parent,
             children: node_children,
             header: node.header,
             body: node.body,
@@ -99,6 +118,7 @@ impl Node<RemoteNodeRef> {
 impl Node<NodeRef> {
     pub fn into_generic(self) -> Result<api::bulk_put::DagNode> {
         let data = Node {
+            parent: self.parent,
             children: self
                 .children
                 .iter()
@@ -136,8 +156,9 @@ impl Node<NodeRef> {
 
 impl<T> Node<T> {
     // TODO: remove arbitrary defaults. very janky.
-    pub fn new() -> Self {
+    pub fn new(parent: Option<NodeId>) -> Self {
         Node {
+            parent,
             children: Vec::new(),
             header: "new node header!".to_string(),
             body: "new node body!".to_string(),
@@ -145,7 +166,7 @@ impl<T> Node<T> {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Serialize, Debug, Deserialize)]
 pub struct GetResp {
     pub requested_node: Node<RemoteNodeRef>,
     pub extra_nodes: HashMap<RemoteNodeRef, Node<RemoteNodeRef>>,

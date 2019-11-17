@@ -1,6 +1,6 @@
 use crate::capabilities::lib::put_and_cache;
 use crate::capabilities::{HasCacheCap, HasIPFSCap};
-use dag_cache_types::types::api::bulk_put;
+use dag_cache_types::types::api::{ClientId, bulk_put};
 use dag_cache_types::types::errors::DagCacheError;
 use dag_cache_types::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
 use dag_cache_types::types::validated_tree::ValidatedTree;
@@ -16,10 +16,11 @@ use tracing::error;
 pub async fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     tree: ValidatedTree,
-) -> Result<(u64, IPFSHash), DagCacheError> {
+) -> Result<bulk_put::Resp, DagCacheError> {
     let focus = tree.root_node.clone();
     let tree = Arc::new(tree);
-    ipfs_publish_cata_unsafe(caps, tree, focus).await
+    let (_size, root_hash, additional_uploaded) = ipfs_publish_cata_unsafe(caps, tree, focus).await?;
+    Ok(bulk_put::Resp{ root_hash, additional_uploaded })
 }
 
 // unsafe b/c it can take any 'focus' ClientId and not just the root node of tree
@@ -27,7 +28,7 @@ async fn ipfs_publish_cata_unsafe<C: 'static + HasCacheCap + HasIPFSCap + Sync +
     caps: Arc<C>,
     tree: Arc<ValidatedTree>, // todo use async/await I guess, mb can avoid needing Arc? ugh
     node: bulk_put::DagNode,
-) -> Result<(u64, IPFSHash), DagCacheError> {
+) -> Result<(u64, IPFSHash, Vec<(ClientId, IPFSHash)>), DagCacheError> {
     let (send, receive) = oneshot::channel();
 
     let f = ipfs_publish_worker(caps, tree, send, node);
@@ -51,27 +52,27 @@ async fn upload_link<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     x: bulk_put::DagNodeLink,
     tree: Arc<ValidatedTree>,
     caps: Arc<C>,
-) -> Result<IPFSHeader, DagCacheError> {
+) -> Result<(IPFSHeader, Vec<(ClientId, IPFSHash)>), DagCacheError> {
     match x {
-        bulk_put::DagNodeLink::Local(client_side_hash) => {
+        bulk_put::DagNodeLink::Local(client_id) => {
             // NOTE: could be more efficient by removing node from tree but would break
             // guarantees provided by ValidatedTree (by removing nodes)
             // NOTE: not possible, really - would need Mut access to the hashmap to do that
 
             // unhandled deref failure, known to be safe b/c of validated tree wrapper
-            let node = tree.nodes[&client_side_hash].clone();
+            let node = tree.nodes[&client_id].clone();
 
-            // todo: figure out how to get this as 100% async
-            let (size, hash) =
+            let (size, hash, mut additional_uploaded) =
                 ipfs_publish_cata_unsafe(caps.clone(), tree.clone(), node.clone()).await?;
             let hdr = IPFSHeader {
-                name: client_side_hash.to_string(),
+                name: client_id.to_string(),
                 size,
                 hash,
             };
-            Ok(hdr)
+            additional_uploaded.push((client_id, hdr.hash.clone()));
+            Ok((hdr, additional_uploaded))
         }
-        bulk_put::DagNodeLink::Remote(hdr) => Ok(hdr.clone()),
+        bulk_put::DagNodeLink::Remote(hdr) => Ok((hdr.clone(), Vec::new())),
     }
 }
 
@@ -79,10 +80,10 @@ async fn upload_link<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
 fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     caps: Arc<C>,
     tree: Arc<ValidatedTree>,
+    chan: oneshot::Sender<Result<(u64, IPFSHash, Vec<(ClientId, IPFSHash)>), DagCacheError>>,
     // TODO: pass around pointers to node in stack frame (hm keys) instead of nodes
     // OR NOT: struct is quite small, even if the owned-by-it vec of u8/vec of links is big
     // TODO: ask rain
-    chan: oneshot::Sender<Result<(u64, IPFSHash), DagCacheError>>,
     node: bulk_put::DagNode,
 ) -> Box<dyn Future<Output = ()> + Unpin + Send> {
     let f = ipfs_publish_worker_async(caps, tree, node)
@@ -105,7 +106,7 @@ async fn ipfs_publish_worker_async<C: 'static + HasCacheCap + HasIPFSCap + Sync 
     // OR NOT: struct is quite small, even if the owned-by-it vec of u8/vec of links is big
     // TODO: ask rain
     node: bulk_put::DagNode,
-) -> Result<(u64, IPFSHash), DagCacheError> {
+) -> Result<(u64, IPFSHash, Vec<(ClientId, IPFSHash)>), DagCacheError> {
     let bulk_put::DagNode { data, links } = node;
 
     let size = data.0.len() as u64;
@@ -115,19 +116,25 @@ async fn ipfs_publish_worker_async<C: 'static + HasCacheCap + HasIPFSCap + Sync 
         .map(|ln| upload_link(ln, tree.clone(), caps.clone()))
         .collect();
 
-    let joined_link_uploads: Vec<Result<IPFSHeader, DagCacheError>> =
+    let joined_link_uploads: Vec<Result<_, DagCacheError>> =
         futures::future::join_all(link_uploads).await;
-    let links: Vec<IPFSHeader> = joined_link_uploads
+    let links: Vec<_> = joined_link_uploads
         .into_iter()
-        .collect::<Result<Vec<IPFSHeader>, DagCacheError>>()?;
+        .collect::<Result<Vec<_>, DagCacheError>>()?;
 
+
+
+    let additional_uploaded: Vec<(ClientId, IPFSHash)> = links.iter().map( |x| x.1.clone() ).flatten().collect();
+
+
+    let links = links.into_iter().map( |x| x.0 ).collect();
     let dag_node = DagNode { data, links };
 
     // might be a bit of an approximation, but w/e
     let size = size + dag_node.links.iter().map(|x| x.size).sum::<u64>();
 
     let hash = put_and_cache(caps.as_ref(), dag_node).await?;
-    Ok((size, hash))
+    Ok((size, hash, additional_uploaded))
 }
 
 #[cfg(test)]

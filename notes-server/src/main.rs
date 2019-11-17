@@ -1,11 +1,10 @@
 // #![deny(warnings)]
 
-use dag_cache_types::types::ipfs;
-use dag_cache_types::types::api::get;
+use dag_cache_types::types::api::{get, bulk_put};
 use dag_cache_types::types::grpc::{self, client::IpfsCacheClient};
 use futures::future::FutureExt;
 use serde::Serialize;
-use warp::{reject, Filter};
+use warp::{reject, http::Method, Filter};
 
 // TODO: struct w/ domain types & etc
 #[derive(Debug)]
@@ -22,6 +21,10 @@ struct ErrorMessage<'a> {
 
 #[tokio::main]
 async fn main() {
+    // let cors = warp::cors()
+    //     .allow_methods(&[Method::GET, Method::POST])
+    //     .allow_origin("http://localhost"); // for testing only <- FIXME
+
     let get_route = warp::path("node")
         .and(warp::path::param::<String>())
         .and_then(|raw_hash: String| {
@@ -46,14 +49,14 @@ async fn main() {
                 Ok::<_, Box<dyn std::error::Error + Send + Sync + 'static>>(resp)
             };
 
-            f.map(|x| x.map_err(|e| reject::custom::<Error>(Error(e))))
+            f.map(|x| x.map_err(|e| {
+                println!("err on get: {:?}", e);
+                reject::custom::<Error>(Error(e))
+            }))
         });
 
-    // TODO: impl put via the above w/ addition of parsing body as json - also wire into frontend
-
-    // note: first path segment duplicated
     let post_route = warp::post()
-        .and(warp::path("node"))
+        .and(warp::path("nodes"))
         .and(warp::body::content_length_limit(1024 * 16)) // arbitrary?
         .and(warp::body::json())
         .and_then(|put_req: notes_types::PutReq| {
@@ -72,17 +75,24 @@ async fn main() {
 
                 let response = client.put_nodes(request).await.map_err(|e| Box::new(e))?;
 
+                // NOTE: no need to use specific repr, ipfs hash and client id are generic enough
                 let response =
-                    ipfs::IPFSHash::from_proto(response.into_inner()).map_err(|e| Box::new(e))?;
+                    bulk_put::Resp::from_proto(response.into_inner()).map_err(|e| Box::new(e))?;
 
                 let resp = warp::reply::json(&response);
                 Ok::<_, Box<dyn std::error::Error + Send + Sync + 'static>>(resp)
             };
 
-            f.map(|x| x.map_err(|e| reject::custom::<Error>(Error(e))))
+            f.map(|x| x.map_err(|e| {
+                println!("err on get: {:?}", e);
+                reject::custom::<Error>(Error(e))
+            }))
         });
 
-    let routes = get_route.or(post_route);
+    // lmao, hardcoded - would be part of deployable, ideally
+    let static_route = warp::fs::dir("/home/pk/dev/rust-wasm/notes-frontend/target/deploy");
+
+    let routes = get_route.or(post_route).or(static_route);
 
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 }
