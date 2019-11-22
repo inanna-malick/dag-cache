@@ -1,0 +1,16 @@
+[package]
+name = "notes"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+strum = "0.13"
+strum_macros = "0.13"
+serde = "1"
+serde_derive = "1"
+yew = "0.10"
+rand = { version = "0.7", features = ["stdweb"] }
+dag-cache-types = { path = "../../dag-cache/dag-cache-types", features = ["minimal"] }
+notes-types = { path = "../../dag-cache/notes-types" }
+failure = "0.1.6"
+stdweb = "0.4"

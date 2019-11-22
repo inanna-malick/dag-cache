@@ -6,3 +6,7 @@ members = [
     "notes-server",
     "notes-types",
 ]
+
+exclude = [
+    "notes-frontend",  # FIXME: requires cargo _web_ to build
+    ]
