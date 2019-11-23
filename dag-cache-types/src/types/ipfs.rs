@@ -58,17 +58,19 @@ impl IPFSHash {
             })
     }
 
-    #[cfg(test)]
     pub fn from_string(x: &str) -> Result<Self, base58::FromBase58Error> {
         Base58::from_string(x).map(Self::from_raw)
     }
 
-    #[cfg(test)]
-    pub fn from_raw(raw: Base58) -> IPFSHash { IPFSHash(raw) }
+    pub fn from_raw(raw: Base58) -> IPFSHash {
+        IPFSHash(raw)
+    }
 }
 
 impl std::fmt::Display for IPFSHash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug, Deserialize, Serialize)]

@@ -1,4 +1,4 @@
-use crate::capabilities::ipfs_store::IPFSNode;
+use crate::capabilities::fs_ipfs_store::FileSystemStore;
 use crate::capabilities::lru_cache::Cache;
 use crate::capabilities::runtime::RuntimeCaps;
 use structopt::StructOpt;
@@ -12,10 +12,12 @@ pub struct Opt {
     #[structopt(short = "p", long = "port", default_value = "8088")]
     pub port: u64,
 
-    #[structopt(long = "ipfs_host", default_value = "localhost")]
-    ipfs_host: String,
-    #[structopt(long = "ipfs_port", default_value = "5001")]
-    ipfs_port: u64,
+    // #[structopt(long = "ipfs_host", default_value = "localhost")]
+    // ipfs_host: String,
+    // #[structopt(long = "ipfs_port", default_value = "5001")]
+    // ipfs_port: u64,
+    #[structopt(short = "f", long = "fs_path")]
+    fs_path: String,
 
     #[structopt(short = "n", long = "max_cache_entries", default_value = "128")]
     // arbitrarily chosen number..
@@ -25,16 +27,20 @@ pub struct Opt {
     honeycomb_key: String,
 }
 
+
 impl Opt {
     /// parse opts into capabilities object, will panic if not configured correctly (TODO: FIXME)
     pub fn into_runtime(self) -> (RuntimeCaps, libhoney::Config) {
-        let ipfs_node = format!("http://{}:{}", &self.ipfs_host, self.ipfs_port); // TODO: https...
-        let ipfs_node = IPFSNode::new(reqwest::Url::parse(&ipfs_node).unwrap_or_else(|_| {
-            panic!(
-                "unable to parse provided IPFS host + port ({:?}) as URL",
-                &ipfs_node
-            )
-        }));
+        // let ipfs_node = format!("http://{}:{}", &self.ipfs_host, self.ipfs_port); // TODO: https...
+        // let ipfs_node = IPFSNode::new(reqwest::Url::parse(&ipfs_node).unwrap_or_else(|_| {
+        //     panic!(
+        //         "unable to parse provided IPFS host + port ({:?}) as URL",
+        //         &ipfs_node
+        //     )
+        // }));
+
+
+        let store = FileSystemStore(self.fs_path);
 
         let honeycomb_config = libhoney::Config {
             options: libhoney::client::Options {
@@ -47,7 +53,7 @@ impl Opt {
 
         let cache = Cache::new(self.max_cache_entries);
 
-        let rt = RuntimeCaps { cache, ipfs_node };
+        let rt = RuntimeCaps { cache, store };
 
         (rt, honeycomb_config)
     }

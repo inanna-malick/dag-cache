@@ -1,10 +1,10 @@
 // #![deny(warnings)]
 
-use dag_cache_types::types::api::{get, bulk_put};
+use dag_cache_types::types::api::{bulk_put, get};
 use dag_cache_types::types::grpc::{self, client::IpfsCacheClient};
 use futures::future::FutureExt;
 use serde::Serialize;
-use warp::{reject, http::Method, Filter};
+use warp::{reject, Filter};
 
 // TODO: struct w/ domain types & etc
 #[derive(Debug)]
@@ -31,7 +31,7 @@ async fn main() {
             let f = async move {
                 println!("parsed hash {} from path", raw_hash);
 
-                let mut client = IpfsCacheClient::connect("http://localhost:8088")
+                let mut client = IpfsCacheClient::connect("http://dag:8088")
                     .await
                     .map_err(|e| Box::new(e))?;
 
@@ -49,10 +49,12 @@ async fn main() {
                 Ok::<_, Box<dyn std::error::Error + Send + Sync + 'static>>(resp)
             };
 
-            f.map(|x| x.map_err(|e| {
-                println!("err on get: {:?}", e);
-                reject::custom::<Error>(Error(e))
-            }))
+            f.map(|x| {
+                x.map_err(|e| {
+                    println!("err on get: {:?}", e);
+                    reject::custom::<Error>(Error(e))
+                })
+            })
         });
 
     let post_route = warp::post()
@@ -66,7 +68,7 @@ async fn main() {
                 let put_req = put_req.into_generic()?;
 
                 // TODO: better mgmt for grpc port/host
-                let mut client = IpfsCacheClient::connect("http://localhost:8088")
+                let mut client = IpfsCacheClient::connect("http://dag:8088")
                     .await
                     .map_err(|e| Box::new(e))?;
 
@@ -83,14 +85,17 @@ async fn main() {
                 Ok::<_, Box<dyn std::error::Error + Send + Sync + 'static>>(resp)
             };
 
-            f.map(|x| x.map_err(|e| {
-                println!("err on get: {:?}", e);
-                reject::custom::<Error>(Error(e))
-            }))
+            f.map(|x| {
+                x.map_err(|e| {
+                    println!("err on get: {:?}", e);
+                    reject::custom::<Error>(Error(e))
+                })
+            })
         });
 
     // lmao, hardcoded - would be part of deployable, ideally
-    let static_route = warp::fs::dir("/home/pk/dev/dag-cache/notes-frontend/target/deploy");
+    // let static_route = warp::fs::dir("/home/pk/dev/dag-cache/notes-frontend/target/deploy");
+    let static_route = warp::fs::dir("/static");
 
     let routes = get_route.or(post_route).or(static_route);
 

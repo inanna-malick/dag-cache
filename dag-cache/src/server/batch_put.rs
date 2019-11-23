@@ -1,6 +1,6 @@
 use crate::capabilities::lib::put_and_cache;
 use crate::capabilities::{HasCacheCap, HasIPFSCap};
-use dag_cache_types::types::api::{ClientId, bulk_put};
+use dag_cache_types::types::api::{bulk_put, ClientId};
 use dag_cache_types::types::errors::DagCacheError;
 use dag_cache_types::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
 use dag_cache_types::types::validated_tree::ValidatedTree;
@@ -19,8 +19,12 @@ pub async fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Se
 ) -> Result<bulk_put::Resp, DagCacheError> {
     let focus = tree.root_node.clone();
     let tree = Arc::new(tree);
-    let (_size, root_hash, additional_uploaded) = ipfs_publish_cata_unsafe(caps, tree, focus).await?;
-    Ok(bulk_put::Resp{ root_hash, additional_uploaded })
+    let (_size, root_hash, additional_uploaded) =
+        ipfs_publish_cata_unsafe(caps, tree, focus).await?;
+    Ok(bulk_put::Resp {
+        root_hash,
+        additional_uploaded,
+    })
 }
 
 // unsafe b/c it can take any 'focus' ClientId and not just the root node of tree
@@ -122,12 +126,10 @@ async fn ipfs_publish_worker_async<C: 'static + HasCacheCap + HasIPFSCap + Sync 
         .into_iter()
         .collect::<Result<Vec<_>, DagCacheError>>()?;
 
+    let additional_uploaded: Vec<(ClientId, IPFSHash)> =
+        links.iter().map(|x| x.1.clone()).flatten().collect();
 
-
-    let additional_uploaded: Vec<(ClientId, IPFSHash)> = links.iter().map( |x| x.1.clone() ).flatten().collect();
-
-
-    let links = links.into_iter().map( |x| x.0 ).collect();
+    let links = links.into_iter().map(|x| x.0).collect();
     let dag_node = DagNode { data, links };
 
     // might be a bit of an approximation, but w/e
@@ -141,21 +143,22 @@ async fn ipfs_publish_worker_async<C: 'static + HasCacheCap + HasIPFSCap + Sync 
 mod tests {
     use super::*;
     use crate::capabilities::{CacheCapability, HasCacheCap, HasIPFSCap, IPFSCapability};
-    use crate::lib;
     use async_trait::async_trait;
     use dag_cache_types::types::api::ClientId;
     use dag_cache_types::types::encodings::{Base58, Base64};
     use dag_cache_types::types::errors::DagCacheError;
     use dag_cache_types::types::ipfs::{DagNode, IPFSHash};
     use dag_cache_types::types::validated_tree::ValidatedTree;
-    use hashbrown::HashMap;
+    use std::collections::HashMap;
     use std::sync::Mutex;
 
     struct MockIPFS(Mutex<HashMap<IPFSHash, DagNode>>);
 
     struct BlackHoleCache;
     impl CacheCapability for BlackHoleCache {
-        fn get(&self, _k: IPFSHash) -> Option<DagNode> { None }
+        fn get(&self, _k: IPFSHash) -> Option<DagNode> {
+            None
+        }
 
         fn put(&self, _k: IPFSHash, _v: DagNode) {}
     }
@@ -185,23 +188,23 @@ mod tests {
 
     impl HasIPFSCap for TestCaps {
         type Output = MockIPFS;
-        fn ipfs_caps(&self) -> &MockIPFS { &self.0 }
+        fn ipfs_caps(&self) -> &MockIPFS {
+            &self.0
+        }
     }
 
     impl HasCacheCap for TestCaps {
         type Output = BlackHoleCache;
-        fn cache_caps(&self) -> &BlackHoleCache { &self.1 }
+        fn cache_caps(&self) -> &BlackHoleCache {
+            &self.1
+        }
     }
 
     // uses mock capabilities, does not require local ipfs daemon
     #[tokio::test]
     async fn test_batch_upload() {
-        lib::init_test_env(); // tracing subscriber
-
         //build some client side 'hashes' - base58 of 1, 2, 3, 4
-        let client_hashes: Vec<ClientId> = (1..=4)
-            .map(|x| ClientId::new(Base58::from_bytes(vec![x])))
-            .collect();
+        let client_ids: Vec<ClientId> = (1..4).map(|x| ClientId::new(format!("{}", x))).collect();
 
         let t0 = bulk_put::DagNode {
             links: vec![],
@@ -215,21 +218,21 @@ mod tests {
 
         let t2 = bulk_put::DagNode {
             links: vec![
-                bulk_put::DagNodeLink::Local(client_hashes[0].clone()),
-                bulk_put::DagNodeLink::Local(client_hashes[1].clone()),
+                bulk_put::DagNodeLink::Local(client_ids[0].clone()),
+                bulk_put::DagNodeLink::Local(client_ids[1].clone()),
             ],
             data: Base64(vec![3, 1, 4, 1, 5]),
         };
 
         let t3 = bulk_put::DagNode {
-            links: vec![bulk_put::DagNodeLink::Local(client_hashes[2].clone())],
+            links: vec![bulk_put::DagNodeLink::Local(client_ids[2].clone())],
             data: Base64(vec![0, 1, 1, 2, 3, 5]),
         };
 
         let mut m = HashMap::new();
-        m.insert(client_hashes[0].clone(), t0.clone());
-        m.insert(client_hashes[1].clone(), t1.clone());
-        m.insert(client_hashes[2].clone(), t2.clone());
+        m.insert(client_ids[0].clone(), t0.clone());
+        m.insert(client_ids[1].clone(), t1.clone());
+        m.insert(client_ids[2].clone(), t2.clone());
 
         let validated_tree = ValidatedTree::validate(t3.clone(), m).expect("static test invalid");
 
@@ -248,7 +251,7 @@ mod tests {
                 (
                     links
                         .iter()
-                        .map(|x| ClientId::new(Base58::from_string(&x.name).unwrap()))
+                        .map(|x| ClientId::new(x.name.clone()))
                         .collect(),
                     data.clone(),
                 )
@@ -257,11 +260,9 @@ mod tests {
 
         assert!(&uploaded_values.contains(&(vec!(), t0.data))); // t1 uploaded
         assert!(&uploaded_values.contains(&(vec!(), t1.data))); // t2 uploaded
-        assert!(&uploaded_values.contains(&(
-            vec!(client_hashes[0].clone(), client_hashes[1].clone()),
-            t2.data
-        ))); // t3 uploaded
-        assert!(&uploaded_values.contains(&(vec!(client_hashes[2].clone()), t3.data)));
+        assert!(&uploaded_values
+            .contains(&(vec!(client_ids[0].clone(), client_ids[1].clone()), t2.data))); // t3 uploaded
+        assert!(&uploaded_values.contains(&(vec!(client_ids[2].clone()), t3.data)));
         // t4 uploaded
     }
 }

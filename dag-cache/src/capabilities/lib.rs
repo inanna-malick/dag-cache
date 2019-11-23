@@ -5,7 +5,7 @@ use tracing::info;
 use tracing::instrument;
 
 #[instrument(skip(caps))]
-pub async fn get_and_cache<C: HasCacheCap + HasIPFSCap + Sync + 'static>(
+pub async fn get_and_cache<C: HasCacheCap + HasIPFSCap + Send + Sync + 'static>(
     caps: &C,
     hash: ipfs::IPFSHash,
 ) -> Result<ipfs::DagNode, DagCacheError> {
@@ -28,7 +28,7 @@ pub async fn get_and_cache<C: HasCacheCap + HasIPFSCap + Sync + 'static>(
 }
 
 #[instrument(skip(caps, node))]
-pub async fn put_and_cache<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(
+pub async fn put_and_cache<C: HasCacheCap + HasIPFSCap + Send + Sync + 'static>(
     caps: &C,
     node: ipfs::DagNode,
 ) -> Result<ipfs::IPFSHash, DagCacheError> {

@@ -32,7 +32,9 @@ pub struct ProtoDecodingError {
 }
 
 impl std::fmt::Display for ProtoDecodingError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{:?}", self) }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 #[cfg(feature = "grpc")]
@@ -43,7 +45,11 @@ impl From<ProtoDecodingError> for Status {
 }
 
 impl std::error::Error for ProtoDecodingError {
-    fn description(&self) -> &str { &self.cause }
+    fn description(&self) -> &str {
+        &self.cause
+    }
 
-    fn cause(&self) -> Option<&dyn std::error::Error> { None }
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        None
+    }
 }

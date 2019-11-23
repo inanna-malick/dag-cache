@@ -9,8 +9,9 @@ use std::collections::HashMap;
 #[derive(PartialEq, Hash, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct ClientId(pub String); // string? u128? idk
 impl ClientId {
-    #[cfg(test)]
-    pub fn new(x: String) -> ClientId { ClientId(x) }
+    pub fn new(x: String) -> ClientId {
+        ClientId(x)
+    }
 
     #[cfg(feature = "grpc")]
     pub fn from_proto(p: grpc::ClientId) -> Result<Self, ProtoDecodingError> {
@@ -19,12 +20,14 @@ impl ClientId {
 
     #[cfg(feature = "grpc")]
     pub fn into_proto(self) -> grpc::ClientId {
-        grpc::ClientId{hash: self.0}
+        grpc::ClientId { hash: self.0 }
     }
 }
 
 impl std::fmt::Display for ClientId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
 }
 
 pub mod bulk_put {
@@ -32,7 +35,6 @@ pub mod bulk_put {
     use crate::types::encodings::Base64;
     use crate::types::ipfs;
     use crate::types::validated_tree::ValidatedTree;
-
 
     #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
     pub struct Resp {
@@ -43,15 +45,16 @@ pub mod bulk_put {
     #[cfg(feature = "grpc")]
     impl Resp {
         pub fn into_proto(self) -> grpc::BulkPutResp {
-
             grpc::BulkPutResp {
                 root_hash: Some(self.root_hash.into_proto()),
-                additional_uploaded: self.additional_uploaded.into_iter().map( |x| {
-                    grpc::BulkPutRespPair {
+                additional_uploaded: self
+                    .additional_uploaded
+                    .into_iter()
+                    .map(|x| grpc::BulkPutRespPair {
                         client_id: Some(x.0.into_proto()),
                         hash: Some(x.1.into_proto()),
-                    }
-                }).collect(),
+                    })
+                    .collect(),
             }
         }
 
@@ -61,29 +64,30 @@ pub mod bulk_put {
             })?;
             let root_hash = ipfs::IPFSHash::from_proto(root_hash)?;
 
-            let additional_uploaded: Result<Vec<(ClientId, ipfs::IPFSHash)>, ProtoDecodingError> = p
-                .additional_uploaded
-                .into_iter()
-                .map(|bp| {
+            let additional_uploaded: Result<Vec<(ClientId, ipfs::IPFSHash)>, ProtoDecodingError> =
+                p.additional_uploaded
+                    .into_iter()
+                    .map(|bp| {
+                        let client_id = bp.client_id.ok_or(ProtoDecodingError {
+                            cause: "client_id not present on Bulk Put Resp proto pair".to_string(),
+                        })?;
+                        let client_id = ClientId::from_proto(client_id)?;
 
-                    let client_id = bp.client_id.ok_or(ProtoDecodingError {
-                        cause: "client_id not present on Bulk Put Resp proto pair".to_string(),
-                    })?;
-                    let client_id = ClientId::from_proto(client_id)?;
-
-                    let hash = bp.hash.ok_or(ProtoDecodingError {
-                        cause: "hash not present on Bulk Put Resp proto pair".to_string(),
-                    })?;
-                    let hash = ipfs::IPFSHash::from_proto(hash)?;
-                    Ok((client_id, hash))
-                })
-                .collect();
+                        let hash = bp.hash.ok_or(ProtoDecodingError {
+                            cause: "hash not present on Bulk Put Resp proto pair".to_string(),
+                        })?;
+                        let hash = ipfs::IPFSHash::from_proto(hash)?;
+                        Ok((client_id, hash))
+                    })
+                    .collect();
             let additional_uploaded = additional_uploaded?;
 
-            Ok(Resp { root_hash, additional_uploaded })
+            Ok(Resp {
+                root_hash,
+                additional_uploaded,
+            })
         }
     }
-
 
     // idea is that a put req will contain some number of nodes, with only client-side blake hashing performed.
     // all hash links in body will solely use blake hash. ipfs is then treated as an implementation detail
@@ -104,7 +108,7 @@ pub mod bulk_put {
                 .validated_tree
                 .nodes
                 .into_iter()
-                .map(|(id, n)| grpc::BulkPutIpfsNodeWithHash{
+                .map(|(id, n)| grpc::BulkPutIpfsNodeWithHash {
                     node: Some(n.into_proto()),
                     client_side_hash: Some(id.into_proto()),
                 })
@@ -187,7 +191,7 @@ pub mod bulk_put {
         pub fn into_proto(self) -> grpc::BulkPutIpfsNode {
             grpc::BulkPutIpfsNode {
                 data: self.data.0,
-                links: self.links.into_iter().map( |x| x.into_proto()).collect(),
+                links: self.links.into_iter().map(|x| x.into_proto()).collect(),
             }
         }
     }
@@ -202,18 +206,12 @@ pub mod bulk_put {
     impl DagNodeLink {
         pub fn into_proto(self) -> grpc::BulkPutLink {
             let link = match self {
-                DagNodeLink::Local(id) => {
-                    grpc::bulk_put_link::Link::InReq(id.into_proto())
-                }
+                DagNodeLink::Local(id) => grpc::bulk_put_link::Link::InReq(id.into_proto()),
 
-                DagNodeLink::Remote(hdr) => {
-                    grpc::bulk_put_link::Link::InIpfs(hdr.into_proto())
-                }
+                DagNodeLink::Remote(hdr) => grpc::bulk_put_link::Link::InIpfs(hdr.into_proto()),
             };
-            grpc::BulkPutLink{ link: Some(link) }
-
+            grpc::BulkPutLink { link: Some(link) }
         }
-
 
         pub fn from_proto(p: grpc::BulkPutLink) -> Result<Self, ProtoDecodingError> {
             match p.link {

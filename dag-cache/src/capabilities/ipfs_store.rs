@@ -11,7 +11,9 @@ use tracing::{event, Level};
 pub struct IPFSNode(reqwest::Url); //base url, copy mutated to produce specific path. should have no path component
 
 impl IPFSNode {
-    pub fn new(a: reqwest::Url) -> Self { IPFSNode(a) }
+    pub fn new(a: reqwest::Url) -> Self {
+        IPFSNode(a)
+    }
 }
 
 impl IPFSNode {

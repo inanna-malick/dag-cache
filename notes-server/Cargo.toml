@@ -18,3 +18,9 @@ dag-cache-types = { path = "../dag-cache-types", features = ["grpc"]}
 notes-types = { path = "../notes-types"}
 
 futures-preview = { version = "0.3.0-alpha.14", features = ["compat"] }
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3

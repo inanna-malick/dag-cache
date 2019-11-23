@@ -66,7 +66,11 @@ impl std::fmt::Display for DagTreeBuildErr {
 }
 
 impl std::error::Error for DagTreeBuildErr {
-    fn description(&self) -> &str { "dag cache build error" }
+    fn description(&self) -> &str {
+        "dag cache build error"
+    }
 
-    fn cause(&self) -> Option<&dyn std::error::Error> { None }
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        None
+    }
 }

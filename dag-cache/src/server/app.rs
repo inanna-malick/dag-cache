@@ -129,7 +129,10 @@ impl<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static> server::IpfsCache for 
         put_node_handler(self.caps.as_ref(), request).await
     }
 
-    async fn put_nodes(&self, request: Request<BulkPutReq>) -> Result<Response<BulkPutResp>, Status> {
+    async fn put_nodes(
+        &self,
+        request: Request<BulkPutReq>,
+    ) -> Result<Response<BulkPutResp>, Status> {
         put_nodes_handler(self.caps.clone(), request).await
     }
 }

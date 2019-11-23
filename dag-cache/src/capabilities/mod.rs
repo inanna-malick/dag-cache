@@ -1,3 +1,4 @@
+pub mod fs_ipfs_store;
 pub mod ipfs_store;
 pub mod lib;
 pub mod lru_cache;
@@ -46,7 +47,11 @@ pub trait HasCacheCap {
 
     fn cache_caps(&self) -> &Self::Output;
 
-    fn cache_get(&self, k: ipfs::IPFSHash) -> Option<ipfs::DagNode> { self.cache_caps().get(k) }
+    fn cache_get(&self, k: ipfs::IPFSHash) -> Option<ipfs::DagNode> {
+        self.cache_caps().get(k)
+    }
 
-    fn cache_put(&self, k: ipfs::IPFSHash, v: ipfs::DagNode) { self.cache_caps().put(k, v) }
+    fn cache_put(&self, k: ipfs::IPFSHash, v: ipfs::DagNode) {
+        self.cache_caps().put(k, v)
+    }
 }
