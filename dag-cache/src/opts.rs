@@ -2,6 +2,8 @@ use crate::capabilities::fs_ipfs_store::FileSystemStore;
 use crate::capabilities::lru_cache::Cache;
 use crate::capabilities::runtime::RuntimeCaps;
 use structopt::StructOpt;
+use std::fs::File;
+use std::io::prelude::*;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -19,12 +21,11 @@ pub struct Opt {
     #[structopt(short = "f", long = "fs_path")]
     fs_path: String,
 
-    #[structopt(short = "n", long = "max_cache_entries", default_value = "128")]
-    // arbitrarily chosen number..
+    #[structopt(short = "n", long = "max_cache_entries", default_value = "1024")]
     max_cache_entries: usize,
 
-    #[structopt(short = "h", long = "honeycomb_key")]
-    honeycomb_key: String,
+    #[structopt(short = "h", long = "honeycomb_key_file")]
+    honeycomb_key_file: String,
 }
 
 
@@ -39,12 +40,15 @@ impl Opt {
         //     )
         // }));
 
-
         let store = FileSystemStore(self.fs_path);
+
+        let mut file = File::open(self.honeycomb_key_file).expect("failed opening honeycomb key file");
+        let mut honeycomb_key = String::new();
+        file.read_to_string(&mut honeycomb_key).expect("failed reading honeycomb key file");
 
         let honeycomb_config = libhoney::Config {
             options: libhoney::client::Options {
-                api_key: self.honeycomb_key,
+                api_key: honeycomb_key,
                 dataset: "dag-cache".to_string(),
                 ..libhoney::client::Options::default()
             },

@@ -1,7 +1,7 @@
-version: '3'
+version: '3.3'
 services:
   web:
-    image: ishtar-orbital/notes-server
+    image: ishtar-orbital/notes-server:latest
     # build: .
     ports:
       - "3030:3030"
@@ -9,15 +9,22 @@ services:
       - dag
     entrypoint:
       # TODO: structopts for this server instead of hardcoded
-      - notes-server
+      - /notes-server
   dag:
-    image: ishtar-orbital/dag-cache
+    image: ishtar-orbital/dag-cache:latest
     expose:
       - 8080
     volumes:
-      - "dag-storage:/dag-storage"
+      - "./dag-storage:/dag-storage"
+    secrets:
+      - honeycomb_key
     entrypoint:
-      - dag-cache
-      - --honeycomb_key
-      # TODO: use secret mgmt framework or similar - until then, don't commit this
-      - ACTUAL KEY
+      - /dag-cache
+      - --honeycomb_key_file
+      - /run/secrets/honeycomb_key
+      - --fs_path
+      - /dag-storage
+
+secrets:
+   honeycomb_key:
+     file: honeycomb_key.txt

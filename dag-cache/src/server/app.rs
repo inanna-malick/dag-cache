@@ -9,7 +9,7 @@ use dag_cache_types::types::ipfs;
 use futures::stream::StreamExt;
 use futures::Stream;
 use grpc::{server, BulkPutReq, BulkPutResp, GetResp, IpfsHash, IpfsNode};
-use honeycomb_tracing::TraceId;
+use honeycomb_tracing::{TraceId, TraceCtx};
 use std::sync::Arc;
 use tonic::{Code, Request, Response, Status};
 use tracing::instrument;
@@ -149,11 +149,26 @@ fn extract_tracing_id_and_record(meta: &tonic::metadata::MetadataMap) -> Result<
                 )
             })?;
 
-            let tracing_id = TraceId::new(tracing_id.to_string());
-            tracing_id.record_on_current_span(); // record on current span using magic downcast_ref
+            let trace_id = TraceId::new(tracing_id.to_string());
+            println!("got trace id {:?} from req headers", &trace_id);
+            TraceCtx {
+                trace_id,
+                remote_span_parent: None,
+            }
+            .record_on_current_span();
 
             Ok(())
         }
-        None => Ok(()), // no-op if header not present
+        None => {
+            let trace_id = TraceId::generate();
+            println!("generated trace id {:?}", &trace_id);
+            TraceCtx {
+                trace_id,
+                remote_span_parent: None,
+            }
+            .record_on_current_span();
+
+            Ok(()) // just generate, if header not present
+        }
     }
 }

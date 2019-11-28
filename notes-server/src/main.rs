@@ -99,5 +99,5 @@ async fn main() {
 
     let routes = get_route.or(post_route).or(static_route);
 
-    warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
+    warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
 }
