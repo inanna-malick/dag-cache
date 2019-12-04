@@ -1,5 +1,5 @@
 use crate::capabilities::lib::put_and_cache;
-use crate::capabilities::{HasCacheCap, HasIPFSCap};
+use crate::capabilities::{HasCacheCap, HasIPFSCap, HasMutableHashStore};
 use crate::server::batch_get;
 use crate::server::batch_put;
 use crate::server::opportunistic_get;
@@ -8,8 +8,8 @@ use dag_cache_types::types::grpc;
 use dag_cache_types::types::ipfs;
 use futures::stream::StreamExt;
 use futures::Stream;
-use grpc::{server, BulkPutReq, BulkPutResp, GetResp, IpfsHash, IpfsNode};
-use honeycomb_tracing::{TraceId, TraceCtx};
+use grpc::{server, BulkPutReq, BulkPutResp, GetHashForKeyReq, GetResp, IpfsHash, IpfsNode};
+use honeycomb_tracing::{TraceCtx, TraceId};
 use std::sync::Arc;
 use tonic::{Code, Request, Response, Status};
 use tracing::instrument;
@@ -109,9 +109,34 @@ async fn put_nodes_handler<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(
     Ok(resp)
 }
 
+#[instrument(skip(caps, request))] // skip potentially-large request (TODO record stats w/o full message body)
+async fn get_hash_for_key_handler<C: HasMutableHashStore + Sync + Send + 'static>(
+    caps: &C,
+    request: Request<GetHashForKeyReq>,
+) -> Result<Response<IpfsHash>, Status> {
+    // extract explicit tracing id (if any)
+    extract_tracing_id_and_record(request.metadata())?;
+
+    let opt_hash = caps.mhs_get(request.into_inner().key).await?;
+
+    match opt_hash {
+        Some(hash) => Ok(Response::new(hash.into_proto())),
+        None => Err(Status::new(Code::Internal, "no key found")),
+    }
+}
+
 // NOTE: async_trait and instrument are mutually incompatible, so use non-async-trait fns and async trait stubs
 #[tonic::async_trait]
-impl<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static> server::IpfsCache for CacheServer<C> {
+impl<C: HasMutableHashStore + HasCacheCap + HasIPFSCap + Sync + Send + 'static> server::IpfsCache
+    for CacheServer<C>
+{
+    async fn get_hash_for_key(
+        &self,
+        request: Request<GetHashForKeyReq>,
+    ) -> Result<Response<IpfsHash>, Status> {
+        get_hash_for_key_handler(self.caps.as_ref(), request).await
+    }
+
     async fn get_node(&self, request: Request<IpfsHash>) -> Result<Response<GetResp>, Status> {
         get_node_handler(self.caps.as_ref(), request).await
     }

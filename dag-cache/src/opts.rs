@@ -1,9 +1,9 @@
-use crate::capabilities::fs_ipfs_store::FileSystemStore;
+use crate::capabilities::fs_store::FileSystemStore;
 use crate::capabilities::lru_cache::Cache;
 use crate::capabilities::runtime::RuntimeCaps;
-use structopt::StructOpt;
 use std::fs::File;
 use std::io::prelude::*;
+use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -28,7 +28,6 @@ pub struct Opt {
     honeycomb_key_file: String,
 }
 
-
 impl Opt {
     /// parse opts into capabilities object, will panic if not configured correctly (TODO: FIXME)
     pub fn into_runtime(self) -> (RuntimeCaps, libhoney::Config) {
@@ -40,19 +39,26 @@ impl Opt {
         //     )
         // }));
 
-        let store = FileSystemStore(self.fs_path);
+        let store = FileSystemStore::new(self.fs_path);
 
-        let mut file = File::open(self.honeycomb_key_file).expect("failed opening honeycomb key file");
+        let mut file =
+            File::open(self.honeycomb_key_file).expect("failed opening honeycomb key file");
         let mut honeycomb_key = String::new();
-        file.read_to_string(&mut honeycomb_key).expect("failed reading honeycomb key file");
+        file.read_to_string(&mut honeycomb_key)
+            .expect("failed reading honeycomb key file");
 
+        // NOTE: underlying lib is not really something I trust rn? just write my own queue + batch sender state machine...
+        // TODO/FIXME/TODO/TODO: srsly, do this ^^
         let honeycomb_config = libhoney::Config {
             options: libhoney::client::Options {
                 api_key: honeycomb_key,
-                dataset: "dag-cache".to_string(),
+                dataset: "dag-cache".to_string(), // todo rename
                 ..libhoney::client::Options::default()
             },
-            transmission_options: libhoney::transmission::Options::default(),
+            transmission_options: libhoney::transmission::Options {
+                max_batch_size: 1,
+                ..libhoney::transmission::Options::default()
+            },
         };
 
         let cache = Cache::new(self.max_cache_entries);

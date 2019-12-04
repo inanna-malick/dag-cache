@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 
+static CAS_KEY: &str = "notes-app";
+
 pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync + 'static>>;
 
 #[derive(PartialEq, Eq, Copy, Clone, Hash, Serialize, Deserialize, Debug)]
@@ -194,6 +196,7 @@ impl GetResp {
 pub struct PutReq {
     pub head_node: Node<NodeRef>,
     pub extra_nodes: HashMap<NodeId, Node<NodeRef>>,
+    pub cas_hash: IPFSHash,
 }
 
 impl PutReq {
@@ -207,7 +210,15 @@ impl PutReq {
 
         let validated_tree = ValidatedTree::validate(head, extra_nodes)?;
 
-        let req = api::bulk_put::Req { validated_tree };
+        let cas = Some(api::bulk_put::CAS {
+            required_previous_hash: self.cas_hash,
+            cas_key: CAS_KEY.to_string(),
+        });
+
+        let req = api::bulk_put::Req {
+            validated_tree,
+            cas,
+        };
         Ok(req)
     }
 }

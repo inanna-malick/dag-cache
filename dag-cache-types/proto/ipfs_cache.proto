@@ -3,6 +3,9 @@ syntax = "proto3";
 package ipfscache;
 
 service IpfsCache {
+  // NOTE: using 'string' here will detract from upgradability but whatevs
+  rpc GetHashForKey(GetHashForKeyReq) returns (IpfsHash) {}
+
   // get a node, return it plus any children of that node reachable via the in-memory cache
   rpc GetNode(IpfsHash) returns (GetResp) {}
 
@@ -14,7 +17,9 @@ service IpfsCache {
   rpc PutNodes(BulkPutReq) returns (BulkPutResp) {}
 }
 
-
+message GetHashForKeyReq {
+  string key = 1;
+}
 
 message GetResp {
   IpfsNode requested_node = 1;
@@ -27,10 +32,19 @@ message IpfsNodeWithHeader {
     IpfsNode node = 2;
 }
 
-
 message BulkPutReq {
   BulkPutIpfsNode root_node = 1; // invariant: must be in list of nodes
   repeated BulkPutIpfsNodeWithHash nodes = 2;
+
+
+  // optional check-and-set - only write if cas_key is required_previous_hash
+  // NOTE: only putting this on BulkPutReq (& not PutNode req type) b/c that's my usage pattern
+  CheckAndSet cas = 3;
+}
+
+message CheckAndSet {
+  IpfsHash required_previous_hash = 1;
+  string cas_key = 2;
 }
 
 message BulkPutResp {

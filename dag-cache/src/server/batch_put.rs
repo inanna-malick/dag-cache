@@ -11,6 +11,10 @@ use tokio;
 use tokio::sync::oneshot;
 use tracing::error;
 
+// TODO: how to make this transactional while maintaining caps approach? ans: have an impl of the ipfsCap (TODO: rename to hash store)
+// that is the _transaction-scoped_ tree - pretty sure this is supported. will likely need to move to dyn
+// (fat pointers) to avoid excessive code gen but idk
+
 // catamorphism - a consuming change
 // recursively publish DAG node tree to IPFS, starting with leaf nodes
 pub async fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(

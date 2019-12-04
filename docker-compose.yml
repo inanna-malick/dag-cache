@@ -23,7 +23,7 @@ services:
       - --honeycomb_key_file
       - /run/secrets/honeycomb_key
       - --fs_path
-      - /dag-storage
+      - /dag-storage/sled.db
 
 secrets:
    honeycomb_key:

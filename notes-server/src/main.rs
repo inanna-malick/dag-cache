@@ -21,10 +21,6 @@ struct ErrorMessage<'a> {
 
 #[tokio::main]
 async fn main() {
-    // let cors = warp::cors()
-    //     .allow_methods(&[Method::GET, Method::POST])
-    //     .allow_origin("http://localhost"); // for testing only <- FIXME
-
     let get_route = warp::path("node")
         .and(warp::path::param::<String>())
         .and_then(|raw_hash: String| {
@@ -56,6 +52,38 @@ async fn main() {
                 })
             })
         });
+
+    // TODO: better naming scheme for these
+    // TODO: bake hash into static initial page (NOT wasm) via templating
+    let get_initial_state_route = warp::path("initialstate").and_then(|| {
+        let f = async move {
+            println!("parsed hash {} from path", raw_hash);
+
+            // TODO: using hardcoded local path - moving to structopt args would be nice
+            let mut client = IpfsCacheClient::connect("http://dag:8088")
+                .await
+                .map_err(|e| Box::new(e))?;
+
+            // TODO: validate base58 here
+            let request = tonic::Request::new(grpc::IpfsHash { hash: raw_hash });
+
+            let response = client.get_node(request).await.map_err(|e| Box::new(e))?;
+
+            let response = get::Resp::from_proto(response.into_inner()).map_err(|e| Box::new(e))?;
+
+            let response = notes_types::GetResp::from_generic(response)?;
+
+            let resp = warp::reply::json(&response);
+            Ok::<_, Box<dyn std::error::Error + Send + Sync + 'static>>(resp)
+        };
+
+        f.map(|x| {
+            x.map_err(|e| {
+                println!("err on get: {:?}", e);
+                reject::custom::<Error>(Error(e))
+            })
+        })
+    });
 
     let post_route = warp::post()
         .and(warp::path("nodes"))

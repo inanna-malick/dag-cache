@@ -27,7 +27,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bind_to = format!("0.0.0.0:{}", &opt.port);
     let (runtime_caps, honeycomb_config) = opt.into_runtime();
 
-    let layer = TelemetryLayer::new("ipfs_dag_cache".to_string(), honeycomb_config).and_then(tracing_subscriber::fmt::Layer::builder().finish()).and_then(LevelFilter::INFO);
+    let layer = TelemetryLayer::new("ipfs_dag_cache".to_string(), honeycomb_config)
+        .and_then(tracing_subscriber::fmt::Layer::builder().finish())
+        .and_then(LevelFilter::INFO);
 
     let subscriber = layer.with_subscriber(registry::Registry::default());
 

@@ -25,4 +25,4 @@ rand = "0.7"
 
 [build-dependencies]
 
-tonic-build = { version = "0.1.0-alpha.3", features = ["transport"], default-features = false }
+tonic-build = { version = "0.1.0-alpha.6", features = ["transport"], default-features = false }

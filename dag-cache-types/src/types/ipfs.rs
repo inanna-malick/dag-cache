@@ -39,7 +39,7 @@ impl IPFSHeader {
 
 // NOTE: would be cool if I knew these were constant size instead of having a vec
 #[derive(Clone, Hash, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub struct IPFSHash(Base58);
+pub struct IPFSHash(pub Base58);
 
 impl IPFSHash {
     #[cfg(feature = "grpc")]

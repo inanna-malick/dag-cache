@@ -89,6 +89,34 @@ pub mod bulk_put {
         }
     }
 
+    #[derive(Debug)]
+    pub struct CAS {
+        pub required_previous_hash: ipfs::IPFSHash,
+        pub cas_key: String,
+    }
+
+    #[cfg(feature = "grpc")]
+    impl CAS {
+        pub fn into_proto(self) -> grpc::CheckAndSet {
+            grpc::CheckAndSet {
+                required_previous_hash: Some(self.required_previous_hash.into_proto()),
+                cas_key: self.cas_key,
+            }
+        }
+
+        pub fn from_proto(p: grpc::CheckAndSet) -> Result<Self, ProtoDecodingError> {
+            let required_previous_hash = p.required_previous_hash.ok_or(ProtoDecodingError {
+                cause: "required previous hash not present on CheckAndSet proto".to_string(),
+            })?;
+            let required_previous_hash = ipfs::IPFSHash::from_proto(required_previous_hash)?;
+
+            Ok(Self {
+                required_previous_hash,
+                cas_key: p.cas_key,
+            })
+        }
+    }
+
     // idea is that a put req will contain some number of nodes, with only client-side blake hashing performed.
     // all hash links in body will solely use blake hash. ipfs is then treated as an implementation detail
     // with parsing-time traverse op to pair each blake hash with the full ipfs hash from the links field
@@ -97,12 +125,15 @@ pub mod bulk_put {
     #[derive(Debug)]
     pub struct Req {
         pub validated_tree: ValidatedTree,
+        pub cas: Option<CAS>,
     }
 
     #[cfg(feature = "grpc")]
     impl Req {
         pub fn into_proto(self) -> grpc::BulkPutReq {
             let root_node = self.validated_tree.root_node.into_proto();
+
+            let cas = self.cas.map(|x| x.into_proto());
 
             let nodes = self
                 .validated_tree
@@ -117,10 +148,19 @@ pub mod bulk_put {
             grpc::BulkPutReq {
                 root_node: Some(root_node),
                 nodes,
+                cas,
             }
         }
 
         pub fn from_proto(p: grpc::BulkPutReq) -> Result<Self, ProtoDecodingError> {
+            let cas = match p.cas {
+                Some(cas) => {
+                    let cas = CAS::from_proto(cas)?;
+                    Some(cas)
+                }
+                None => None,
+            };
+
             let root_node = p.root_node.ok_or(ProtoDecodingError {
                 cause: "root node not present on Bulk Put Req proto".to_string(),
             })?;
@@ -144,7 +184,10 @@ pub mod bulk_put {
                     cause: format!("invalid tree provided in Bulk Put Req proto, {:?}", e),
                 })?;
 
-            Ok(Req { validated_tree })
+            Ok(Req {
+                validated_tree,
+                cas,
+            })
         }
     }
 
