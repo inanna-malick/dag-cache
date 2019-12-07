@@ -1,3 +1,4 @@
+use crate::types::ipfs::IPFSHash;
 #[cfg(feature = "grpc")]
 use tonic::{Code, Status};
 
@@ -6,7 +7,13 @@ pub enum DagCacheError {
     IPFSError,
     IPFSJsonError,
     ProtoDecodingError(ProtoDecodingError),
-    UnexpectedError { msg: String },
+    UnexpectedError {
+        msg: String,
+    },
+    CASViolationError {
+        expected_hash: Option<IPFSHash>,
+        actual_hash: Option<IPFSHash>,
+    },
 }
 
 #[cfg(feature = "grpc")]
@@ -22,6 +29,16 @@ impl From<DagCacheError> for Status {
             DagCacheError::UnexpectedError { msg: s } => {
                 Status::new(Code::Internal, "unexpected error, ".to_owned() + &s)
             }
+            DagCacheError::CASViolationError {
+                expected_hash,
+                actual_hash,
+            } => Status::new(
+                Code::DeadlineExceeded,
+                format!(
+                    "cas violation: expected: {:?}, actual: {:?}",
+                    expected_hash, actual_hash
+                ),
+            ),
         }
     }
 }

@@ -1,15 +1,17 @@
-use crate::capabilities::{HasCacheCap, HasIPFSCap};
+use crate::capabilities::{Cache, HashedBlobStore};
 use dag_cache_types::types::errors::DagCacheError;
 use dag_cache_types::types::ipfs;
+use std::sync::Arc;
 use tracing::info;
 use tracing::instrument;
 
-#[instrument(skip(caps))]
-pub async fn get_and_cache<C: HasCacheCap + HasIPFSCap + Send + Sync + 'static>(
-    caps: &C,
+#[instrument(skip(store, cache))]
+pub async fn get_and_cache(
+    store: Arc<dyn HashedBlobStore>,
+    cache: Arc<Cache>,
     hash: ipfs::IPFSHash,
 ) -> Result<ipfs::DagNode, DagCacheError> {
-    match caps.cache_get(hash.clone()) {
+    match cache.get(hash.clone()) {
         Some(dag_node) => {
             info!("cache hit");
             Ok(dag_node)
@@ -17,24 +19,25 @@ pub async fn get_and_cache<C: HasCacheCap + HasIPFSCap + Send + Sync + 'static>(
         None => {
             info!("cache miss");
 
-            let dag_node = caps.ipfs_get(hash.clone()).await?;
+            let dag_node = store.get(hash.clone()).await?;
 
             info!("writing result of post cache miss lookup to cache");
-            caps.cache_put(hash.clone(), dag_node.clone());
+            cache.put(hash.clone(), dag_node.clone());
 
             Ok(dag_node)
         }
     }
 }
 
-#[instrument(skip(caps, node))]
-pub async fn put_and_cache<C: HasCacheCap + HasIPFSCap + Send + Sync + 'static>(
-    caps: &C,
+#[instrument(skip(store, cache, node))]
+pub async fn put_and_cache(
+    store: Arc<dyn HashedBlobStore>,
+    cache: Arc<Cache>,
     node: ipfs::DagNode,
 ) -> Result<ipfs::IPFSHash, DagCacheError> {
-    let hash = caps.ipfs_put(node.clone()).await?;
+    let hash = store.put(node.clone()).await?;
 
-    caps.cache_put(hash.clone(), node);
+    cache.put(hash.clone(), node);
 
     Ok(hash)
 }

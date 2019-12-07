@@ -4,7 +4,7 @@ package ipfscache;
 
 service IpfsCache {
   // NOTE: using 'string' here will detract from upgradability but whatevs
-  rpc GetHashForKey(GetHashForKeyReq) returns (IpfsHash) {}
+  rpc GetHashForKey(GetHashForKeyReq) returns (GetHashForKeyResp) {}
 
   // get a node, return it plus any children of that node reachable via the in-memory cache
   rpc GetNode(IpfsHash) returns (GetResp) {}
@@ -19,6 +19,10 @@ service IpfsCache {
 
 message GetHashForKeyReq {
   string key = 1;
+}
+
+message GetHashForKeyResp {
+  IpfsHash hash = 1;
 }
 
 message GetResp {

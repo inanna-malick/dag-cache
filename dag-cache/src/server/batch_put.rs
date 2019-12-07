@@ -1,5 +1,5 @@
 use crate::capabilities::lib::put_and_cache;
-use crate::capabilities::{HasCacheCap, HasIPFSCap};
+use crate::capabilities::{Cache, HashedBlobStore, MutableHashStore};
 use dag_cache_types::types::api::{bulk_put, ClientId};
 use dag_cache_types::types::errors::DagCacheError;
 use dag_cache_types::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
@@ -15,16 +15,45 @@ use tracing::error;
 // that is the _transaction-scoped_ tree - pretty sure this is supported. will likely need to move to dyn
 // (fat pointers) to avoid excessive code gen but idk
 
+pub async fn ipfs_publish_cata_with_cas(
+    mhs: Arc<dyn MutableHashStore>,
+    store: Arc<dyn HashedBlobStore>,
+    cache: Arc<Cache>,
+    tree: ValidatedTree,
+    cas: Option<bulk_put::CAS>,
+) -> Result<bulk_put::Resp, DagCacheError> {
+    match cas {
+        Some(cas) => {
+            let actual_hash = mhs.get(cas.cas_key.clone()).await?;
+            if &actual_hash == &cas.required_previous_hash {
+                let res = ipfs_publish_cata(store, cache, tree).await?;
+                mhs.put(cas.cas_key, res.root_hash.clone());
+                Ok(res)
+            } else {
+                Err(DagCacheError::CASViolationError {
+                    expected_hash: cas.required_previous_hash,
+                    actual_hash,
+                })
+            }
+        }
+        None => {
+            let res = ipfs_publish_cata(store, cache, tree).await?;
+            Ok(res)
+        }
+    }
+}
+
 // catamorphism - a consuming change
 // recursively publish DAG node tree to IPFS, starting with leaf nodes
-pub async fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
-    caps: Arc<C>,
+pub async fn ipfs_publish_cata(
+    store: Arc<dyn HashedBlobStore>,
+    cache: Arc<Cache>,
     tree: ValidatedTree,
 ) -> Result<bulk_put::Resp, DagCacheError> {
     let focus = tree.root_node.clone();
     let tree = Arc::new(tree);
     let (_size, root_hash, additional_uploaded) =
-        ipfs_publish_cata_unsafe(caps, tree, focus).await?;
+        ipfs_publish_cata_unsafe(store, cache, tree, focus).await?;
     Ok(bulk_put::Resp {
         root_hash,
         additional_uploaded,
@@ -32,14 +61,15 @@ pub async fn ipfs_publish_cata<C: 'static + HasCacheCap + HasIPFSCap + Sync + Se
 }
 
 // unsafe b/c it can take any 'focus' ClientId and not just the root node of tree
-async fn ipfs_publish_cata_unsafe<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
-    caps: Arc<C>,
+async fn ipfs_publish_cata_unsafe(
+    store: Arc<dyn HashedBlobStore>,
+    cache: Arc<Cache>,
     tree: Arc<ValidatedTree>, // todo use async/await I guess, mb can avoid needing Arc? ugh
     node: bulk_put::DagNode,
 ) -> Result<(u64, IPFSHash, Vec<(ClientId, IPFSHash)>), DagCacheError> {
     let (send, receive) = oneshot::channel();
 
-    let f = ipfs_publish_worker(caps, tree, send, node);
+    let f = ipfs_publish_worker(store, cache, tree, send, node);
     tokio::spawn(f);
 
     let recvd = receive.await;
@@ -56,10 +86,11 @@ async fn ipfs_publish_cata_unsafe<C: 'static + HasCacheCap + HasIPFSCap + Sync +
     }
 }
 
-async fn upload_link<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
+async fn upload_link(
+    store: Arc<dyn HashedBlobStore>,
+    cache: Arc<Cache>,
     x: bulk_put::DagNodeLink,
     tree: Arc<ValidatedTree>,
-    caps: Arc<C>,
 ) -> Result<(IPFSHeader, Vec<(ClientId, IPFSHash)>), DagCacheError> {
     match x {
         bulk_put::DagNodeLink::Local(client_id) => {
@@ -71,7 +102,7 @@ async fn upload_link<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
             let node = tree.nodes[&client_id].clone();
 
             let (size, hash, mut additional_uploaded) =
-                ipfs_publish_cata_unsafe(caps.clone(), tree.clone(), node.clone()).await?;
+                ipfs_publish_cata_unsafe(store, cache.clone(), tree.clone(), node.clone()).await?;
             let hdr = IPFSHeader {
                 name: client_id.to_string(),
                 size,
@@ -85,8 +116,9 @@ async fn upload_link<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
 }
 
 // needed to not have async cycle? idk lmao FIXME refactor
-fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
-    caps: Arc<C>,
+fn ipfs_publish_worker(
+    store: Arc<dyn HashedBlobStore>,
+    cache: Arc<Cache>,
     tree: Arc<ValidatedTree>,
     chan: oneshot::Sender<Result<(u64, IPFSHash, Vec<(ClientId, IPFSHash)>), DagCacheError>>,
     // TODO: pass around pointers to node in stack frame (hm keys) instead of nodes
@@ -94,7 +126,7 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
     // TODO: ask rain
     node: bulk_put::DagNode,
 ) -> Box<dyn Future<Output = ()> + Unpin + Send> {
-    let f = ipfs_publish_worker_async(caps, tree, node)
+    let f = ipfs_publish_worker_async(store, cache, tree, node)
         .map(move |res| {
             let chan_send_res = chan.send(res);
             if let Err(err) = chan_send_res {
@@ -107,8 +139,9 @@ fn ipfs_publish_worker<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
 }
 
 // worker thread - uses one-shot channel to return result to avoid unbounded stack growth
-async fn ipfs_publish_worker_async<C: 'static + HasCacheCap + HasIPFSCap + Sync + Send>(
-    caps: Arc<C>,
+async fn ipfs_publish_worker_async(
+    store: Arc<dyn HashedBlobStore>,
+    cache: Arc<Cache>,
     tree: Arc<ValidatedTree>,
     // TODO: pass around pointers to node in stack frame (hm keys) instead of nodes
     // OR NOT: struct is quite small, even if the owned-by-it vec of u8/vec of links is big
@@ -121,7 +154,7 @@ async fn ipfs_publish_worker_async<C: 'static + HasCacheCap + HasIPFSCap + Sync 
 
     let link_uploads: Vec<_> = links
         .into_iter()
-        .map(|ln| upload_link(ln, tree.clone(), caps.clone()))
+        .map(|ln| upload_link(store.clone(), cache.clone(), ln, tree.clone()))
         .collect();
 
     let joined_link_uploads: Vec<Result<_, DagCacheError>> =
@@ -139,37 +172,25 @@ async fn ipfs_publish_worker_async<C: 'static + HasCacheCap + HasIPFSCap + Sync 
     // might be a bit of an approximation, but w/e
     let size = size + dag_node.links.iter().map(|x| x.size).sum::<u64>();
 
-    let hash = put_and_cache(caps.as_ref(), dag_node).await?;
+    let hash = put_and_cache(store, cache, dag_node).await?;
     Ok((size, hash, additional_uploaded))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capabilities::{CacheCapability, HasCacheCap, HasIPFSCap, IPFSCapability};
     use async_trait::async_trait;
-    use dag_cache_types::types::api::ClientId;
     use dag_cache_types::types::encodings::{Base58, Base64};
     use dag_cache_types::types::errors::DagCacheError;
     use dag_cache_types::types::ipfs::{DagNode, IPFSHash};
-    use dag_cache_types::types::validated_tree::ValidatedTree;
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    struct MockIPFS(Mutex<HashMap<IPFSHash, DagNode>>);
-
-    struct BlackHoleCache;
-    impl CacheCapability for BlackHoleCache {
-        fn get(&self, _k: IPFSHash) -> Option<DagNode> {
-            None
-        }
-
-        fn put(&self, _k: IPFSHash, _v: DagNode) {}
-    }
+    struct MockStore(Mutex<HashMap<IPFSHash, DagNode>>);
 
     // TODO: separate read/write caps to simplify writing this?
     #[async_trait]
-    impl IPFSCapability for MockIPFS {
+    impl HashedBlobStore for MockStore {
         async fn get(&self, k: IPFSHash) -> Result<DagNode, DagCacheError> {
             let map = self.0.lock().unwrap();
             let v = map.get(&k).unwrap(); // fail if not found in map
@@ -185,22 +206,6 @@ mod tests {
             map.insert(hash.clone(), v);
 
             Ok(hash)
-        }
-    }
-
-    struct TestCaps(MockIPFS, BlackHoleCache);
-
-    impl HasIPFSCap for TestCaps {
-        type Output = MockIPFS;
-        fn ipfs_caps(&self) -> &MockIPFS {
-            &self.0
-        }
-    }
-
-    impl HasCacheCap for TestCaps {
-        type Output = BlackHoleCache;
-        fn cache_caps(&self) -> &BlackHoleCache {
-            &self.1
         }
     }
 
@@ -240,14 +245,15 @@ mod tests {
 
         let validated_tree = ValidatedTree::validate(t3.clone(), m).expect("static test invalid");
 
-        let mock_ipfs = MockIPFS(Mutex::new(HashMap::new()));
-        let caps = std::sync::Arc::new(TestCaps(mock_ipfs, BlackHoleCache));
+        let store = Arc::new(MockStore(Mutex::new(HashMap::new())));
 
-        let _published = ipfs_publish_cata(caps.clone(), validated_tree)
+        let cache = Arc::new(Cache::new(16));
+
+        let _published = ipfs_publish_cata(store.clone(), cache, validated_tree)
             .await
             .expect("ipfs publish cata error");
 
-        let map = (caps.0).0.lock().unwrap();
+        let map = store.0.lock().unwrap();
 
         let uploaded_values: Vec<(Vec<ClientId>, Base64)> = map
             .values()

@@ -1,9 +1,14 @@
-use crate::capabilities::fs_store::FileSystemStore;
-use crate::capabilities::lru_cache::Cache;
-use crate::capabilities::runtime::RuntimeCaps;
+use crate::capabilities::cache::Cache;
+use crate::capabilities::store::FileSystemStore;
+use crate::server::app::Runtime;
+use honeycomb_tracing::TelemetryLayer;
 use std::fs::File;
 use std::io::prelude::*;
+use std::sync::Arc;
 use structopt::StructOpt;
+use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::layer::Layer;
+use tracing_subscriber::registry;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -30,7 +35,7 @@ pub struct Opt {
 
 impl Opt {
     /// parse opts into capabilities object, will panic if not configured correctly (TODO: FIXME)
-    pub fn into_runtime(self) -> (RuntimeCaps, libhoney::Config) {
+    pub fn into_runtime(self) -> Runtime {
         // let ipfs_node = format!("http://{}:{}", &self.ipfs_host, self.ipfs_port); // TODO: https...
         // let ipfs_node = IPFSNode::new(reqwest::Url::parse(&ipfs_node).unwrap_or_else(|_| {
         //     panic!(
@@ -39,7 +44,7 @@ impl Opt {
         //     )
         // }));
 
-        let store = FileSystemStore::new(self.fs_path);
+        let store = Arc::new(FileSystemStore::new(self.fs_path));
 
         let mut file =
             File::open(self.honeycomb_key_file).expect("failed opening honeycomb key file");
@@ -60,11 +65,19 @@ impl Opt {
                 ..libhoney::transmission::Options::default()
             },
         };
+        let layer = TelemetryLayer::new("ipfs_dag_cache".to_string(), honeycomb_config)
+            .and_then(tracing_subscriber::fmt::Layer::builder().finish())
+            .and_then(LevelFilter::INFO);
 
-        let cache = Cache::new(self.max_cache_entries);
+        let subscriber = layer.with_subscriber(registry::Registry::default());
+        tracing::subscriber::set_global_default(subscriber).expect("setting global default failed");
 
-        let rt = RuntimeCaps { cache, store };
+        let cache = Arc::new(Cache::new(self.max_cache_entries));
 
-        (rt, honeycomb_config)
+        Runtime {
+            cache: cache,
+            mutable_hash_store: store.clone(),
+            hashed_blob_store: store,
+        }
     }
 }

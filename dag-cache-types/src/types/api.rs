@@ -91,7 +91,8 @@ pub mod bulk_put {
 
     #[derive(Debug)]
     pub struct CAS {
-        pub required_previous_hash: ipfs::IPFSHash,
+        /// previous hash required for operation to succeed - optional, to allow for first set operation
+        pub required_previous_hash: Option<ipfs::IPFSHash>,
         pub cas_key: String,
     }
 
@@ -99,16 +100,16 @@ pub mod bulk_put {
     impl CAS {
         pub fn into_proto(self) -> grpc::CheckAndSet {
             grpc::CheckAndSet {
-                required_previous_hash: Some(self.required_previous_hash.into_proto()),
+                required_previous_hash: self.required_previous_hash.map(|x| x.into_proto()),
                 cas_key: self.cas_key,
             }
         }
 
         pub fn from_proto(p: grpc::CheckAndSet) -> Result<Self, ProtoDecodingError> {
-            let required_previous_hash = p.required_previous_hash.ok_or(ProtoDecodingError {
-                cause: "required previous hash not present on CheckAndSet proto".to_string(),
-            })?;
-            let required_previous_hash = ipfs::IPFSHash::from_proto(required_previous_hash)?;
+            let required_previous_hash = p
+                .required_previous_hash
+                .map(ipfs::IPFSHash::from_proto)
+                .transpose()?;
 
             Ok(Self {
                 required_previous_hash,

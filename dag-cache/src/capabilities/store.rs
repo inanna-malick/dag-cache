@@ -1,4 +1,4 @@
-use crate::capabilities::{IPFSCapability, MutableHashStore};
+use crate::capabilities::{HashedBlobStore, MutableHashStore};
 use blake2::{Blake2b, Digest};
 use dag_cache_types::types::encodings;
 use dag_cache_types::types::errors::DagCacheError;
@@ -54,7 +54,9 @@ impl FileSystemStore {
     #[instrument(skip(self))]
     fn get_mhs(&self, k: String) -> Result<Option<IPFSHash>, DagCacheError> {
         match self.0.get(k) {
-            Ok(Some(value)) => Ok(Some(IPFSHash::from_raw(encodings::Base58::from_bytes(value.to_vec())))),
+            Ok(Some(value)) => Ok(Some(IPFSHash::from_raw(encodings::Base58::from_bytes(
+                value.to_vec(),
+            )))),
             // TODO: actual handling for errors - time to revamp error schema?
             Ok(None) => Ok(None),
             Err(e) => panic!("operational problem encountered: {}", e),
@@ -74,7 +76,7 @@ impl FileSystemStore {
 }
 
 #[tonic::async_trait]
-impl IPFSCapability for FileSystemStore {
+impl HashedBlobStore for FileSystemStore {
     async fn get(&self, hash: IPFSHash) -> Result<DagNode, DagCacheError> {
         self.get_blob(hash)
     }

@@ -1,5 +1,5 @@
 use crate::capabilities::lib::put_and_cache;
-use crate::capabilities::{HasCacheCap, HasIPFSCap, HasMutableHashStore};
+use crate::capabilities::{Cache, HashedBlobStore, MutableHashStore};
 use crate::server::batch_get;
 use crate::server::batch_put;
 use crate::server::opportunistic_get;
@@ -8,137 +8,163 @@ use dag_cache_types::types::grpc;
 use dag_cache_types::types::ipfs;
 use futures::stream::StreamExt;
 use futures::Stream;
-use grpc::{server, BulkPutReq, BulkPutResp, GetHashForKeyReq, GetResp, IpfsHash, IpfsNode};
+use grpc::{
+    server, BulkPutReq, BulkPutResp, GetHashForKeyReq, GetHashForKeyResp, GetResp, IpfsHash,
+    IpfsNode,
+};
 use honeycomb_tracing::{TraceCtx, TraceId};
 use std::sync::Arc;
 use tonic::{Code, Request, Response, Status};
 use tracing::instrument;
 use tracing::{event, info, Level};
 
-pub struct CacheServer<C> {
-    pub caps: Arc<C>,
-}
-
-#[instrument(skip(caps))]
-async fn get_node_handler<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(
-    caps: &C,
-    request: Request<IpfsHash>,
-) -> Result<Response<GetResp>, Status> {
-    // extract explicit tracing id (if any)
-    extract_tracing_id_and_record(request.metadata())?;
-
-    let request = ipfs::IPFSHash::from_proto(request.into_inner()).map_err( |e| {
-        event!(Level::ERROR, msg = "unable to parse request proto as valid domain object", error = ?e);
-        e
-    })?;
-
-    let resp = opportunistic_get::get(caps, request).await?;
-
-    let resp = resp.into_proto();
-    let resp = Response::new(resp);
-    Ok(resp)
+// TODO: parameterize over E where E is the underlying error type (different for txn vs. main scope)
+pub struct Runtime {
+    pub cache: Arc<Cache>,
+    pub mutable_hash_store: Arc<dyn MutableHashStore>,
+    pub hashed_blob_store: Arc<dyn HashedBlobStore>,
 }
 
 type GetNodesStream =
     Box<dyn Stream<Item = Result<IpfsNode, Status>> + Unpin + Send + Sync + 'static>;
 
-#[instrument(skip(caps))]
-async fn get_nodes_handler<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(
-    caps: Arc<C>,
-    request: Request<IpfsHash>,
-) -> Result<Response<GetNodesStream>, Status> {
-    // extract explicit tracing id (if any)
-    extract_tracing_id_and_record(request.metadata())?;
+impl Runtime {
+    #[instrument(skip(self))]
+    async fn get_node_handler(
+        &self,
+        request: Request<IpfsHash>,
+    ) -> Result<Response<GetResp>, Status> {
+        // extract explicit tracing id (if any)
+        extract_tracing_id_and_record(request.metadata())?;
 
-    let domain_hash = ipfs::IPFSHash::from_proto(request.into_inner()).map_err( |e| {
-        event!(Level::ERROR, msg = "unable to parse request proto as valid domain object", error = ?e);
-        e
-    })?;
+        let request = ipfs::IPFSHash::from_proto(request.into_inner()).map_err( |e| {
+            event!(Level::ERROR, msg = "unable to parse request proto as valid domain object", error = ?e);
+            e
+        })?;
 
-    // TODO: wrapper that holds span, instrument, basically - should be possible! maybe build inline?
-    let s = batch_get::ipfs_fetch(caps, domain_hash)
+        let resp =
+            opportunistic_get::get(self.hashed_blob_store.clone(), self.cache.clone(), request)
+                .await?;
+
+        let resp = resp.into_proto();
+        let resp = Response::new(resp);
+        Ok(resp)
+    }
+
+    #[instrument(skip(self))]
+    async fn get_nodes_handler(
+        &self,
+        request: Request<IpfsHash>,
+    ) -> Result<Response<GetNodesStream>, Status> {
+        // extract explicit tracing id (if any)
+        extract_tracing_id_and_record(request.metadata())?;
+
+        let domain_hash = ipfs::IPFSHash::from_proto(request.into_inner()).map_err( |e| {
+            event!(Level::ERROR, msg = "unable to parse request proto as valid domain object", error = ?e);
+            e
+        })?;
+
+        // TODO: wrapper that holds span, instrument, basically - should be possible! maybe build inline?
+        let s = batch_get::ipfs_fetch(
+            self.hashed_blob_store.clone(),
+            self.cache.clone(),
+            domain_hash,
+        )
         // NOTE: tracing_futures does not yet support this, tried to impl, was hard (weird pinning voodoo)
         // .instrument(tracing::info_span!("get-nodes-stream"))
         .map(|x| match x {
             Ok(n) => Ok(n.into_proto()),
             Err(de) => Err(std::convert::From::from(de)),
         });
-    let s: GetNodesStream = Box::new(s);
-    let resp = Response::new(s);
-    Ok(resp)
-}
+        let s: GetNodesStream = Box::new(s);
+        let resp = Response::new(s);
+        Ok(resp)
+    }
 
-#[instrument(skip(caps, request))] // skip potentially-large request (TODO record stats w/o full message body)
-async fn put_node_handler<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(
-    caps: &C,
-    request: Request<IpfsNode>,
-) -> Result<Response<IpfsHash>, Status> {
-    // extract explicit tracing id (if any)
-    extract_tracing_id_and_record(request.metadata())?;
+    #[instrument(skip(self, request))] // skip potentially-large request (TODO record stats w/o full message body)
+    async fn put_node_handler(
+        &self,
+        request: Request<IpfsNode>,
+    ) -> Result<Response<IpfsHash>, Status> {
+        // extract explicit tracing id (if any)
+        extract_tracing_id_and_record(request.metadata())?;
 
-    let domain_node = ipfs::DagNode::from_proto(request.into_inner()).map_err( |e| {
-        event!(Level::ERROR, msg = "unable to parse request proto as valid domain object", error = ?e);
-        e
-    })?;
+        let domain_node = ipfs::DagNode::from_proto(request.into_inner()).map_err( |e| {
+            event!(Level::ERROR, msg = "unable to parse request proto as valid domain object", error = ?e);
+            e
+        })?;
 
-    info!("dag cache put handler"); //TODO,, better msgs
+        info!("dag cache put handler"); //TODO,, better msgs
 
-    let hash = put_and_cache(caps, domain_node).await?;
-    let proto_hash = hash.into_proto();
-    let resp = Response::new(proto_hash);
-    Ok(resp)
-}
+        let hash = put_and_cache(
+            self.hashed_blob_store.clone(),
+            self.cache.clone(),
+            domain_node,
+        )
+        .await?;
+        let proto_hash = hash.into_proto();
+        let resp = Response::new(proto_hash);
+        Ok(resp)
+    }
 
-#[instrument(skip(caps, request))] // skip potentially-large request (TODO record stats w/o full message body)
-async fn put_nodes_handler<C: HasCacheCap + HasIPFSCap + Sync + Send + 'static>(
-    caps: Arc<C>,
-    request: Request<BulkPutReq>,
-) -> Result<Response<BulkPutResp>, Status> {
-    // extract explicit tracing id (if any)
-    extract_tracing_id_and_record(request.metadata())?;
+    #[instrument(skip(self, request))] // skip potentially-large request (TODO record stats w/o full message body)
+    async fn put_nodes_handler(
+        &self,
+        request: Request<BulkPutReq>,
+    ) -> Result<Response<BulkPutResp>, Status> {
+        // extract explicit tracing id (if any)
+        extract_tracing_id_and_record(request.metadata())?;
 
-    let bulk_put_req = types::api::bulk_put::Req::from_proto(request.into_inner()).map_err( |e| {
-        event!(Level::ERROR, msg = "unable to parse request proto as valid domain object", error = ?e);
-        e
-    })?;
+        let request = types::api::bulk_put::Req::from_proto(request.into_inner()).map_err( |e| {
+            event!(Level::ERROR, msg = "unable to parse request proto as valid domain object", error = ?e);
+            e
+        })?;
 
-    info!("dag cache put handler");
-    let resp = batch_put::ipfs_publish_cata(caps, bulk_put_req.validated_tree).await?;
+        info!("dag cache put handler");
+        let resp = batch_put::ipfs_publish_cata_with_cas(
+            self.mutable_hash_store.clone(),
+            self.hashed_blob_store.clone(),
+            self.cache.clone(),
+            request.validated_tree,
+            request.cas,
+        )
+        .await?;
 
-    let resp = Response::new(resp.into_proto());
-    Ok(resp)
-}
+        let resp = Response::new(resp.into_proto());
+        Ok(resp)
+    }
 
-#[instrument(skip(caps, request))] // skip potentially-large request (TODO record stats w/o full message body)
-async fn get_hash_for_key_handler<C: HasMutableHashStore + Sync + Send + 'static>(
-    caps: &C,
-    request: Request<GetHashForKeyReq>,
-) -> Result<Response<IpfsHash>, Status> {
-    // extract explicit tracing id (if any)
-    extract_tracing_id_and_record(request.metadata())?;
+    #[instrument(skip(self, request))] // skip potentially-large request (TODO record stats w/o full message body)
+    async fn get_hash_for_key_handler(
+        &self,
+        request: Request<GetHashForKeyReq>,
+    ) -> Result<Response<GetHashForKeyResp>, Status> {
+        // extract explicit tracing id (if any)
+        extract_tracing_id_and_record(request.metadata())?;
 
-    let opt_hash = caps.mhs_get(request.into_inner().key).await?;
+        let hash = self
+            .mutable_hash_store
+            .get(request.into_inner().key)
+            .await?
+            .map(|h| h.into_proto());
 
-    match opt_hash {
-        Some(hash) => Ok(Response::new(hash.into_proto())),
-        None => Err(Status::new(Code::Internal, "no key found")),
+        let resp = GetHashForKeyResp { hash };
+        Ok(Response::new(resp))
     }
 }
 
 // NOTE: async_trait and instrument are mutually incompatible, so use non-async-trait fns and async trait stubs
 #[tonic::async_trait]
-impl<C: HasMutableHashStore + HasCacheCap + HasIPFSCap + Sync + Send + 'static> server::IpfsCache
-    for CacheServer<C>
-{
+impl server::IpfsCache for Runtime {
     async fn get_hash_for_key(
         &self,
         request: Request<GetHashForKeyReq>,
-    ) -> Result<Response<IpfsHash>, Status> {
-        get_hash_for_key_handler(self.caps.as_ref(), request).await
+    ) -> Result<Response<GetHashForKeyResp>, Status> {
+        self.get_hash_for_key_handler(request).await
     }
 
     async fn get_node(&self, request: Request<IpfsHash>) -> Result<Response<GetResp>, Status> {
-        get_node_handler(self.caps.as_ref(), request).await
+        self.get_node_handler(request).await
     }
 
     type GetNodesStream = GetNodesStream;
@@ -147,18 +173,18 @@ impl<C: HasMutableHashStore + HasCacheCap + HasIPFSCap + Sync + Send + 'static> 
         &self,
         request: Request<IpfsHash>,
     ) -> Result<Response<Self::GetNodesStream>, Status> {
-        get_nodes_handler(self.caps.clone(), request).await
+        self.get_nodes_handler(request).await
     }
 
     async fn put_node(&self, request: Request<IpfsNode>) -> Result<Response<IpfsHash>, Status> {
-        put_node_handler(self.caps.as_ref(), request).await
+        self.put_node_handler(request).await
     }
 
     async fn put_nodes(
         &self,
         request: Request<BulkPutReq>,
     ) -> Result<Response<BulkPutResp>, Status> {
-        put_nodes_handler(self.caps.clone(), request).await
+        self.put_nodes_handler(request).await
     }
 }
 

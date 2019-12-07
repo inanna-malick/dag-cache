@@ -84,17 +84,30 @@ pub enum Msg {
 
 impl Component for State {
     type Message = Msg;
-    type Properties = ();
+    type Properties = Option<IPFSHash>;
 
-    fn create(_: Self::Properties, mut link: ComponentLink<Self>) -> Self {
-        // todo use backend storage (pointer only, rest is easy)
-        let fresh_root = InMemNode {
-            hash: None, // not persisted
-            inner: Node::new(None), // None b/c node is root (no parent)
-        };
+    // TODO: pass in init hash in properties?
+    fn create(opt_hash: Self::Properties, mut link: ComponentLink<Self>) -> Self {
         let mut nodes = HashMap::new();
-        let id = gen_node_id();
-        nodes.insert(id, fresh_root);
+
+        match opt_hash {
+            None => {
+                // todo use backend storage (pointer only, rest is easy)
+                let fresh_root = InMemNode {
+                    hash: None, // not persisted
+                    inner: Node::new(None), // None b/c node is root (no parent)
+                };
+                let id = gen_node_id();
+                nodes.insert(id, fresh_root);
+                NodeRef::Modified(id)
+            }
+            Some(h) => {
+                // todo: need hash _and_ node id, fuck
+                // TODO (temp): magic hash for root node, always just use '0'.
+                // TODO (actual): root object is 'Root { root_id: x, root_hash: y, metadata: ...}, id'd by hash.
+                // ^^ provides upgrade point to 'commit' structure
+            }
+        }
 
         // should handle repeatedly waking up save process - checks root node, saves (recursively) if modifed
         let mut interval_service = IntervalService::new();
@@ -105,7 +118,7 @@ impl Component for State {
 
         State {
             nodes: nodes,
-            entry_point: NodeRef::Modified(id),
+            entry_point: ,
             edit_state: None,
             // TODO: split out display-relevant state and capabilities
             link: link,
