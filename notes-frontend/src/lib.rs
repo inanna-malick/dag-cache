@@ -104,6 +104,8 @@ impl Component for State {
     fn create(opt_hash: Self::Properties, mut link: ComponentLink<Self>) -> Self {
         let mut nodes = HashMap::new();
 
+        println!("starting with: {:?}", &opt_hash);
+
         let (entry_point, last_known_hash) = match opt_hash {
             Arg(None) => {
                 // todo use backend storage (pointer only, rest is easy)
@@ -189,7 +191,7 @@ impl Component for State {
                                     panic!("lmao, todo (panic during resp handler)")
                                 }
                             } else {
-                                panic!("lmao, todo (panic in outer get resp callback {:?}", meta)
+                                panic!("lmao, todo (panic in outer put resp callback {:?}", meta)
                             }
                         },
                     );

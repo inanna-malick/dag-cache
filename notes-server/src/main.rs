@@ -13,6 +13,7 @@ use std::sync::Arc;
 use structopt::StructOpt;
 use tracing::instrument;
 use warp::{reject, Filter};
+use serde_json::json;
 
 // TODO: struct w/ domain types & etc
 #[derive(Debug)]
@@ -82,6 +83,7 @@ async fn get_initial_state(
     });
 
     let meta = request.metadata_mut();
+    // TODO: propagate proto trace ctx here instead of just ID
     meta.insert("trace_id", "traceid-test-8".parse().unwrap());
 
     let response = client.get_hash_for_key(request).await?;
@@ -142,7 +144,11 @@ async fn main() {
                     let res = get_nodes(url, raw_hash).await;
 
                     match res {
-                        Ok(resp) => Ok(warp::reply::json(&resp)),
+                        Ok(resp) => {
+                            println!(" get route resp: {:?}", &resp);
+                            // lmao how does this fail? seems to happen on
+                            Ok(warp::reply::json(&resp))
+                        }
                         Err(e) => {
                             println!("err on get: {:?}", e);
                             Err(reject::custom::<Error>(Error(e)))
@@ -161,9 +167,17 @@ async fn main() {
 
                 match res {
                     Ok(resp) => {
-                        let t = crate::opts::WithTemplate {
-                            name: "index.html",
-                            value: resp,
+                        println!("initial state resp: {:?}", &resp);
+                        let t = match resp {
+                            Some(h) => crate::opts::WithTemplate {
+                                name: "index.html",
+                                value: json!({"initial_hash" : format!("{}", h) }),
+                            },
+                            None => crate::opts::WithTemplate {
+                                name: "index.html",
+                                value: json!({"initial_hash" : ""}),
+                            }
+
                         };
                         Ok(get_ctx().render(t))
                     }

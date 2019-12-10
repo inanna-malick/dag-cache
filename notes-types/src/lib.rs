@@ -38,6 +38,7 @@ impl NodeRef {
     }
 }
 
+
 #[derive(PartialEq, Eq, Clone, Hash, Serialize, Deserialize, Debug)]
 pub struct RemoteNodeRef(pub NodeId, pub IPFSHash);
 
@@ -171,7 +172,8 @@ impl<T> Node<T> {
 #[derive(PartialEq, Eq, Clone, Serialize, Debug, Deserialize)]
 pub struct GetResp {
     pub requested_node: Node<RemoteNodeRef>,
-    pub extra_nodes: HashMap<RemoteNodeRef, Node<RemoteNodeRef>>,
+    // NOTE: using tuples so it serializes, all the json here looks like crap and could do with some hand tuning
+    pub extra_nodes: Vec<(RemoteNodeRef, Node<RemoteNodeRef>)>,
 }
 
 impl GetResp {
@@ -183,6 +185,8 @@ impl GetResp {
             let node = Node::from_generic(x.node)?;
             extra_nodes.insert(RemoteNodeRef(id, x.header.hash), node);
         }
+
+        let extra_nodes = extra_nodes.into_iter().collect();
 
         let resp = GetResp {
             requested_node,

@@ -86,7 +86,7 @@ impl Opt {
                 </head>
                 <body>
                     <script>
-                        window.starting_hash={{initial_hash}};
+                        window.starting_hash=\"{{initial_hash}}\";
                     </script>
                     <script src=\"/notes.js\"></script>
                 </body>

@@ -8,11 +8,14 @@ fn main() {
         return window.starting_hash;
     });
     let arg: notes::Arg = match value {
-        stdweb::Value::Null => notes::Arg(None),
         stdweb::Value::String(s) => {
-            let hash = IPFSHash::from_string(&s)
-                .expect("unable to parse hash (handlebar template bug, FIXME)");
-            notes::Arg(Some(hash))
+            if s.is_empty() {
+                notes::Arg(None)
+            } else {
+                let hash = IPFSHash::from_string(&s)
+                    .expect("unable to parse hash (handlebar template bug, FIXME)");
+                notes::Arg(Some(hash))
+            }
         }
         _ => panic!("unexpected type from handlebar template, FIXME"),
     };
