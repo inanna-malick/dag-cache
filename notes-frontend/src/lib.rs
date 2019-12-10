@@ -6,6 +6,7 @@ use notes_types::{Node, NodeId, NodeRef, RemoteNodeRef};
 use rand;
 use std::collections::HashMap;
 use stdweb::js;
+use stdweb::js_deserializable;
 use yew::events::IKeyboardEvent;
 use yew::format::{Json, Nothing};
 use yew::services::fetch::{FetchService, FetchTask, Request, Response};
@@ -56,9 +57,10 @@ pub struct EditState {
 #[derive(Debug)]
 pub struct State {
     nodes: HashMap<NodeId, InMemNode>, // note: node ref's can contain stale hashes.. is ok?
-    entry_point: NodeRef,              // NOTE: can contain stale hashes.. is this the wrong way to store root? mb just node id?
+    entry_point: NodeRef, // NOTE: can contain stale hashes.. is this the wrong way to store root? mb just node id?
     // node (header or body) being edited, as property of state & note node tree
     // focus includes path to root from that node
+    last_known_hash: Option<IPFSHash>, // for CAS
     edit_state: Option<EditState>,
     fetch_service: FetchService,
     link: ComponentLink<State>, // used to send callbacks
@@ -82,32 +84,48 @@ pub enum Msg {
     NoOp,
 }
 
+#[derive(serde::Deserialize, Debug)]
+pub struct Arg(pub Option<IPFSHash>);
+
+js_deserializable!(Arg);
+
+impl yew::html::Properties for Arg {
+    type Builder = Box<dyn Fn(Option<IPFSHash>) -> Arg>;
+    fn builder() -> Self::Builder {
+        Box::new(|x| Arg(x))
+    }
+}
+
 impl Component for State {
     type Message = Msg;
-    type Properties = Option<IPFSHash>;
+    type Properties = Arg;
 
     // TODO: pass in init hash in properties?
     fn create(opt_hash: Self::Properties, mut link: ComponentLink<Self>) -> Self {
         let mut nodes = HashMap::new();
 
-        match opt_hash {
-            None => {
+        let (entry_point, last_known_hash) = match opt_hash {
+            Arg(None) => {
                 // todo use backend storage (pointer only, rest is easy)
                 let fresh_root = InMemNode {
-                    hash: None, // not persisted
+                    hash: None,             // not persisted
                     inner: Node::new(None), // None b/c node is root (no parent)
                 };
                 let id = gen_node_id();
                 nodes.insert(id, fresh_root);
-                NodeRef::Modified(id)
+                (NodeRef::Modified(id), None)
             }
-            Some(h) => {
-                // todo: need hash _and_ node id, fuck
+            Arg(Some(h)) => {
+                // todo: need hash _and_ node id, fuck me/FIXME
                 // TODO (temp): magic hash for root node, always just use '0'.
                 // TODO (actual): root object is 'Root { root_id: x, root_hash: y, metadata: ...}, id'd by hash.
                 // ^^ provides upgrade point to 'commit' structure
+                (
+                    NodeRef::Unmodified(RemoteNodeRef(NodeId(0), h.clone())),
+                    Some(h),
+                )
             }
-        }
+        };
 
         // should handle repeatedly waking up save process - checks root node, saves (recursively) if modifed
         let mut interval_service = IntervalService::new();
@@ -118,7 +136,8 @@ impl Component for State {
 
         State {
             nodes: nodes,
-            entry_point: ,
+            entry_point,
+            last_known_hash,
             edit_state: None,
             // TODO: split out display-relevant state and capabilities
             link: link,
@@ -139,19 +158,22 @@ impl Component for State {
                 if let NodeRef::Modified(modified_root_id) = self.entry_point {
                     // construct map of all nodes that have been modified
                     let mut extra_nodes = HashMap::new();
-                    for (id, node) in self.nodes.iter().filter( |(_, n)| n.hash.is_none()) { // hash==None -> modified node
+                    for (id, node) in self.nodes.iter().filter(|(_, n)| n.hash.is_none()) {
+                        // hash==None -> modified node
                         extra_nodes.insert(id.clone(), node.inner.clone());
-                    };
+                    }
 
                     let req = notes_types::PutReq {
                         head_node: extra_nodes
                             .remove(&modified_root_id)
                             .expect("root node lookup failed!"),
-                        extra_nodes, // remaining extra nodes (as expected by API)
+                        extra_nodes,
+                        cas_hash: self.last_known_hash.clone(),
                     };
 
                     let request = Request::post("/nodes")
-                        .header("Content-Type", "application/json") // lmao that this is neccessary - mb im doing it wrong?
+                        // why is this is neccessary given Json body type on builder - mb I'm doing it wrong?
+                        .header("Content-Type", "application/json")
                         .body(Json(&req))
                         .unwrap();
 
@@ -179,9 +201,11 @@ impl Component for State {
                     // no-op if root node not modified
                 }
             }
+            // TODO: handle CAS violation, currently will just explode, lmao
             // kinda gnarly, basically just writes every saved node to the nodes store and in the process wipes out the modified nodes
             Msg::SaveComplete(root_id, resp) => {
                 self.save_task = None; // re-enable updates
+                self.last_known_hash = Some(resp.root_hash.clone()); // set last known hash for future CAS use
                 let root_node_ref = RemoteNodeRef(root_id, resp.root_hash.clone());
                 // update entry point to newly-persisted root node
                 self.entry_point = NodeRef::Unmodified(root_node_ref);
@@ -202,8 +226,9 @@ impl Component for State {
                     node.hash = Some(hash.clone());
                     if let Some(parent_id) = node.parent {
                         drop(node);
-                        let parent_node = self.nodes.get_mut(&parent_id).expect("hash mismatch, BUG");
-                        parent_node.map_mut( |node_ref| {
+                        let parent_node =
+                            self.nodes.get_mut(&parent_id).expect("hash mismatch, BUG");
+                        parent_node.map_mut(|node_ref| {
                             if node_ref.node_id() == id {
                                 *node_ref = NodeRef::Unmodified(RemoteNodeRef(id, hash.clone()));
                             }
@@ -508,14 +533,13 @@ impl State {
 
             // update pointer to previous node to indicate modification
             if let Some(prev) = prev {
-                node.map_mut( |node_ref| {
+                node.map_mut(|node_ref| {
                     if node_ref.node_id() == prev {
                         // downgrade any pointers to the prev node to modified
                         *node_ref = NodeRef::Modified(prev);
                     }
                 })
             }
-
 
             // TODO: retain prev node id, map_mut over refs to update to local ref. combination should yield correct refs
 
@@ -534,7 +558,13 @@ impl State {
 
 fn gen_node_id() -> NodeId {
     let u = rand::random::<u128>();
-    NodeId(u)
+    if u == 0 {
+        // RESERVED VALUE for root node
+        // TODO: loop? idk, stack overflow v. unlikely
+        gen_node_id()
+    } else {
+        NodeId(u)
+    }
 }
 
 // THOUGHTS:

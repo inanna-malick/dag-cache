@@ -98,3 +98,18 @@ message IpfsNode {
   bytes data = 1;
   repeated IpfsHeader links = 2;
 }
+
+
+// not part of GRPC defn, used as part of metadata
+// to propagate distributed tracing metadata
+message TraceCtx {
+    SpanId parent_span = 1;
+    string trace_id = 2;
+}
+
+// not part of GRPC defn, used as part of metadata
+// to propagate distributed tracing metadata
+message SpanId {
+  uint64 instance_id = 1;
+  uint64 tracing_id  = 2;
+}

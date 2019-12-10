@@ -323,3 +323,57 @@ pub mod get {
         }
     }
 }
+
+#[cfg(feature = "grpc")]
+pub mod meta {
+    use super::*;
+    use honeycomb_tracing::{SpanId, TraceCtx};
+    use tracing::span::Id;
+
+    #[cfg(feature = "grpc")]
+    pub fn trace_ctx_from_proto(p: grpc::TraceCtx) -> Result<TraceCtx, ProtoDecodingError> {
+        let parent_span = p.parent_span.map(span_id_from_proto).transpose()?;
+        let t = TraceCtx {
+            trace_id: honeycomb_tracing::TraceId(p.trace_id),
+            parent_span,
+        };
+
+        Ok(t)
+    }
+
+    #[cfg(feature = "grpc")]
+    pub fn trace_ctx_into_proto(t: TraceCtx) -> grpc::TraceCtx {
+        grpc::TraceCtx {
+            trace_id: t.trace_id.0,
+            parent_span: t.parent_span.map(span_id_into_proto),
+        }
+    }
+
+    #[cfg(feature = "grpc")]
+    pub fn span_id_from_proto(p: grpc::SpanId) -> Result<SpanId, ProtoDecodingError> {
+        let tracing_id = if p.tracing_id == 0 {
+            Err(ProtoDecodingError {
+                cause: "tracing id cannot be zero".to_string(),
+            })
+        } else {
+            Ok(p.tracing_id)
+        };
+        let tracing_id = tracing_id?;
+        let tracing_id = Id::from_u64(tracing_id);
+
+        let instance_id = p.instance_id;
+
+        Ok(SpanId {
+            tracing_id,
+            instance_id,
+        })
+    }
+
+    #[cfg(feature = "grpc")]
+    pub fn span_id_into_proto(s: SpanId) -> grpc::SpanId {
+        grpc::SpanId {
+            tracing_id: s.tracing_id.into_u64(),
+            instance_id: s.instance_id,
+        }
+    }
+}

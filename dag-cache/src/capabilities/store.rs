@@ -6,6 +6,7 @@ use dag_cache_types::types::ipfs::{DagNode, IPFSHash};
 use serde_json;
 use sled::Db;
 use tracing::instrument;
+use tracing::{info};
 
 /// store backed by local fs rocksdb
 pub struct FileSystemStore(Db);
@@ -52,27 +53,47 @@ impl FileSystemStore {
     }
 
     #[instrument(skip(self))]
-    fn get_mhs(&self, k: String) -> Result<Option<IPFSHash>, DagCacheError> {
+    fn get_mhs(&self, k: &str) -> Result<Option<IPFSHash>, DagCacheError> {
         match self.0.get(k) {
-            Ok(Some(value)) => Ok(Some(IPFSHash::from_raw(encodings::Base58::from_bytes(
-                value.to_vec(),
-            )))),
+            Ok(x) => Ok(x.map(decode)),
             // TODO: actual handling for errors - time to revamp error schema?
-            Ok(None) => Ok(None),
             Err(e) => panic!("operational problem encountered: {}", e),
         }
     }
 
-    #[instrument(skip(self, v))]
-    fn put_mhs(&self, k: String, hash: IPFSHash) -> Result<Option<IPFSHash>, DagCacheError> {
-        let base58 = hash.0;
-        let bytes = base58.0;
+    // TODO: expose ONLY check and set, not put
+    #[instrument(skip(self))]
+    fn cas_mhs(
+        &self,
+        k: &str,
+        previous_hash: Option<IPFSHash>,
+        proposed_hash: IPFSHash,
+    ) -> Result<(), DagCacheError> {
+        println!("cas mhs!");
 
-        let prev = self.0.insert(k, bytes).unwrap(); // todo: expose error instead of panic
-        let prev = prev.map(|p| IPFSHash::from_raw(encodings::Base58::from_bytes(p.to_vec())));
+        info!("inside cas mhs");
+        let cas_res =
+            self.0
+                .compare_and_swap(k, previous_hash.map(encode), Some(encode(proposed_hash))); // FIXME: refactor error structure
+        info!("cas mhs res: {:?}", &cas_res);
+        let cas_res = cas_res.unwrap();
 
-        Ok(prev)
+        cas_res.map_err(
+            |e: sled::CompareAndSwapError| DagCacheError::CASViolationError {
+                actual_hash: e.current.map(decode),
+            },
+        )
     }
+}
+
+fn decode(hash: sled::IVec) -> IPFSHash {
+    IPFSHash::from_raw(encodings::Base58::from_bytes(hash.to_vec()))
+}
+
+fn encode(hash: IPFSHash) -> Vec<u8> {
+    let base58 = hash.0;
+    let bytes = base58.0;
+    bytes
 }
 
 #[tonic::async_trait]
@@ -88,11 +109,16 @@ impl HashedBlobStore for FileSystemStore {
 
 #[tonic::async_trait]
 impl MutableHashStore for FileSystemStore {
-    async fn get(&self, k: String) -> Result<Option<IPFSHash>, DagCacheError> {
+    async fn get(&self, k: &str) -> Result<Option<IPFSHash>, DagCacheError> {
         self.get_mhs(k)
     }
 
-    async fn put(&self, k: String, hash: IPFSHash) -> Result<Option<IPFSHash>, DagCacheError> {
-        self.put_mhs(k, hash)
+    async fn cas(
+        &self,
+        k: &str,
+        previous_hash: Option<IPFSHash>,
+        proposed_hash: IPFSHash,
+    ) -> Result<(), DagCacheError> {
+        self.cas_mhs(k, previous_hash, proposed_hash)
     }
 }

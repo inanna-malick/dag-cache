@@ -1,10 +1,17 @@
 // #![deny(warnings)]
 
+mod opts;
+
+use crate::opts::Runtime;
 use dag_cache_types::types::api::{bulk_put, get};
 use dag_cache_types::types::grpc::{self, client::IpfsCacheClient};
 use dag_cache_types::types::ipfs;
-use futures::future::FutureExt;
+use opts::Opt;
 use serde::Serialize;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
+use structopt::StructOpt;
+use tracing::instrument;
 use warp::{reject, Filter};
 
 // TODO: struct w/ domain types & etc
@@ -20,6 +27,19 @@ struct ErrorMessage<'a> {
     message: &'a str,
 }
 
+// used to provide shared runtime ctx - there's probably a better way to do this
+static mut GLOBAL_CTX: Option<Arc<Runtime>> = None;
+
+fn get_ctx() -> Arc<Runtime> {
+    unsafe {
+        match &GLOBAL_CTX {
+            Some(x) => x.clone(),
+            None => panic!("global ctx not set"),
+        }
+    }
+}
+
+#[instrument]
 async fn get_nodes(
     url: String,
     raw_hash: String,
@@ -31,7 +51,10 @@ async fn get_nodes(
         .map_err(|e| Box::new(e))?;
 
     // TODO: validate base58 here
-    let request = tonic::Request::new(grpc::IpfsHash { hash: raw_hash });
+    let mut request = tonic::Request::new(grpc::IpfsHash { hash: raw_hash });
+
+    let meta = request.metadata_mut();
+    meta.insert("trace_id", "traceid-test-8".parse().unwrap());
 
     let response = client.get_node(request).await.map_err(|e| Box::new(e))?;
 
@@ -41,6 +64,7 @@ async fn get_nodes(
     Ok(response)
 }
 
+#[instrument]
 async fn get_initial_state(
     url: String,
 ) -> Result<Option<ipfs::IPFSHash>, Box<dyn std::error::Error + Send + Sync + 'static>> {
@@ -53,9 +77,12 @@ async fn get_initial_state(
 
     // TODO: validate base58 here
     // TODO: dedup cas hash
-    let request = tonic::Request::new(grpc::GetHashForKeyReq {
+    let mut request = tonic::Request::new(grpc::GetHashForKeyReq {
         key: notes_types::CAS_KEY.to_string(),
     });
+
+    let meta = request.metadata_mut();
+    meta.insert("trace_id", "traceid-test-8".parse().unwrap());
 
     let response = client.get_hash_for_key(request).await?;
     let response = response
@@ -68,6 +95,7 @@ async fn get_initial_state(
     Ok(response)
 }
 
+#[instrument]
 async fn put_nodes(
     url: String,
     put_req: notes_types::PutReq,
@@ -82,7 +110,11 @@ async fn put_nodes(
         .map_err(|e| Box::new(e))?;
 
     // TODO: validate base58 here
-    let request = tonic::Request::new(put_req.into_proto());
+    let mut request = tonic::Request::new(put_req.into_proto());
+
+    let meta = request.metadata_mut();
+    // TODO: figure out better encoding, 3 u64/string id fields
+    meta.insert("trace_id", "traceid-test-8".parse().unwrap());
 
     let response = client.put_nodes(request).await.map_err(|e| Box::new(e))?;
 
@@ -94,45 +126,64 @@ async fn put_nodes(
 
 #[tokio::main]
 async fn main() {
+    let opt = Opt::from_args();
+    let runtime = opt.into_runtime();
+    unsafe {
+        GLOBAL_CTX = Some(Arc::new(runtime));
+    }
+
     let get_route = warp::path("node")
         .and(warp::path::param::<String>())
-        .and_then(|raw_hash: String| {
-            async move {
-                let res = get_nodes("http://dag:8088".to_string(), raw_hash).await;
+        // .end()
+        .and_then({
+            |raw_hash: String| {
+                async move {
+                    let url = get_ctx().dag_cache_url.to_string();
+                    let res = get_nodes(url, raw_hash).await;
+
+                    match res {
+                        Ok(resp) => Ok(warp::reply::json(&resp)),
+                        Err(e) => {
+                            println!("err on get: {:?}", e);
+                            Err(reject::custom::<Error>(Error(e)))
+                        }
+                    }
+                }
+            }
+        });
+
+    let index_route = warp::get()
+        .and(warp::path::end())
+        .and_then(|| {
+            async {
+                let url = get_ctx().dag_cache_url.to_string();
+                let res = get_initial_state(url).await;
 
                 match res {
-                    Ok(resp) => Ok(warp::reply::json(&resp)),
+                    Ok(resp) => {
+                        let t = crate::opts::WithTemplate {
+                            name: "index.html",
+                            value: resp,
+                        };
+                        Ok(get_ctx().render(t))
+                    }
                     Err(e) => {
-                        println!("err on get: {:?}", e);
+                        println!("err on get initial state: {:?}", e);
                         Err(reject::custom::<Error>(Error(e)))
                     }
                 }
             }
         });
 
-    // TODO: better naming scheme for these
-    // TODO: bake hash into static initial page (NOT wasm) via templating
-    let get_initial_state_route = warp::path("initialstate").and_then(|| {
-        async {
-            let res = get_initial_state("http://dag:8088".to_string()).await;
-
-            match res {
-                Ok(resp) => Ok(warp::reply::json(&resp)),
-                Err(e) => {
-                    println!("err on get initial state: {:?}", e);
-                    Err(reject::custom::<Error>(Error(e)))
-                }
-            }
-        }
-    });
-
     let post_route = warp::post()
         .and(warp::path("nodes"))
         .and(warp::body::content_length_limit(1024 * 16)) // arbitrary?
         .and(warp::body::json())
+        // .end()
         .and_then(|put_req: notes_types::PutReq| {
             async move {
-                let res = put_nodes("http://dag:8088".to_string(), put_req).await;
+                let url = get_ctx().dag_cache_url.to_string();
+                let res = put_nodes(url, put_req).await;
 
                 match res {
                     Ok(resp) => Ok(warp::reply::json(&resp)),
@@ -148,9 +199,10 @@ async fn main() {
     // let static_route = warp::fs::dir("/home/pk/dev/dag-cache/notes-frontend/target/deploy");
     let static_route = warp::fs::dir("/static");
 
-    let routes = get_route.or(post_route).or(static_route);
+    let routes = get_route.or(post_route).or(index_route).or(static_route);
 
-    warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
+    let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), get_ctx().port);
+    warp::serve(routes).run(socket).await;
 }
 
 #[cfg(test)]

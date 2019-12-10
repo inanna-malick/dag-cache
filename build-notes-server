@@ -1,5 +1,10 @@
+cd notes-frontend
+cargo web deploy --output ../notes-server/deploy
+cd ..
+
 docker run -v $PWD:/volume -v $PWD/../honeycomb-tracing:/honeycomb-tracing -v cargo-cache:/root/.cargo/registry --rm -t clux/muslrust cargo build --bin notes-server --target x86_64-unknown-linux-musl --release
 cp target/x86_64-unknown-linux-musl/release/notes-server notes-server
 cd notes-server
 docker build -t ishtar-orbital/notes-server .
+rm notes-server
 cd ..

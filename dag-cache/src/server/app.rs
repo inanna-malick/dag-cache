@@ -120,7 +120,7 @@ impl Runtime {
             e
         })?;
 
-        info!("dag cache put handler");
+        info!("dag cache put handler request, cas: {:?}", &request.cas);
         let resp = batch_put::ipfs_publish_cata_with_cas(
             self.mutable_hash_store.clone(),
             self.hashed_blob_store.clone(),
@@ -144,7 +144,7 @@ impl Runtime {
 
         let hash = self
             .mutable_hash_store
-            .get(request.into_inner().key)
+            .get(&request.into_inner().key)
             .await?
             .map(|h| h.into_proto());
 
@@ -204,7 +204,7 @@ fn extract_tracing_id_and_record(meta: &tonic::metadata::MetadataMap) -> Result<
             println!("got trace id {:?} from req headers", &trace_id);
             TraceCtx {
                 trace_id,
-                remote_span_parent: None,
+                parent_span: None,
             }
             .record_on_current_span();
 
@@ -215,7 +215,7 @@ fn extract_tracing_id_and_record(meta: &tonic::metadata::MetadataMap) -> Result<
             println!("generated trace id {:?}", &trace_id);
             TraceCtx {
                 trace_id,
-                remote_span_parent: None,
+                parent_span: None,
             }
             .record_on_current_span();
 

@@ -7,9 +7,17 @@ services:
       - "3030:3030"
     links:
       - dag
+    secrets:
+      - honeycomb_key
     entrypoint:
       # TODO: structopts for this server instead of hardcoded
       - /notes-server
+      - --honeycomb_key_file
+      - /run/secrets/honeycomb_key
+      - --port
+      - "3030"
+      - --dag_cache_url
+      - http://dag:8080
   dag:
     image: ishtar-orbital/dag-cache:latest
     expose:
@@ -24,6 +32,8 @@ services:
       - /run/secrets/honeycomb_key
       - --fs_path
       - /dag-storage/sled.db
+      - --port
+      - "8080"
 
 secrets:
    honeycomb_key:

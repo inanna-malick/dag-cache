@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tokio;
 use tokio::sync::oneshot;
 use tracing::error;
+use tracing::{info};
 
 // TODO: how to make this transactional while maintaining caps approach? ans: have an impl of the ipfsCap (TODO: rename to hash store)
 // that is the _transaction-scoped_ tree - pretty sure this is supported. will likely need to move to dyn
@@ -24,17 +25,17 @@ pub async fn ipfs_publish_cata_with_cas(
 ) -> Result<bulk_put::Resp, DagCacheError> {
     match cas {
         Some(cas) => {
-            let actual_hash = mhs.get(cas.cas_key.clone()).await?;
-            if &actual_hash == &cas.required_previous_hash {
-                let res = ipfs_publish_cata(store, cache, tree).await?;
-                mhs.put(cas.cas_key, res.root_hash.clone());
-                Ok(res)
-            } else {
-                Err(DagCacheError::CASViolationError {
-                    expected_hash: cas.required_previous_hash,
-                    actual_hash,
-                })
-            }
+            info!("some cas, writing to store via cata");
+            let res = ipfs_publish_cata(store, cache, tree).await?;
+            info!("some cas, got res: {:?}", &res);
+            mhs.cas(
+                &cas.cas_key,
+                cas.required_previous_hash,
+                res.root_hash.clone(),
+            )
+            .await?;
+            info!("some cas, wrote res hash to mhs");
+            Ok(res)
         }
         None => {
             let res = ipfs_publish_cata(store, cache, tree).await?;
