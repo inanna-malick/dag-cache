@@ -1,6 +1,6 @@
 //re-export macro magic
-pub use ipfscache::*;
+pub use dagstore::*;
 
-pub mod ipfscache {
-    tonic::include_proto!("ipfscache");
+pub mod dagstore {
+    tonic::include_proto!("dagstore");
 }

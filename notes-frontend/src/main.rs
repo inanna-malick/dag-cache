@@ -1,4 +1,5 @@
-use dag_cache_types::types::ipfs::IPFSHash;
+use dag_cache_types::types::domain::Hash;
+use notes_types::notes::CannonicalNode;
 use stdweb::js;
 
 fn main() {
@@ -12,8 +13,9 @@ fn main() {
             if s.is_empty() {
                 notes::Arg(None)
             } else {
-                let hash = IPFSHash::from_string(&s)
-                    .expect("unable to parse hash (handlebar template bug, FIXME)");
+                let hash = Hash::from_string(&s)
+                    .expect("unable to parse hash (handlebar template bug, FIXME)")
+                    .promote::<CannonicalNode>();
                 notes::Arg(Some(hash))
             }
         }

@@ -1,8 +1,8 @@
-use crate::capabilities::lib::get_and_cache;
+use crate::capabilities::get_and_cache;
 use crate::capabilities::{Cache, HashedBlobStore};
 use chashmap::CHashMap;
+use dag_cache_types::types::domain::{Hash, Node};
 use dag_cache_types::types::errors::DagCacheError;
-use dag_cache_types::types::ipfs::{DagNode, IPFSHash};
 use futures::channel::mpsc;
 use futures::sink::SinkExt;
 use std::sync::Arc;
@@ -12,8 +12,8 @@ use tracing::{error, info};
 pub fn ipfs_fetch(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
-    hash: IPFSHash,
-) -> mpsc::Receiver<Result<DagNode, DagCacheError>> {
+    hash: Hash,
+) -> mpsc::Receiver<Result<Node, DagCacheError>> {
     info!("starting recursive fetch for root hash {:?}", &hash);
     let (send, receive) = mpsc::channel(128); // randomly chose this channel buffer size..
     let memoizer = Arc::new(CHashMap::new());
@@ -27,9 +27,9 @@ pub fn ipfs_fetch(
 fn ipfs_fetch_ana_internal(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
-    hash: IPFSHash,
-    resp_chan: mpsc::Sender<Result<DagNode, DagCacheError>>, // used to send completed nodes (eagerly)
-    to_populate: Arc<CHashMap<IPFSHash, ()>>,                // used to memoize async fetches
+    hash: Hash,
+    resp_chan: mpsc::Sender<Result<Node, DagCacheError>>, // used to send completed nodes (eagerly)
+    to_populate: Arc<CHashMap<Hash, ()>>,                 // used to memoize async fetches
 ) {
     let hash2 = hash.clone();
     to_populate.clone().upsert(
@@ -47,9 +47,9 @@ fn ipfs_fetch_ana_internal(
 async fn ipfs_fetch_worker(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
-    hash: IPFSHash,
-    mut resp_chan: mpsc::Sender<Result<DagNode, DagCacheError>>,
-    to_populate: Arc<CHashMap<IPFSHash, ()>>, // used to memoize async fetches
+    hash: Hash,
+    mut resp_chan: mpsc::Sender<Result<Node, DagCacheError>>,
+    to_populate: Arc<CHashMap<Hash, ()>>, // used to memoize async fetches
 ) {
     let res = get_and_cache(store.clone(), cache.clone(), hash.clone()).await;
     match res {

@@ -1,8 +1,8 @@
-use dag_cache_types::types::ipfs::{DagNode, IPFSHash};
+use dag_cache_types::types::domain::{Hash, Node};
 use lru::LruCache;
 use std::sync::Mutex;
 
-pub struct Cache(pub Mutex<LruCache<IPFSHash, DagNode>>);
+pub struct Cache(pub Mutex<LruCache<Hash, Node>>);
 
 impl Cache {
     pub fn new(max_cache_entries: usize) -> Self {
@@ -12,14 +12,14 @@ impl Cache {
     }
 
     // TODO: rain says investigate stable deref (given that all refs here are immutable)
-    pub fn get(&self, k: IPFSHash) -> Option<DagNode> {
+    pub fn get(&self, k: Hash) -> Option<Node> {
         // succeed or die. failure is unrecoverable (mutex poisoned)
         let mut cache = self.0.lock().unwrap();
         let mv = cache.get(&k);
         mv.cloned() // this feels weird? clone(d) is actually needed, right?
     }
 
-    pub fn put(&self, k: IPFSHash, v: DagNode) {
+    pub fn put(&self, k: Hash, v: Node) {
         // succeed or die. failure is unrecoverable (mutex poisoned)
         let mut cache = self.0.lock().unwrap();
         cache.put(k, v);

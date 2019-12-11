@@ -1,8 +1,8 @@
 #![recursion_limit = "512"]
 
 use dag_cache_types::types::api as api_types;
-use dag_cache_types::types::ipfs::IPFSHash;
-use notes_types::{Node, NodeId, NodeRef, RemoteNodeRef};
+use dag_cache_types::types::domain::TypedHash;
+use notes_types::notes::{CannonicalNode, Node, NodeId, NodeRef, RemoteNodeRef};
 use rand;
 use std::collections::HashMap;
 use stdweb::js;
@@ -29,7 +29,7 @@ pub enum EditFocus {
 // NOTE: optional ipfs hash indicates if node is modified or not
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct InMemNode {
-    hash: Option<IPFSHash>,
+    hash: Option<TypedHash<CannonicalNode>>,
     inner: Node<NodeRef>,
 }
 
@@ -60,7 +60,7 @@ pub struct State {
     entry_point: NodeRef, // NOTE: can contain stale hashes.. is this the wrong way to store root? mb just node id?
     // node (header or body) being edited, as property of state & note node tree
     // focus includes path to root from that node
-    last_known_hash: Option<IPFSHash>, // for CAS
+    last_known_hash: Option<TypedHash<CannonicalNode>>, // for CAS
     edit_state: Option<EditState>,
     fetch_service: FetchService,
     link: ComponentLink<State>, // used to send callbacks
@@ -77,20 +77,20 @@ pub enum Msg {
     UpdateEdit(String),
     CommitEdit,
     CreateOn { at_idx: usize, parent: NodeId },
-    Fetch(RemoteNodeRef),                               // HTTP fetch from store
-    FetchComplete(RemoteNodeRef, notes_types::GetResp), // HTTP fetch from store (domain type)
-    StartSave, // init backup of everything in store - blocking operation, probably
+    Fetch(RemoteNodeRef), // HTTP fetch from store
+    FetchComplete(RemoteNodeRef, notes_types::api::GetResp), // HTTP fetch from store (domain type)
+    StartSave,            // init backup of everything in store - blocking operation, probably
     SaveComplete(NodeId, api_types::bulk_put::Resp),
     NoOp,
 }
 
 #[derive(serde::Deserialize, Debug)]
-pub struct Arg(pub Option<IPFSHash>);
+pub struct Arg(pub Option<TypedHash<CannonicalNode>>);
 
 js_deserializable!(Arg);
 
 impl yew::html::Properties for Arg {
-    type Builder = Box<dyn Fn(Option<IPFSHash>) -> Arg>;
+    type Builder = Box<dyn Fn(Option<TypedHash<CannonicalNode>>) -> Arg>;
     fn builder() -> Self::Builder {
         Box::new(|x| Arg(x))
     }
@@ -165,7 +165,7 @@ impl Component for State {
                         extra_nodes.insert(id.clone(), node.inner.clone());
                     }
 
-                    let req = notes_types::PutReq {
+                    let req = notes_types::api::PutReq {
                         head_node: extra_nodes
                             .remove(&modified_root_id)
                             .expect("root node lookup failed!"),
@@ -207,8 +207,9 @@ impl Component for State {
             // kinda gnarly, basically just writes every saved node to the nodes store and in the process wipes out the modified nodes
             Msg::SaveComplete(root_id, resp) => {
                 self.save_task = None; // re-enable updates
-                self.last_known_hash = Some(resp.root_hash.clone()); // set last known hash for future CAS use
-                let root_node_ref = RemoteNodeRef(root_id, resp.root_hash.clone());
+                let root_hash = resp.root_hash.promote::<CannonicalNode>();
+                self.last_known_hash = Some(root_hash.clone()); // set last known hash for future CAS use
+                let root_node_ref = RemoteNodeRef(root_id, root_hash.clone());
                 // update entry point to newly-persisted root node
                 self.entry_point = NodeRef::Unmodified(root_node_ref);
 
@@ -220,9 +221,10 @@ impl Component for State {
 
                 // update root node with hash
                 let mut node = self.nodes.get_mut(&root_id).expect("hash mismatch, BUG");
-                node.hash = Some(resp.root_hash);
+                node.hash = Some(root_hash);
 
                 for (id, hash) in resp.additional_uploaded.into_iter() {
+                    let hash = hash.promote::<CannonicalNode>();
                     let id = NodeId::from_generic(id.0).unwrap(); // FIXME - type conversion gore
                     let mut node = self.nodes.get_mut(&id).expect("hash mismatch, BUG");
                     node.hash = Some(hash.clone());
@@ -247,7 +249,7 @@ impl Component for State {
 
                 let callback = self.link.send_back(
                     move |response: Response<
-                        Json<Result<notes_types::GetResp, failure::Error>>,
+                        Json<Result<notes_types::api::GetResp, failure::Error>>,
                     >| {
                         if let (meta, Json(Ok(body))) = response.into_parts() {
                             if meta.status.is_success() {
@@ -573,12 +575,12 @@ fn gen_node_id() -> NodeId {
 // walking path to root, maintaining, etc is cumbersome. what if I just had a single node -> parent id mapping?
 // NOTE: could just have an Option<parent_id> field on each node.. why not, eh? always known when inserting node, wouldn't introduce merkle-breaking circularity
 
-// keeping two maps is cumbersome/seems to cause problems w/ state-tracking. what if I just had one map w/ each node having an optional IPFSHash
+// keeping two maps is cumbersome/seems to cause problems w/ state-tracking. what if I just had one map w/ each node having an optional Hash
 // would slightly complicate saving, but would simplify everything else (eg no need to walk map to do anything other than unset ipfs hash for parents)
 // NOTE: would lose NodeRef type-level distinction between local and non/local nodes on modified_nodes, but w/e - same info kept via option field
 // PROBLEM: ^^ would lose lazy-load ability - if map key loses ipfs hash, can't do lazy load on failed lookup
 // NOTE: can fix, by using Node<NodeRef>, with remote node refs used to indicate a required lazy load <- i don't really like this..
-// NOTE: fix via Node<(NodeId, Option<IPFSHash>)> <- would capture req'd info, also could do initial lookup via (SHIT, isomorphic to above..)
+// NOTE: fix via Node<(NodeId, Option<Hash>)> <- would capture req'd info, also could do initial lookup via (SHIT, isomorphic to above..)
 // NOTE: but... would always have node_id for lookup, fall back to hash only if that fails.. yeah, that works
 // could provide helper:
 

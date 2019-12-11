@@ -1,12 +1,12 @@
 use handlebars::Handlebars;
 use honeycomb_tracing::TelemetryLayer;
+use std::error::Error;
 use std::fs::File;
 use std::io::prelude::*;
 use structopt::StructOpt;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::Layer;
 use tracing_subscriber::registry;
-use std::error::Error;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -35,7 +35,8 @@ impl Runtime {
     where
         T: serde::Serialize,
     {
-        let body = self.hb
+        let body = self
+            .hb
             .render(template.name, &template.value)
             .unwrap_or_else(|err| err.description().to_owned());
 
@@ -76,8 +77,7 @@ impl Opt {
         let subscriber = layer.with_subscriber(registry::Registry::default());
         tracing::subscriber::set_global_default(subscriber).expect("setting global default failed");
 
-        let template =
-            "<!doctype html>
+        let template = "<!doctype html>
             <html>
                 <head>
                     <meta charset=\"utf-8\" />

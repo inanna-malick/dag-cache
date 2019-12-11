@@ -1,22 +1,19 @@
-use crate::capabilities::lib::put_and_cache;
+use crate::capabilities::put_and_cache;
 use crate::capabilities::{Cache, HashedBlobStore, MutableHashStore};
 use crate::server::batch_get;
 use crate::server::batch_put;
 use crate::server::opportunistic_get;
-use dag_cache_types::types;
-use dag_cache_types::types::grpc;
-use dag_cache_types::types::ipfs;
-use futures::stream::StreamExt;
-use futures::Stream;
-use grpc::{
-    server, BulkPutReq, BulkPutResp, GetHashForKeyReq, GetHashForKeyResp, GetResp, IpfsHash,
-    IpfsNode,
+use dag_cache_types::types::{
+    api, domain,
+    grpc::{
+        server, BulkPutReq, BulkPutResp, GetHashForKeyReq, GetHashForKeyResp, GetResp, Hash, Node,
+    },
 };
+use futures::{Stream, StreamExt};
 use honeycomb_tracing::{TraceCtx, TraceId};
 use std::sync::Arc;
 use tonic::{Code, Request, Response, Status};
-use tracing::instrument;
-use tracing::{event, info, Level};
+use tracing::{event, info, instrument, Level};
 
 // TODO: parameterize over E where E is the underlying error type (different for txn vs. main scope)
 pub struct Runtime {
@@ -25,19 +22,15 @@ pub struct Runtime {
     pub hashed_blob_store: Arc<dyn HashedBlobStore>,
 }
 
-type GetNodesStream =
-    Box<dyn Stream<Item = Result<IpfsNode, Status>> + Unpin + Send + Sync + 'static>;
+type GetNodesStream = Box<dyn Stream<Item = Result<Node, Status>> + Unpin + Send + Sync + 'static>;
 
 impl Runtime {
     #[instrument(skip(self))]
-    async fn get_node_handler(
-        &self,
-        request: Request<IpfsHash>,
-    ) -> Result<Response<GetResp>, Status> {
+    async fn get_node_handler(&self, request: Request<Hash>) -> Result<Response<GetResp>, Status> {
         // extract explicit tracing id (if any)
         extract_tracing_id_and_record(request.metadata())?;
 
-        let request = ipfs::IPFSHash::from_proto(request.into_inner()).map_err( |e| {
+        let request = domain::Hash::from_proto(request.into_inner()).map_err( |e| {
             event!(Level::ERROR, msg = "unable to parse request proto as valid domain object", error = ?e);
             e
         })?;
@@ -54,12 +47,12 @@ impl Runtime {
     #[instrument(skip(self))]
     async fn get_nodes_handler(
         &self,
-        request: Request<IpfsHash>,
+        request: Request<Hash>,
     ) -> Result<Response<GetNodesStream>, Status> {
         // extract explicit tracing id (if any)
         extract_tracing_id_and_record(request.metadata())?;
 
-        let domain_hash = ipfs::IPFSHash::from_proto(request.into_inner()).map_err( |e| {
+        let domain_hash = domain::Hash::from_proto(request.into_inner()).map_err( |e| {
             event!(Level::ERROR, msg = "unable to parse request proto as valid domain object", error = ?e);
             e
         })?;
@@ -82,14 +75,11 @@ impl Runtime {
     }
 
     #[instrument(skip(self, request))] // skip potentially-large request (TODO record stats w/o full message body)
-    async fn put_node_handler(
-        &self,
-        request: Request<IpfsNode>,
-    ) -> Result<Response<IpfsHash>, Status> {
+    async fn put_node_handler(&self, request: Request<Node>) -> Result<Response<Hash>, Status> {
         // extract explicit tracing id (if any)
         extract_tracing_id_and_record(request.metadata())?;
 
-        let domain_node = ipfs::DagNode::from_proto(request.into_inner()).map_err( |e| {
+        let domain_node = domain::Node::from_proto(request.into_inner()).map_err( |e| {
             event!(Level::ERROR, msg = "unable to parse request proto as valid domain object", error = ?e);
             e
         })?;
@@ -115,7 +105,7 @@ impl Runtime {
         // extract explicit tracing id (if any)
         extract_tracing_id_and_record(request.metadata())?;
 
-        let request = types::api::bulk_put::Req::from_proto(request.into_inner()).map_err( |e| {
+        let request = api::bulk_put::Req::from_proto(request.into_inner()).map_err( |e| {
             event!(Level::ERROR, msg = "unable to parse request proto as valid domain object", error = ?e);
             e
         })?;
@@ -155,7 +145,7 @@ impl Runtime {
 
 // NOTE: async_trait and instrument are mutually incompatible, so use non-async-trait fns and async trait stubs
 #[tonic::async_trait]
-impl server::IpfsCache for Runtime {
+impl server::DagStore for Runtime {
     async fn get_hash_for_key(
         &self,
         request: Request<GetHashForKeyReq>,
@@ -163,7 +153,7 @@ impl server::IpfsCache for Runtime {
         self.get_hash_for_key_handler(request).await
     }
 
-    async fn get_node(&self, request: Request<IpfsHash>) -> Result<Response<GetResp>, Status> {
+    async fn get_node(&self, request: Request<Hash>) -> Result<Response<GetResp>, Status> {
         self.get_node_handler(request).await
     }
 
@@ -171,12 +161,12 @@ impl server::IpfsCache for Runtime {
 
     async fn get_nodes(
         &self,
-        request: Request<IpfsHash>,
+        request: Request<Hash>,
     ) -> Result<Response<Self::GetNodesStream>, Status> {
         self.get_nodes_handler(request).await
     }
 
-    async fn put_node(&self, request: Request<IpfsNode>) -> Result<Response<IpfsHash>, Status> {
+    async fn put_node(&self, request: Request<Node>) -> Result<Response<Hash>, Status> {
         self.put_node_handler(request).await
     }
 

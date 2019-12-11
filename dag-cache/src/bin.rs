@@ -4,7 +4,7 @@ mod opts;
 mod server;
 mod utils;
 
-use dag_cache_types::types::grpc::server::IpfsCacheServer;
+use dag_cache_types::types::grpc::server::DagStoreServer;
 use opts::Opt;
 use structopt::StructOpt;
 use tonic::transport::Server;
@@ -23,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = bind_to.parse().unwrap();
 
     Server::builder()
-        .add_service(IpfsCacheServer::new(runtime))
+        .add_service(DagStoreServer::new(runtime))
         .serve(addr)
         .await?;
 

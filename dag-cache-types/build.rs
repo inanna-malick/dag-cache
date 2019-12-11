@@ -1,3 +1,3 @@
 fn main() {
-    tonic_build::compile_protos("proto/ipfs_cache.proto").unwrap();
+    tonic_build::compile_protos("proto/dagstore.proto").unwrap();
 }

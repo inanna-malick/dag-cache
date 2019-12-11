@@ -1,28 +1,25 @@
-use crate::types::ipfs::IPFSHash;
+use crate::types::domain::Hash;
+use std::error::Error;
 #[cfg(feature = "grpc")]
 use tonic::{Code, Status};
 
 #[derive(Debug)]
 pub enum DagCacheError {
-    IPFSError,
-    IPFSJsonError,
     ProtoDecodingError(ProtoDecodingError),
-    UnexpectedError { msg: String },
-    CASViolationError { actual_hash: Option<IPFSHash> },
+    UnexpectedError(String),
+    CASViolationError { actual_hash: Option<Hash> },
 }
 
 #[cfg(feature = "grpc")]
 impl From<DagCacheError> for Status {
     fn from(error: DagCacheError) -> Status {
         match error {
-            DagCacheError::IPFSError => Status::new(Code::Internal, "ipfs error"),
-            DagCacheError::IPFSJsonError => Status::new(Code::Internal, "ipfs json error"),
             DagCacheError::ProtoDecodingError(de) => Status::new(
                 Code::InvalidArgument,
-                "error decoding proto, ".to_owned() + &de.cause,
+                format!("error decoding proto, {:?}", de.description()),
             ),
-            DagCacheError::UnexpectedError { msg: s } => {
-                Status::new(Code::Internal, "unexpected error, ".to_owned() + &s)
+            DagCacheError::UnexpectedError(s) => {
+                Status::new(Code::Internal, format!("unexpected error: {:?}", s))
             }
             DagCacheError::CASViolationError { actual_hash } => Status::new(
                 Code::DeadlineExceeded,
@@ -32,10 +29,15 @@ impl From<DagCacheError> for Status {
     }
 }
 
-#[derive(Debug)]
-pub struct ProtoDecodingError {
-    pub cause: String,
+impl From<ProtoDecodingError> for DagCacheError {
+    fn from(error: ProtoDecodingError) -> DagCacheError {
+        DagCacheError::ProtoDecodingError(error)
+    }
 }
+
+
+#[derive(Debug)]
+pub struct ProtoDecodingError(pub String);
 
 impl std::fmt::Display for ProtoDecodingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -50,12 +52,12 @@ impl From<ProtoDecodingError> for Status {
     }
 }
 
-impl std::error::Error for ProtoDecodingError {
+impl Error for ProtoDecodingError {
     fn description(&self) -> &str {
-        &self.cause
+        &self.0
     }
 
-    fn cause(&self) -> Option<&dyn std::error::Error> {
+    fn cause(&self) -> Option<&dyn Error> {
         None
     }
 }

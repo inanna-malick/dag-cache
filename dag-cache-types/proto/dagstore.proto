@@ -1,19 +1,18 @@
 syntax = "proto3";
 
-package ipfscache;
+package dagstore;
 
-service IpfsCache {
+service DagStore {
   // NOTE: using 'string' here will detract from upgradability but whatevs
   rpc GetHashForKey(GetHashForKeyReq) returns (GetHashForKeyResp) {}
 
   // get a node, return it plus any children of that node reachable via the in-memory cache
-  rpc GetNode(IpfsHash) returns (GetResp) {}
+  rpc GetNode(Hash) returns (GetResp) {}
 
-  rpc GetNodes(IpfsHash) returns (stream IpfsNode) {}
+  rpc GetNodes(Hash) returns (stream Node) {}
 
-  rpc PutNode(IpfsNode) returns (IpfsHash) {}
+  rpc PutNode(Node) returns (Hash) {}
 
-  // TODO: mb figure out how to do as stream? nah, would remove ability to validate before any ipfs uploads performed
   rpc PutNodes(BulkPutReq) returns (BulkPutResp) {}
 }
 
@@ -22,58 +21,56 @@ message GetHashForKeyReq {
 }
 
 message GetHashForKeyResp {
-  IpfsHash hash = 1;
+  Hash hash = 1;
 }
 
 message GetResp {
-  IpfsNode requested_node = 1;
+  Node requested_node = 1;
   uint64 extra_node_count = 2;
-  repeated IpfsNodeWithHeader extra_nodes = 3;
+  repeated NodeWithHeader extra_nodes = 3;
 }
 
-message IpfsNodeWithHeader {
-    IpfsHeader header = 1;
-    IpfsNode node = 2;
+message NodeWithHeader {
+    Header header = 1;
+    Node node = 2;
 }
 
 message BulkPutReq {
-  BulkPutIpfsNode root_node = 1; // invariant: must be in list of nodes
-  repeated BulkPutIpfsNodeWithHash nodes = 2;
-
+  BulkPutNode root_node = 1;
+  repeated BulkPutNodeWithHash nodes = 2;
 
   // optional check-and-set - only write if cas_key is required_previous_hash
-  // NOTE: only putting this on BulkPutReq (& not PutNode req type) b/c that's my usage pattern
   CheckAndSet cas = 3;
 }
 
 message CheckAndSet {
-  IpfsHash required_previous_hash = 1;
+  Hash required_previous_hash = 1;
   string cas_key = 2;
 }
 
 message BulkPutResp {
-  IpfsHash root_hash = 1;
+  Hash root_hash = 1;
   repeated BulkPutRespPair additional_uploaded = 2;
 }
 
 message BulkPutRespPair {
-  IpfsHash hash = 1;
+  Hash hash = 1;
   ClientId client_id = 2;
 }
 
 message BulkPutLink {
   oneof link {
-    IpfsHeader in_ipfs = 1;
+    Header in_store = 1;
     ClientId in_req = 2;
   }
 }
 
-message BulkPutIpfsNodeWithHash {
+message BulkPutNodeWithHash {
   ClientId client_side_hash = 1;
-  BulkPutIpfsNode node = 2;
+  BulkPutNode node = 2;
 }
 
-message BulkPutIpfsNode {
+message BulkPutNode {
   bytes data = 1;
   repeated BulkPutLink links = 2;
 }
@@ -84,19 +81,19 @@ message ClientId {
 
 
 
-message IpfsHash {
+message Hash {
   string hash = 1; // base58 encoded string, to simplify grpc gui interactions
 }
 
-message IpfsHeader {
+message Header {
   string name = 1; // using this naming scheme so clients can do lazy diffing w/o having to upload a whole tree
-  IpfsHash hash = 2;
+  Hash hash = 2;
   uint64 size = 3;
 }
 
-message IpfsNode {
+message Node {
   bytes data = 1;
-  repeated IpfsHeader links = 2;
+  repeated Header links = 2;
 }
 
 

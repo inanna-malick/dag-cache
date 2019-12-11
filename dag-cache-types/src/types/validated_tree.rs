@@ -1,19 +1,19 @@
-use crate::types::api::bulk_put::{DagNode, DagNodeLink};
+use crate::types::api::bulk_put::{Node, NodeLink};
 use crate::types::api::ClientId;
 use std::collections::HashMap;
 
 // ephemeral, used for data structure in memory
 #[derive(Debug)]
 pub struct ValidatedTree {
-    pub root_node: DagNode,
-    pub nodes: HashMap<ClientId, DagNode>,
+    pub root_node: Node,
+    pub nodes: HashMap<ClientId, Node>,
 }
 
 // TODO: tests
 impl ValidatedTree {
     pub fn validate(
-        root_node: DagNode,
-        nodes: HashMap<ClientId, DagNode>,
+        root_node: Node,
+        nodes: HashMap<ClientId, Node>,
     ) -> Result<ValidatedTree, DagTreeBuildErr> {
         let mut node_visited_count = 0;
         let mut stack = Vec::new();
@@ -21,9 +21,9 @@ impl ValidatedTree {
         for node_link in root_node.links.iter() {
             match node_link {
                 // reference to node in map, must verify
-                DagNodeLink::Local(csh) => stack.push(csh.clone()),
+                NodeLink::Local(csh) => stack.push(csh.clone()),
                 // no-op, valid by definition
-                DagNodeLink::Remote(_) => {}
+                NodeLink::Remote(_) => {}
             }
         }
 
@@ -34,9 +34,9 @@ impl ValidatedTree {
                     for node_link in node.links.iter() {
                         match node_link {
                             // reference to node in map, must verify
-                            DagNodeLink::Local(csh) => stack.push(csh.clone()),
+                            NodeLink::Local(csh) => stack.push(csh.clone()),
                             // no-op, valid by definition
-                            DagNodeLink::Remote(_) => {}
+                            NodeLink::Remote(_) => {}
                         }
                     }
                 }

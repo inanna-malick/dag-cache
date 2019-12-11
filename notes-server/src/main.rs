@@ -1,19 +1,22 @@
-// #![deny(warnings)]
+#![deny(warnings)]
 
 mod opts;
 
-use crate::opts::Runtime;
-use dag_cache_types::types::api::{bulk_put, get};
-use dag_cache_types::types::grpc::{self, client::IpfsCacheClient};
-use dag_cache_types::types::ipfs;
-use opts::Opt;
+use dag_cache_types::types::{
+    api::{bulk_put, get},
+    grpc::{self, client::DagStoreClient},
+    domain,
+};
+use opts::{Runtime, Opt};
 use serde::Serialize;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::Arc;
+use serde_json::json;
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    sync::Arc,
+};
 use structopt::StructOpt;
 use tracing::instrument;
 use warp::{reject, Filter};
-use serde_json::json;
 
 // TODO: struct w/ domain types & etc
 #[derive(Debug)]
@@ -44,15 +47,15 @@ fn get_ctx() -> Arc<Runtime> {
 async fn get_nodes(
     url: String,
     raw_hash: String,
-) -> Result<notes_types::GetResp, Box<dyn std::error::Error + Send + Sync + 'static>> {
+) -> Result<notes_types::api::GetResp, Box<dyn std::error::Error + Send + Sync + 'static>> {
     println!("parsed hash {} from path", raw_hash);
 
-    let mut client = IpfsCacheClient::connect(url)
+    let mut client = DagStoreClient::connect(url)
         .await
         .map_err(|e| Box::new(e))?;
 
     // TODO: validate base58 here
-    let mut request = tonic::Request::new(grpc::IpfsHash { hash: raw_hash });
+    let mut request = tonic::Request::new(grpc::Hash { hash: raw_hash });
 
     let meta = request.metadata_mut();
     meta.insert("trace_id", "traceid-test-8".parse().unwrap());
@@ -61,25 +64,25 @@ async fn get_nodes(
 
     let response = get::Resp::from_proto(response.into_inner()).map_err(|e| Box::new(e))?;
 
-    let response = notes_types::GetResp::from_generic(response)?;
+    let response = notes_types::api::GetResp::from_generic(response)?;
     Ok(response)
 }
 
 #[instrument]
 async fn get_initial_state(
     url: String,
-) -> Result<Option<ipfs::IPFSHash>, Box<dyn std::error::Error + Send + Sync + 'static>> {
+) -> Result<Option<domain::Hash>, Box<dyn std::error::Error + Send + Sync + 'static>> {
     println!("fetching initialstate");
 
     // TODO: using hardcoded local path - moving to structopt args would be nice
-    let mut client = IpfsCacheClient::connect(url)
+    let mut client = DagStoreClient::connect(url)
         .await
         .map_err(|e| Box::new(e))?;
 
     // TODO: validate base58 here
     // TODO: dedup cas hash
     let mut request = tonic::Request::new(grpc::GetHashForKeyReq {
-        key: notes_types::CAS_KEY.to_string(),
+        key: notes_types::api::CAS_KEY.to_string(),
     });
 
     let meta = request.metadata_mut();
@@ -90,7 +93,7 @@ async fn get_initial_state(
     let response = response
         .into_inner()
         .hash
-        .map(|p| ipfs::IPFSHash::from_proto(p))
+        .map(|p| domain::Hash::from_proto(p))
         .transpose()
         .map_err(|e| Box::new(e))?;
 
@@ -100,14 +103,14 @@ async fn get_initial_state(
 #[instrument]
 async fn put_nodes(
     url: String,
-    put_req: notes_types::PutReq,
+    put_req: notes_types::api::PutReq,
 ) -> Result<bulk_put::Resp, Box<dyn std::error::Error + Send + Sync + 'static>> {
     println!("got req {:?} body", put_req);
 
     let put_req = put_req.into_generic()?;
 
     // TODO: better mgmt for grpc port/host
-    let mut client = IpfsCacheClient::connect(url)
+    let mut client = DagStoreClient::connect(url)
         .await
         .map_err(|e| Box::new(e))?;
 
@@ -120,7 +123,7 @@ async fn put_nodes(
 
     let response = client.put_nodes(request).await.map_err(|e| Box::new(e))?;
 
-    // NOTE: no need to use specific repr, ipfs hash and client id are generic enough
+    // NOTE: no need to use specific repr, hash and client id are generic enough
     let response = bulk_put::Resp::from_proto(response.into_inner()).map_err(|e| Box::new(e))?;
 
     Ok(response)
@@ -158,43 +161,40 @@ async fn main() {
             }
         });
 
-    let index_route = warp::get()
-        .and(warp::path::end())
-        .and_then(|| {
-            async {
-                let url = get_ctx().dag_cache_url.to_string();
-                let res = get_initial_state(url).await;
+    let index_route = warp::get().and(warp::path::end()).and_then(|| {
+        async {
+            let url = get_ctx().dag_cache_url.to_string();
+            let res = get_initial_state(url).await;
 
-                match res {
-                    Ok(resp) => {
-                        println!("initial state resp: {:?}", &resp);
-                        let t = match resp {
-                            Some(h) => crate::opts::WithTemplate {
-                                name: "index.html",
-                                value: json!({"initial_hash" : format!("{}", h) }),
-                            },
-                            None => crate::opts::WithTemplate {
-                                name: "index.html",
-                                value: json!({"initial_hash" : ""}),
-                            }
-
-                        };
-                        Ok(get_ctx().render(t))
-                    }
-                    Err(e) => {
-                        println!("err on get initial state: {:?}", e);
-                        Err(reject::custom::<Error>(Error(e)))
-                    }
+            match res {
+                Ok(resp) => {
+                    println!("initial state resp: {:?}", &resp);
+                    let t = match resp {
+                        Some(h) => crate::opts::WithTemplate {
+                            name: "index.html",
+                            value: json!({ "initial_hash": format!("{}", h) }),
+                        },
+                        None => crate::opts::WithTemplate {
+                            name: "index.html",
+                            value: json!({"initial_hash" : ""}),
+                        },
+                    };
+                    Ok(get_ctx().render(t))
+                }
+                Err(e) => {
+                    println!("err on get initial state: {:?}", e);
+                    Err(reject::custom::<Error>(Error(e)))
                 }
             }
-        });
+        }
+    });
 
     let post_route = warp::post()
         .and(warp::path("nodes"))
         .and(warp::body::content_length_limit(1024 * 16)) // arbitrary?
         .and(warp::body::json())
         // .end()
-        .and_then(|put_req: notes_types::PutReq| {
+        .and_then(|put_req: notes_types::api::PutReq| {
             async move {
                 let url = get_ctx().dag_cache_url.to_string();
                 let res = put_nodes(url, put_req).await;
@@ -235,14 +235,14 @@ mod tests {
         let state = get_initial_state(url.to_string()).await.unwrap();
         assert_eq!(state, None);
 
-        let node = notes_types::Node {
+        let node = notes_types::notes::Node {
             parent: None, // _not_ T, constant type. NOTE: enforces that this is a TREE and not a DAG
             children: Vec::new(),
             header: "hdr".to_string(),
             body: "body".to_string(),
         };
 
-        let put_req = notes_types::PutReq {
+        let put_req = notes_types::api::PutReq {
             head_node: node,
             extra_nodes: HashMap::new(),
             cas_hash: None,
@@ -260,7 +260,7 @@ mod tests {
         // - get tree, recursive expansion of same (NOTE: only one layer currently)
         let get_resp = get_nodes(url.to_string(), hash.to_string()).await.unwrap();
 
-        let expected_node = notes_types::Node {
+        let expected_node = notes_types::notes::Node {
             parent: None, // _not_ T, constant type. NOTE: enforces that this is a TREE and not a DAG
             children: Vec::new(),
             header: "hdr".to_string(),

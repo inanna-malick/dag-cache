@@ -1,8 +1,8 @@
-use crate::capabilities::lib::put_and_cache;
+use crate::capabilities::put_and_cache;
 use crate::capabilities::{Cache, HashedBlobStore, MutableHashStore};
 use dag_cache_types::types::api::{bulk_put, ClientId};
+use dag_cache_types::types::domain::{Hash, Header, Node};
 use dag_cache_types::types::errors::DagCacheError;
-use dag_cache_types::types::ipfs::{DagNode, IPFSHash, IPFSHeader};
 use dag_cache_types::types::validated_tree::ValidatedTree;
 use futures::future::FutureExt;
 use futures::Future;
@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tokio;
 use tokio::sync::oneshot;
 use tracing::error;
-use tracing::{info};
+use tracing::info;
 
 // TODO: how to make this transactional while maintaining caps approach? ans: have an impl of the ipfsCap (TODO: rename to hash store)
 // that is the _transaction-scoped_ tree - pretty sure this is supported. will likely need to move to dyn
@@ -66,8 +66,8 @@ async fn ipfs_publish_cata_unsafe(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
     tree: Arc<ValidatedTree>, // todo use async/await I guess, mb can avoid needing Arc? ugh
-    node: bulk_put::DagNode,
-) -> Result<(u64, IPFSHash, Vec<(ClientId, IPFSHash)>), DagCacheError> {
+    node: bulk_put::Node,
+) -> Result<(u64, Hash, Vec<(ClientId, Hash)>), DagCacheError> {
     let (send, receive) = oneshot::channel();
 
     let f = ipfs_publish_worker(store, cache, tree, send, node);
@@ -78,10 +78,10 @@ async fn ipfs_publish_cata_unsafe(
     match recvd {
         Ok(x) => x,
         Err(e) => {
-            let e = DagCacheError::UnexpectedError {
+            let e = DagCacheError::UnexpectedError(
                 // todo capture recv error
-                msg: format!("one shot channel cancelled, {:?}", e),
-            }; // one-shot channel cancelled
+                format!("one shot channel cancelled, {:?}", e),
+            ); // one-shot channel cancelled
             Err(e)
         }
     }
@@ -90,11 +90,11 @@ async fn ipfs_publish_cata_unsafe(
 async fn upload_link(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
-    x: bulk_put::DagNodeLink,
+    x: bulk_put::NodeLink,
     tree: Arc<ValidatedTree>,
-) -> Result<(IPFSHeader, Vec<(ClientId, IPFSHash)>), DagCacheError> {
+) -> Result<(Header, Vec<(ClientId, Hash)>), DagCacheError> {
     match x {
-        bulk_put::DagNodeLink::Local(client_id) => {
+        bulk_put::NodeLink::Local(client_id) => {
             // NOTE: could be more efficient by removing node from tree but would break
             // guarantees provided by ValidatedTree (by removing nodes)
             // NOTE: not possible, really - would need Mut access to the hashmap to do that
@@ -104,7 +104,7 @@ async fn upload_link(
 
             let (size, hash, mut additional_uploaded) =
                 ipfs_publish_cata_unsafe(store, cache.clone(), tree.clone(), node.clone()).await?;
-            let hdr = IPFSHeader {
+            let hdr = Header {
                 name: client_id.to_string(),
                 size,
                 hash,
@@ -112,7 +112,7 @@ async fn upload_link(
             additional_uploaded.push((client_id, hdr.hash.clone()));
             Ok((hdr, additional_uploaded))
         }
-        bulk_put::DagNodeLink::Remote(hdr) => Ok((hdr.clone(), Vec::new())),
+        bulk_put::NodeLink::Remote(hdr) => Ok((hdr.clone(), Vec::new())),
     }
 }
 
@@ -121,11 +121,11 @@ fn ipfs_publish_worker(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
     tree: Arc<ValidatedTree>,
-    chan: oneshot::Sender<Result<(u64, IPFSHash, Vec<(ClientId, IPFSHash)>), DagCacheError>>,
+    chan: oneshot::Sender<Result<(u64, Hash, Vec<(ClientId, Hash)>), DagCacheError>>,
     // TODO: pass around pointers to node in stack frame (hm keys) instead of nodes
     // OR NOT: struct is quite small, even if the owned-by-it vec of u8/vec of links is big
     // TODO: ask rain
-    node: bulk_put::DagNode,
+    node: bulk_put::Node,
 ) -> Box<dyn Future<Output = ()> + Unpin + Send> {
     let f = ipfs_publish_worker_async(store, cache, tree, node)
         .map(move |res| {
@@ -147,9 +147,9 @@ async fn ipfs_publish_worker_async(
     // TODO: pass around pointers to node in stack frame (hm keys) instead of nodes
     // OR NOT: struct is quite small, even if the owned-by-it vec of u8/vec of links is big
     // TODO: ask rain
-    node: bulk_put::DagNode,
-) -> Result<(u64, IPFSHash, Vec<(ClientId, IPFSHash)>), DagCacheError> {
-    let bulk_put::DagNode { data, links } = node;
+    node: bulk_put::Node,
+) -> Result<(u64, Hash, Vec<(ClientId, Hash)>), DagCacheError> {
+    let bulk_put::Node { data, links } = node;
 
     let size = data.0.len() as u64;
 
@@ -164,11 +164,11 @@ async fn ipfs_publish_worker_async(
         .into_iter()
         .collect::<Result<Vec<_>, DagCacheError>>()?;
 
-    let additional_uploaded: Vec<(ClientId, IPFSHash)> =
+    let additional_uploaded: Vec<(ClientId, Hash)> =
         links.iter().map(|x| x.1.clone()).flatten().collect();
 
     let links = links.into_iter().map(|x| x.0).collect();
-    let dag_node = DagNode { data, links };
+    let dag_node = Node { data, links };
 
     // might be a bit of an approximation, but w/e
     let size = size + dag_node.links.iter().map(|x| x.size).sum::<u64>();
@@ -183,26 +183,26 @@ mod tests {
     use async_trait::async_trait;
     use dag_cache_types::types::encodings::{Base58, Base64};
     use dag_cache_types::types::errors::DagCacheError;
-    use dag_cache_types::types::ipfs::{DagNode, IPFSHash};
+    use dag_cache_types::types::ipfs::{Hash, Node};
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    struct MockStore(Mutex<HashMap<IPFSHash, DagNode>>);
+    struct MockStore(Mutex<HashMap<Hash, Node>>);
 
     // TODO: separate read/write caps to simplify writing this?
     #[async_trait]
     impl HashedBlobStore for MockStore {
-        async fn get(&self, k: IPFSHash) -> Result<DagNode, DagCacheError> {
+        async fn get(&self, k: Hash) -> Result<Node, DagCacheError> {
             let map = self.0.lock().unwrap();
             let v = map.get(&k).unwrap(); // fail if not found in map
             Ok(v.clone())
         }
 
-        async fn put(&self, v: DagNode) -> Result<IPFSHash, DagCacheError> {
+        async fn put(&self, v: Node) -> Result<Hash, DagCacheError> {
             let mut map = self.0.lock().unwrap(); // fail on mutex poisoned
 
             // use map len (monotonic increasing) to provide unique hash ID
-            let hash = IPFSHash::from_raw(Base58::from_bytes(vec![map.len() as u8]));
+            let hash = Hash::from_raw(Base58::from_bytes(vec![map.len() as u8]));
 
             map.insert(hash.clone(), v);
 
@@ -216,26 +216,26 @@ mod tests {
         //build some client side 'hashes' - base58 of 1, 2, 3, 4
         let client_ids: Vec<ClientId> = (1..4).map(|x| ClientId::new(format!("{}", x))).collect();
 
-        let t0 = bulk_put::DagNode {
+        let t0 = bulk_put::Node {
             links: vec![],
             data: Base64(vec![1, 3, 3, 7]),
         };
 
-        let t1 = bulk_put::DagNode {
+        let t1 = bulk_put::Node {
             links: vec![],
             data: Base64(vec![3, 1, 4, 1, 5]),
         };
 
-        let t2 = bulk_put::DagNode {
+        let t2 = bulk_put::Node {
             links: vec![
-                bulk_put::DagNodeLink::Local(client_ids[0].clone()),
-                bulk_put::DagNodeLink::Local(client_ids[1].clone()),
+                bulk_put::NodeLink::Local(client_ids[0].clone()),
+                bulk_put::NodeLink::Local(client_ids[1].clone()),
             ],
             data: Base64(vec![3, 1, 4, 1, 5]),
         };
 
-        let t3 = bulk_put::DagNode {
-            links: vec![bulk_put::DagNodeLink::Local(client_ids[2].clone())],
+        let t3 = bulk_put::Node {
+            links: vec![bulk_put::NodeLink::Local(client_ids[2].clone())],
             data: Base64(vec![0, 1, 1, 2, 3, 5]),
         };
 
@@ -258,7 +258,7 @@ mod tests {
 
         let uploaded_values: Vec<(Vec<ClientId>, Base64)> = map
             .values()
-            .map(|DagNode { links, data }| {
+            .map(|Node { links, data }| {
                 (
                     links
                         .iter()

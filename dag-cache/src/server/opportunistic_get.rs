@@ -1,8 +1,8 @@
-use crate::capabilities::lib::get_and_cache;
+use crate::capabilities::get_and_cache;
 use crate::capabilities::{Cache, HashedBlobStore};
-use dag_cache_types::types::api as api_types;
+use dag_cache_types::types::api;
+use dag_cache_types::types::domain::{Hash, Node, NodeWithHeader};
 use dag_cache_types::types::errors::DagCacheError;
-use dag_cache_types::types::ipfs as ipfs_types;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tracing::info;
@@ -12,8 +12,8 @@ use tracing::instrument;
 pub async fn get(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
-    k: ipfs_types::IPFSHash,
-) -> Result<api_types::get::Resp, DagCacheError> {
+    k: Hash,
+) -> Result<api::get::Resp, DagCacheError> {
     let dag_node = get_and_cache(store.clone(), cache.clone(), k).await?;
 
     // use cache to extend DAG node by following links as long as they exist in-memory
@@ -23,7 +23,7 @@ pub async fn get(
 }
 
 // TODO: figure out traversal termination strategy - don't want to return whole cache in one resp
-fn extend(cache: Arc<Cache>, node: ipfs_types::DagNode) -> api_types::get::Resp {
+fn extend(cache: Arc<Cache>, node: Node) -> api::get::Resp {
     let mut frontier = VecDeque::new();
     let mut res = Vec::new();
 
@@ -45,14 +45,14 @@ fn extend(cache: Arc<Cache>, node: ipfs_types::DagNode) -> api_types::get::Resp 
                 "add node with hash {:?} to opportunistic get result",
                 hp.clone()
             );
-            res.push(ipfs_types::DagNodeWithHeader {
+            res.push(NodeWithHeader {
                 header: hp,
                 node: dn,
             });
         }
     }
 
-    api_types::get::Resp {
+    api::get::Resp {
         requested_node: node,
         extra_node_count: res.len() as u64,
         extra_nodes: res,
