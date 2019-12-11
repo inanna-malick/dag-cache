@@ -11,7 +11,7 @@ use yew::events::IKeyboardEvent;
 use yew::format::{Json, Nothing};
 use yew::services::fetch::{FetchService, FetchTask, Request, Response};
 use yew::services::interval::{IntervalService, IntervalTask};
-use yew::{html, Component, ComponentLink, Html, ShouldRender};
+use yew::{html, Component, ComponentLink, Html, Properties, ShouldRender};
 
 macro_rules! println {
     ($($tt:tt)*) => {{
@@ -82,18 +82,16 @@ pub enum Msg {
     StartSave,            // init backup of everything in store - blocking operation, probably
     SaveComplete(NodeId, api_types::bulk_put::Resp),
     NoOp,
+    // TODO: use https://gomakethings.com/how-to-test-if-an-element-is-in-the-viewport-with-vanilla-javascript/
+    // TODO: to trigger lazy loading when a lazy-loaded element enters the viewport (is on-screen)
+    // LazyLoadOnScroll,
 }
 
 #[derive(serde::Deserialize, Debug)]
-pub struct Arg(pub Option<TypedHash<CannonicalNode>>);
-
-js_deserializable!(Arg);
-
-impl yew::html::Properties for Arg {
-    type Builder = Box<dyn Fn(Option<TypedHash<CannonicalNode>>) -> Arg>;
-    fn builder() -> Self::Builder {
-        Box::new(|x| Arg(x))
-    }
+#[derive(PartialEq, Properties)]
+pub struct Arg {
+    #[props(required)]
+    pub hash: Option<TypedHash<CannonicalNode>>,
 }
 
 impl Component for State {
@@ -107,7 +105,7 @@ impl Component for State {
         println!("starting with: {:?}", &opt_hash);
 
         let (entry_point, last_known_hash) = match opt_hash {
-            Arg(None) => {
+            Arg { hash: None } => {
                 // todo use backend storage (pointer only, rest is easy)
                 let fresh_root = InMemNode {
                     hash: None,             // not persisted
@@ -117,7 +115,7 @@ impl Component for State {
                 nodes.insert(id, fresh_root);
                 (NodeRef::Modified(id), None)
             }
-            Arg(Some(h)) => {
+            Arg { hash: Some(h) } => {
                 // todo: need hash _and_ node id, fuck me/FIXME
                 // TODO (temp): magic hash for root node, always just use '0'.
                 // TODO (actual): root object is 'Root { root_id: x, root_hash: y, metadata: ...}, id'd by hash.

@@ -11,12 +11,12 @@ fn main() {
     let arg: notes::Arg = match value {
         stdweb::Value::String(s) => {
             if s.is_empty() {
-                notes::Arg(None)
+                notes::Arg { hash: None }
             } else {
                 let hash = Hash::from_string(&s)
                     .expect("unable to parse hash (handlebar template bug, FIXME)")
                     .promote::<CannonicalNode>();
-                notes::Arg(Some(hash))
+                notes::Arg { hash: Some(hash) }
             }
         }
         _ => panic!("unexpected type from handlebar template, FIXME"),
