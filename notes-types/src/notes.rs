@@ -1,5 +1,5 @@
 use crate::api::{ParseError, Result};
-use dag_cache_types::types::{
+use dag_store_types::types::{
     api,
     domain::{self, TypedHash},
     encodings,

@@ -1,6 +1,6 @@
 use crate::notes;
-use dag_cache_types::types::domain::TypedHash;
-use dag_cache_types::types::{api, validated_tree::ValidatedTree};
+use dag_store_types::types::domain::TypedHash;
+use dag_store_types::types::{api, validated_tree::ValidatedTree};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;

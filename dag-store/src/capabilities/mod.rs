@@ -1,8 +1,8 @@
 pub mod cache;
 pub mod store;
 pub use crate::capabilities::cache::Cache;
-use dag_cache_types::types::domain::{Hash, Node};
-use dag_cache_types::types::errors::DagCacheError;
+use dag_store_types::types::domain::{Hash, Node};
+use dag_store_types::types::errors::DagCacheError;
 use std::sync::Arc;
 use tracing::info;
 use tracing::instrument;

@@ -1,12 +1,11 @@
 #![recursion_limit = "512"]
 
-use dag_cache_types::types::api as api_types;
-use dag_cache_types::types::domain::TypedHash;
+use dag_store_types::types::api as api_types;
+use dag_store_types::types::domain::TypedHash;
 use notes_types::notes::{CannonicalNode, Node, NodeId, NodeRef, RemoteNodeRef};
 use rand;
 use std::collections::HashMap;
 use stdweb::js;
-use stdweb::js_deserializable;
 use yew::events::IKeyboardEvent;
 use yew::format::{Json, Nothing};
 use yew::services::fetch::{FetchService, FetchTask, Request, Response};

@@ -2,12 +2,14 @@
 
 mod opts;
 
-use dag_cache_types::types::{
-    api::{bulk_put, get},
-    grpc::{self, client::DagStoreClient},
+use dag_store_types::types::{
+    api::{bulk_put, get, meta},
     domain,
+    grpc::{self, client::DagStoreClient},
 };
-use opts::{Runtime, Opt};
+use honeycomb_tracing::{TraceCtx, TraceId};
+use opts::{Opt, Runtime};
+use prost::Message;
 use serde::Serialize;
 use serde_json::json;
 use std::{
@@ -15,6 +17,7 @@ use std::{
     sync::Arc,
 };
 use structopt::StructOpt;
+use tonic::metadata::MetadataValue;
 use tracing::instrument;
 use warp::{reject, Filter};
 
@@ -43,11 +46,40 @@ fn get_ctx() -> Arc<Runtime> {
     }
 }
 
+fn register_trace_root() {
+    let trace_id = TraceId::generate();
+    println!("generated trace id {:?}", &trace_id);
+    TraceCtx {
+        trace_id,
+        parent_span: None,
+    }
+    .record_on_current_span();
+}
+
+fn add_tracing_to_meta<T>(request: &mut tonic::Request<T>) {
+    let current_trace_ctx = TraceCtx::eval_current_trace_ctx();
+
+    if let Some(ctx) = current_trace_ctx {
+        let meta = request.metadata_mut();
+        let ctx: grpc::TraceCtx = meta::trace_ctx_into_proto(ctx);
+        let mut buf = vec![];
+        ctx.encode(&mut buf)
+            .expect("error writing proto msg to buffer");
+
+        println!("writing binary into meta: {:?}", &buf);
+
+        meta.insert_bin("trace-ctx-bin", MetadataValue::from_bytes(&buf));
+
+        println!("modified meta: {:?}", &meta);
+    };
+}
+
 #[instrument]
 async fn get_nodes(
     url: String,
     raw_hash: String,
 ) -> Result<notes_types::api::GetResp, Box<dyn std::error::Error + Send + Sync + 'static>> {
+    register_trace_root();
     println!("parsed hash {} from path", raw_hash);
 
     let mut client = DagStoreClient::connect(url)
@@ -56,9 +88,7 @@ async fn get_nodes(
 
     // TODO: validate base58 here
     let mut request = tonic::Request::new(grpc::Hash { hash: raw_hash });
-
-    let meta = request.metadata_mut();
-    meta.insert("trace_id", "traceid-test-8".parse().unwrap());
+    add_tracing_to_meta(&mut request);
 
     let response = client.get_node(request).await.map_err(|e| Box::new(e))?;
 
@@ -72,6 +102,7 @@ async fn get_nodes(
 async fn get_initial_state(
     url: String,
 ) -> Result<Option<domain::Hash>, Box<dyn std::error::Error + Send + Sync + 'static>> {
+    register_trace_root();
     println!("fetching initialstate");
 
     // TODO: using hardcoded local path - moving to structopt args would be nice
@@ -84,10 +115,7 @@ async fn get_initial_state(
     let mut request = tonic::Request::new(grpc::GetHashForKeyReq {
         key: notes_types::api::CAS_KEY.to_string(),
     });
-
-    let meta = request.metadata_mut();
-    // TODO: propagate proto trace ctx here instead of just ID
-    meta.insert("trace_id", "traceid-test-8".parse().unwrap());
+    add_tracing_to_meta(&mut request);
 
     let response = client.get_hash_for_key(request).await?;
     let response = response
@@ -105,6 +133,7 @@ async fn put_nodes(
     url: String,
     put_req: notes_types::api::PutReq,
 ) -> Result<bulk_put::Resp, Box<dyn std::error::Error + Send + Sync + 'static>> {
+    register_trace_root();
     println!("got req {:?} body", put_req);
 
     let put_req = put_req.into_generic()?;
@@ -116,10 +145,7 @@ async fn put_nodes(
 
     // TODO: validate base58 here
     let mut request = tonic::Request::new(put_req.into_proto());
-
-    let meta = request.metadata_mut();
-    // TODO: figure out better encoding, 3 u64/string id fields
-    meta.insert("trace_id", "traceid-test-8".parse().unwrap());
+    add_tracing_to_meta(&mut request);
 
     let response = client.put_nodes(request).await.map_err(|e| Box::new(e))?;
 
@@ -143,7 +169,7 @@ async fn main() {
         .and_then({
             |raw_hash: String| {
                 async move {
-                    let url = get_ctx().dag_cache_url.to_string();
+                    let url = get_ctx().dag_store_url.to_string();
                     let res = get_nodes(url, raw_hash).await;
 
                     match res {
@@ -163,7 +189,7 @@ async fn main() {
 
     let index_route = warp::get().and(warp::path::end()).and_then(|| {
         async {
-            let url = get_ctx().dag_cache_url.to_string();
+            let url = get_ctx().dag_store_url.to_string();
             let res = get_initial_state(url).await;
 
             match res {
@@ -196,7 +222,7 @@ async fn main() {
         // .end()
         .and_then(|put_req: notes_types::api::PutReq| {
             async move {
-                let url = get_ctx().dag_cache_url.to_string();
+                let url = get_ctx().dag_store_url.to_string();
                 let res = put_nodes(url, put_req).await;
 
                 match res {

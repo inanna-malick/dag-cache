@@ -1,3 +1,3 @@
 FROM scratch
-COPY dag-cache /
+COPY dag-store /
 WORKDIR /

@@ -1,5 +1,5 @@
 [package]
-name = "dag-cache-types"
+name = "dag-store-types"
 version = "0.1.0"
 authors = ["pk <pkinsky@gmail.com>"]
 edition = "2018"

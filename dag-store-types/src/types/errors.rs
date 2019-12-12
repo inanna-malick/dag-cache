@@ -35,7 +35,6 @@ impl From<ProtoDecodingError> for DagCacheError {
     }
 }
 
-
 #[derive(Debug)]
 pub struct ProtoDecodingError(pub String);
 

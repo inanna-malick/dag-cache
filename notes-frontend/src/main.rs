@@ -1,4 +1,4 @@
-use dag_cache_types::types::domain::Hash;
+use dag_store_types::types::domain::Hash;
 use notes_types::notes::CannonicalNode;
 use stdweb::js;
 

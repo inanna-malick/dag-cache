@@ -1,8 +1,8 @@
 use crate::capabilities::{HashedBlobStore, MutableHashStore};
 use blake2::{Blake2b, Digest};
-use dag_cache_types::types::domain::{Hash, Node};
-use dag_cache_types::types::encodings;
-use dag_cache_types::types::errors::{DagCacheError, ProtoDecodingError};
+use dag_store_types::types::domain::{Hash, Node};
+use dag_store_types::types::encodings;
+use dag_store_types::types::errors::{DagCacheError, ProtoDecodingError};
 use serde_json;
 use sled::Db;
 use tracing::info;
@@ -30,10 +30,7 @@ impl FileSystemStore {
         match self.0.get(format!("{}.blake2", hash)) {
             Ok(Some(value)) => {
                 let node = serde_json::from_reader(value.as_ref()).map_err(|e| {
-                    ProtoDecodingError(format!(
-                        "error parsing proto file: {:?}",
-                        e
-                    ))
+                    ProtoDecodingError(format!("error parsing proto file: {:?}", e))
                 })?;
                 Ok(node)
             }

@@ -1,8 +1,8 @@
 use crate::capabilities::get_and_cache;
 use crate::capabilities::{Cache, HashedBlobStore};
 use chashmap::CHashMap;
-use dag_cache_types::types::domain::{Hash, Node};
-use dag_cache_types::types::errors::DagCacheError;
+use dag_store_types::types::domain::{Hash, Node};
+use dag_store_types::types::errors::DagCacheError;
 use futures::channel::mpsc;
 use futures::sink::SinkExt;
 use std::sync::Arc;

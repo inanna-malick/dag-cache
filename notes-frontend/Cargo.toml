@@ -10,7 +10,7 @@ serde = "1"
 serde_derive = "1"
 yew = "0.10"
 rand = { version = "0.7", features = ["stdweb"] }
-dag-cache-types = { path = "../../dag-cache/dag-cache-types", features = ["minimal"] }
-notes-types = { path = "../../dag-cache/notes-types" }
+dag-store-types = { path = "../../dag-store/dag-store-types", features = ["minimal"] }
+notes-types = { path = "../../dag-store/notes-types" }
 failure = "0.1.6"
 stdweb = "0.4"

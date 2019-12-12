@@ -3,14 +3,16 @@ use crate::capabilities::{Cache, HashedBlobStore, MutableHashStore};
 use crate::server::batch_get;
 use crate::server::batch_put;
 use crate::server::opportunistic_get;
-use dag_cache_types::types::{
+use dag_store_types::types::{
     api, domain,
     grpc::{
-        server, BulkPutReq, BulkPutResp, GetHashForKeyReq, GetHashForKeyResp, GetResp, Hash, Node,
+        self, server, BulkPutReq, BulkPutResp, GetHashForKeyReq, GetHashForKeyResp, GetResp, Hash,
+        Node,
     },
 };
 use futures::{Stream, StreamExt};
 use honeycomb_tracing::{TraceCtx, TraceId};
+use prost::Message;
 use std::sync::Arc;
 use tonic::{Code, Request, Response, Status};
 use tracing::{event, info, instrument, Level};
@@ -180,23 +182,34 @@ impl server::DagStore for Runtime {
 
 /// Extract a tracing id from the provided metadata
 fn extract_tracing_id_and_record(meta: &tonic::metadata::MetadataMap) -> Result<(), Status> {
-    match meta.get("trace_id") {
-        Some(s) => {
-            let tracing_id = s.to_str().map_err(|e| {
-                event!(Level::ERROR, msg = "unable to parse trace_id header as ascii string", error = ?e);
+    println!("got meta: {:?}", &meta);
+    match meta.get_bin("trace-ctx-bin") {
+        Some(b) => {
+            let b = b.to_bytes().map_err(|e| {
+                event!(Level::ERROR, msg = "died converting to bytes", error = ?e);
                 Status::new(
                     Code::InvalidArgument,
-                    format!("unable to parse trace_id header as ascii string: {:?}", e),
+                    format!("died converting to bytes: {:?}", e),
+                )
+            })?;
+            println!("got key for binary from meta: {:?}", &b);
+            let trace_ctx = grpc::TraceCtx::decode(b).map_err(|e| {
+                event!(Level::ERROR, msg = "unable to parse trace-ctx-bin metadata value as proto", error = ?e);
+                Status::new(
+                    Code::InvalidArgument,
+                    format!("unable to parse trace_id header as proto: {:?}", e),
                 )
             })?;
 
-            let trace_id = TraceId::new(tracing_id.to_string());
-            println!("got trace id {:?} from req headers", &trace_id);
-            TraceCtx {
-                trace_id,
-                parent_span: None,
-            }
-            .record_on_current_span();
+            let trace_ctx = api::meta::trace_ctx_from_proto(trace_ctx).map_err(|e| {
+                event!(Level::ERROR, msg = "unable to decode trace_ctx proto into domain form", error = ?e);
+                Status::new(
+                    Code::InvalidArgument,
+                    format!("unable to decode trace_ctx proto into domain form, {:?}", e),
+                )
+            })?;
+
+            trace_ctx.record_on_current_span();
 
             Ok(())
         }

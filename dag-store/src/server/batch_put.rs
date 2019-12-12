@@ -1,9 +1,11 @@
 use crate::capabilities::put_and_cache;
 use crate::capabilities::{Cache, HashedBlobStore, MutableHashStore};
-use dag_cache_types::types::api::{bulk_put, ClientId};
-use dag_cache_types::types::domain::{Hash, Header, Node};
-use dag_cache_types::types::errors::DagCacheError;
-use dag_cache_types::types::validated_tree::ValidatedTree;
+use dag_store_types::types::{
+    api::{bulk_put, ClientId},
+    domain::{Hash, Header, Node},
+    errors::DagCacheError,
+    validated_tree::ValidatedTree,
+};
 use futures::future::FutureExt;
 use futures::Future;
 use std::sync::Arc;
@@ -181,9 +183,9 @@ async fn ipfs_publish_worker_async(
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use dag_cache_types::types::encodings::{Base58, Base64};
-    use dag_cache_types::types::errors::DagCacheError;
-    use dag_cache_types::types::ipfs::{Hash, Node};
+    use dag_store_types::types::encodings::{Base58, Base64};
+    use dag_store_types::types::errors::DagCacheError;
+    use dag_store_types::types::ipfs::{Hash, Node};
     use std::collections::HashMap;
     use std::sync::Mutex;
 

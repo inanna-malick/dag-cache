@@ -1,4 +1,4 @@
-use dag_cache_types::types::domain::{Hash, Node};
+use dag_store_types::types::domain::{Hash, Node};
 use lru::LruCache;
 use std::sync::Mutex;
 

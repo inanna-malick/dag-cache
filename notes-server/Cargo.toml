@@ -5,7 +5,7 @@ authors = ["pk <pkinsky@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-dag-cache = { path = "../dag-cache" }
+dag-store = { path = "../dag-store" }
 
 warp = { git = "https://github.com/seanmonstar/warp" }
 tokio = "0.2.0-alpha.6"
@@ -16,11 +16,12 @@ serde_json = "1.0"
 
 handlebars = "1.0.0"
 
-dag-cache-types = { path = "../dag-cache-types", features = ["grpc"]}
+dag-store-types = { path = "../dag-store-types", features = ["grpc"]}
 notes-types = { path = "../notes-types"}
 
 futures-preview = { version = "0.3.0-alpha.14", features = ["compat"] }
 
+prost = "0.5"
 tracing = "0.1.9" 
 tracing-core = "0.1.7"
 tracing-futures = {version = "0.1.0", features = ["futures-preview", "tokio-alpha"]}

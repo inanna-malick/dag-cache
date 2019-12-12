@@ -1,12 +1,12 @@
 [package]
-name = "dag-cache"
+name = "dag-store"
 version = "0.1.0"
 authors = ["pk <pkinsky@gmail.com>"]
 edition = "2018"
 
 
 [[bin]]
-name = "dag-cache"
+name = "dag-store"
 path = "src/bin.rs"
 
 [dependencies]
@@ -45,7 +45,7 @@ sled = "0.29.2"
 serde = { version = "1.0.91", features = ["derive"] }
 serde_json = "1.0.39"
 
-dag-cache-types = { path = "../dag-cache-types", features = ["grpc"] }
+dag-store-types = { path = "../dag-store-types", features = ["grpc"] }
 
 honeycomb-tracing = { git = "https://github.com/pkinsky/honeycomb-tracing", branch = "v2" }
 libhoney-rust = "0.1.3"

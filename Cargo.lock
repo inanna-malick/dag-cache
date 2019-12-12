@@ -382,7 +382,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dag-cache"
+name = "dag-store"
 version = "0.1.0"
 dependencies = [
  "async-trait 0.1.21 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -391,7 +391,7 @@ dependencies = [
  "blake2 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "bytes 0.4.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "chashmap 2.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "dag-cache-types 0.1.0",
+ "dag-store-types 0.1.0",
  "futures-preview 0.3.0-alpha.19 (registry+https://github.com/rust-lang/crates.io-index)",
  "honeycomb-tracing 0.0.1 (git+https://github.com/pkinsky/honeycomb-tracing?branch=v2)",
  "hyper 0.12.35 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -418,7 +418,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dag-cache-types"
+name = "dag-store-types"
 version = "0.1.0"
 dependencies = [
  "base58 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1216,13 +1216,14 @@ dependencies = [
 name = "notes-server"
 version = "0.1.0"
 dependencies = [
- "dag-cache 0.1.0",
- "dag-cache-types 0.1.0",
+ "dag-store 0.1.0",
+ "dag-store-types 0.1.0",
  "futures-preview 0.3.0-alpha.19 (registry+https://github.com/rust-lang/crates.io-index)",
  "handlebars 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "honeycomb-tracing 0.0.1 (git+https://github.com/pkinsky/honeycomb-tracing?branch=v2)",
  "libhoney-rust 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "notes-types 0.1.0",
+ "prost 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.101 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json 1.0.40 (registry+https://github.com/rust-lang/crates.io-index)",
  "structopt 0.2.18 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1241,7 +1242,7 @@ dependencies = [
 name = "notes-types"
 version = "0.1.0"
 dependencies = [
- "dag-cache-types 0.1.0",
+ "dag-store-types 0.1.0",
  "serde 1.0.101 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json 1.0.40 (registry+https://github.com/rust-lang/crates.io-index)",
 ]

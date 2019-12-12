@@ -1,8 +1,8 @@
 [workspace]
 
 members = [
-    "dag-cache",
-    "dag-cache-types",
+    "dag-store",
+    "dag-store-types",
     "notes-server",
     "notes-types",
 ]

@@ -20,13 +20,13 @@ pub struct Opt {
     #[structopt(short = "h", long = "honeycomb_key_file")]
     honeycomb_key_file: String,
 
-    #[structopt(short = "u", long = "dag_cache_url")]
-    dag_cache_url: String,
+    #[structopt(short = "u", long = "dag_store_url")]
+    dag_store_url: String,
 }
 
 pub struct Runtime {
     pub port: u16,
-    pub dag_cache_url: String,
+    pub dag_store_url: String,
     pub hb: Handlebars,
 }
 
@@ -57,12 +57,17 @@ impl Opt {
         file.read_to_string(&mut honeycomb_key)
             .expect("failed reading honeycomb key file");
 
+        println!(
+            "lmao, insecure, but here it is: honeycomb key: {:?}",
+            &honeycomb_key
+        );
+
         // NOTE: underlying lib is not really something I trust rn? just write my own queue + batch sender state machine...
         // TODO/FIXME/TODO/TODO: srsly, do this ^^
         let honeycomb_config = libhoney::Config {
             options: libhoney::client::Options {
                 api_key: honeycomb_key,
-                dataset: "dag-cache".to_string(), // todo rename
+                dataset: "dag-cache".to_string(), // TODO: better name for this
                 ..libhoney::client::Options::default()
             },
             transmission_options: libhoney::transmission::Options {
@@ -97,7 +102,7 @@ impl Opt {
 
         Runtime {
             port: self.port,
-            dag_cache_url: self.dag_cache_url,
+            dag_store_url: self.dag_store_url,
             hb,
         }
     }

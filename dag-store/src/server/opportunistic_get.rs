@@ -1,8 +1,8 @@
 use crate::capabilities::get_and_cache;
 use crate::capabilities::{Cache, HashedBlobStore};
-use dag_cache_types::types::api;
-use dag_cache_types::types::domain::{Hash, Node, NodeWithHeader};
-use dag_cache_types::types::errors::DagCacheError;
+use dag_store_types::types::api;
+use dag_store_types::types::domain::{Hash, Node, NodeWithHeader};
+use dag_store_types::types::errors::DagCacheError;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tracing::info;

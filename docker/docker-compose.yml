@@ -16,10 +16,10 @@ services:
       - /run/secrets/honeycomb_key
       - --port
       - "3030"
-      - --dag_cache_url
+      - --dag_store_url
       - http://dag:8080
   dag:
-    image: ishtar-orbital/dag-cache:latest
+    image: ishtar-orbital/dag-store:latest
     expose:
       - 8080
     volumes:
@@ -27,7 +27,7 @@ services:
     secrets:
       - honeycomb_key
     entrypoint:
-      - /dag-cache
+      - /dag-store
       - --honeycomb_key_file
       - /run/secrets/honeycomb_key
       - --fs_path

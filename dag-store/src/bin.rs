@@ -4,7 +4,7 @@ mod opts;
 mod server;
 mod utils;
 
-use dag_cache_types::types::grpc::server::DagStoreServer;
+use dag_store_types::types::grpc::server::DagStoreServer;
 use opts::Opt;
 use structopt::StructOpt;
 use tonic::transport::Server;

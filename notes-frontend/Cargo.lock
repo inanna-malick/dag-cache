@@ -105,7 +105,7 @@ version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
-name = "dag-cache-types"
+name = "dag-store-types"
 version = "0.1.0"
 dependencies = [
  "base58 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -262,7 +262,7 @@ dependencies = [
 name = "notes"
 version = "0.1.0"
 dependencies = [
- "dag-cache-types 0.1.0",
+ "dag-store-types 0.1.0",
  "failure 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "notes-types 0.1.0",
  "rand 0.7.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -278,7 +278,7 @@ dependencies = [
 name = "notes-types"
 version = "0.1.0"
 dependencies = [
- "dag-cache-types 0.1.0",
+ "dag-store-types 0.1.0",
  "serde 1.0.101 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json 1.0.40 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
