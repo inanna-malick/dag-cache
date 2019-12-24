@@ -22,10 +22,14 @@ pub struct Opt {
 
     #[structopt(short = "u", long = "dag_store_url")]
     dag_store_url: String,
+
+    #[structopt(short = "s", long = "static_dir")]
+    static_dir: String,
 }
 
 pub struct Runtime {
     pub port: u16,
+    pub static_dir: String,
     pub dag_store_url: String,
     pub hb: Handlebars,
 }
@@ -56,11 +60,6 @@ impl Opt {
         let mut honeycomb_key = String::new();
         file.read_to_string(&mut honeycomb_key)
             .expect("failed reading honeycomb key file");
-
-        println!(
-            "lmao, insecure, but here it is: honeycomb key: {:?}",
-            &honeycomb_key
-        );
 
         // NOTE: underlying lib is not really something I trust rn? just write my own queue + batch sender state machine...
         // TODO/FIXME/TODO/TODO: srsly, do this ^^
@@ -103,6 +102,7 @@ impl Opt {
         Runtime {
             port: self.port,
             dag_store_url: self.dag_store_url,
+            static_dir: self.static_dir,
             hb,
         }
     }

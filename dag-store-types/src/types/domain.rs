@@ -10,9 +10,7 @@ use serde::{Deserializer, Serializer};
 pub struct ClientId(pub String); // string? u128? idk
 
 impl ClientId {
-    pub fn new(x: String) -> ClientId {
-        ClientId(x)
-    }
+    pub fn new(x: String) -> ClientId { ClientId(x) }
 
     #[cfg(feature = "grpc")]
     pub fn from_proto(p: grpc::ClientId) -> Result<Self, ProtoDecodingError> {
@@ -20,15 +18,11 @@ impl ClientId {
     }
 
     #[cfg(feature = "grpc")]
-    pub fn into_proto(self) -> grpc::ClientId {
-        grpc::ClientId { hash: self.0 }
-    }
+    pub fn into_proto(self) -> grpc::ClientId { grpc::ClientId { hash: self.0 } }
 }
 
 impl std::fmt::Display for ClientId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
@@ -86,19 +80,13 @@ impl Hash {
         Base58::from_string(x).map(Self::from_raw)
     }
 
-    pub fn from_raw(raw: Base58) -> Hash {
-        Hash(raw)
-    }
+    pub fn from_raw(raw: Base58) -> Hash { Hash(raw) }
 
-    pub fn promote<T>(self) -> TypedHash<T> {
-        TypedHash(self, std::marker::PhantomData)
-    }
+    pub fn promote<T>(self) -> TypedHash<T> { TypedHash(self, std::marker::PhantomData) }
 }
 
 impl std::fmt::Display for Hash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) }
 }
 
 // phantom type param used to distinguish between hashes of different types
@@ -106,23 +94,17 @@ impl std::fmt::Display for Hash {
 pub struct TypedHash<T>(Hash, std::marker::PhantomData<T>);
 
 impl<T> std::hash::Hash for TypedHash<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
-    }
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.0.hash(state); }
 }
 
 impl<T> TypedHash<T> {
-    pub fn demote(self) -> Hash {
-        self.0
-    }
+    pub fn demote(self) -> Hash { self.0 }
 }
 
 impl<T> core::ops::Deref for TypedHash<T> {
     type Target = Hash;
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
+    fn deref(&self) -> &Self::Target { &self.0 }
 }
 
 impl<'de, T> Deserialize<'de> for TypedHash<T> {

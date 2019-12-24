@@ -86,9 +86,7 @@ impl FileSystemStore {
     }
 }
 
-fn decode(hash: sled::IVec) -> Hash {
-    Hash::from_raw(encodings::Base58::from_bytes(hash.to_vec()))
-}
+fn decode(hash: sled::IVec) -> Hash { Hash::from_raw(encodings::Base58::from_bytes(hash.to_vec())) }
 
 fn encode(hash: Hash) -> Vec<u8> {
     let base58 = hash.0;
@@ -98,20 +96,14 @@ fn encode(hash: Hash) -> Vec<u8> {
 
 #[tonic::async_trait]
 impl HashedBlobStore for FileSystemStore {
-    async fn get(&self, hash: Hash) -> Result<Node, DagCacheError> {
-        self.get_blob(hash)
-    }
+    async fn get(&self, hash: Hash) -> Result<Node, DagCacheError> { self.get_blob(hash) }
 
-    async fn put(&self, v: Node) -> Result<Hash, DagCacheError> {
-        self.put_blob(v)
-    }
+    async fn put(&self, v: Node) -> Result<Hash, DagCacheError> { self.put_blob(v) }
 }
 
 #[tonic::async_trait]
 impl MutableHashStore for FileSystemStore {
-    async fn get(&self, k: &str) -> Result<Option<Hash>, DagCacheError> {
-        self.get_mhs(k)
-    }
+    async fn get(&self, k: &str) -> Result<Option<Hash>, DagCacheError> { self.get_mhs(k) }
 
     async fn cas(
         &self,

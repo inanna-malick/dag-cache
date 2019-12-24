@@ -30,18 +30,14 @@ impl From<DagCacheError> for Status {
 }
 
 impl From<ProtoDecodingError> for DagCacheError {
-    fn from(error: ProtoDecodingError) -> DagCacheError {
-        DagCacheError::ProtoDecodingError(error)
-    }
+    fn from(error: ProtoDecodingError) -> DagCacheError { DagCacheError::ProtoDecodingError(error) }
 }
 
 #[derive(Debug)]
 pub struct ProtoDecodingError(pub String);
 
 impl std::fmt::Display for ProtoDecodingError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{:?}", self) }
 }
 
 #[cfg(feature = "grpc")]
@@ -52,11 +48,7 @@ impl From<ProtoDecodingError> for Status {
 }
 
 impl Error for ProtoDecodingError {
-    fn description(&self) -> &str {
-        &self.0
-    }
+    fn description(&self) -> &str { &self.0 }
 
-    fn cause(&self) -> Option<&dyn Error> {
-        None
-    }
+    fn cause(&self) -> Option<&dyn Error> { None }
 }

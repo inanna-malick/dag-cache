@@ -10,9 +10,7 @@ impl Base58 {
         base58::FromBase58::from_base58(x).map(Base58)
     }
 
-    pub fn from_bytes(x: Vec<u8>) -> Base58 {
-        Base58(x)
-    }
+    pub fn from_bytes(x: Vec<u8>) -> Base58 { Base58(x) }
 }
 
 impl std::fmt::Debug for Base58 {

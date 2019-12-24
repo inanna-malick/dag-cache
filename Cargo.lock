@@ -758,7 +758,7 @@ dependencies = [
 [[package]]
 name = "honeycomb-tracing"
 version = "0.0.1"
-source = "git+https://github.com/pkinsky/honeycomb-tracing?branch=v2#3ac5fe35b9f3a1fe2a0734690af0383bbab22ff5"
+source = "git+https://github.com/pkinsky/honeycomb-tracing?branch=v2#2a5b7539f43208f9a63944b388d8e40bc8463b0c"
 dependencies = [
  "chashmap 2.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "chrono 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",

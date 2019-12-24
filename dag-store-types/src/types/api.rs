@@ -11,9 +11,7 @@ use std::collections::HashMap;
 pub struct ClientId(pub String); // string? u128? idk
 
 impl ClientId {
-    pub fn new(x: String) -> ClientId {
-        ClientId(x)
-    }
+    pub fn new(x: String) -> ClientId { ClientId(x) }
 
     #[cfg(feature = "grpc")]
     pub fn from_proto(p: grpc::ClientId) -> Result<Self, ProtoDecodingError> {
@@ -21,15 +19,11 @@ impl ClientId {
     }
 
     #[cfg(feature = "grpc")]
-    pub fn into_proto(self) -> grpc::ClientId {
-        grpc::ClientId { hash: self.0 }
-    }
+    pub fn into_proto(self) -> grpc::ClientId { grpc::ClientId { hash: self.0 } }
 }
 
 impl std::fmt::Display for ClientId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) }
 }
 
 pub mod bulk_put {

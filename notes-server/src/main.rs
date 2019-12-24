@@ -237,7 +237,7 @@ async fn main() {
 
     // lmao, hardcoded - would be part of deployable, ideally
     // let static_route = warp::fs::dir("/home/pk/dev/dag-cache/notes-frontend/target/deploy");
-    let static_route = warp::fs::dir("/static");
+    let static_route = warp::fs::dir(get_ctx().static_dir.clone());
 
     let routes = get_route.or(post_route).or(index_route).or(static_route);
 

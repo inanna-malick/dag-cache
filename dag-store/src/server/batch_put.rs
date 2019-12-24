@@ -183,9 +183,9 @@ async fn ipfs_publish_worker_async(
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use dag_store_types::types::domain::{Hash, Node};
     use dag_store_types::types::encodings::{Base58, Base64};
     use dag_store_types::types::errors::DagCacheError;
-    use dag_store_types::types::ipfs::{Hash, Node};
     use std::collections::HashMap;
     use std::sync::Mutex;
 

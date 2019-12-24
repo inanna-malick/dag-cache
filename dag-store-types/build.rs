@@ -1,3 +1,1 @@
-fn main() {
-    tonic_build::compile_protos("proto/dagstore.proto").unwrap();
-}
+fn main() { tonic_build::compile_protos("proto/dagstore.proto").unwrap(); }
