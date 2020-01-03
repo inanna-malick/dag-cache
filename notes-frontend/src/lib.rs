@@ -111,7 +111,7 @@ impl Component for State {
                     inner: Node::new(None), // None b/c node is root (no parent)
                 };
                 let id = gen_node_id();
-                nodes.insert(id, fresh_root);
+                nodes.insert(id.clone(), fresh_root);
                 (NodeRef::Modified(id), None)
             }
             Arg { hash: Some(h) } => {
@@ -120,7 +120,7 @@ impl Component for State {
                 // TODO (actual): root object is 'Root { root_id: x, root_hash: y, metadata: ...}, id'd by hash.
                 // ^^ provides upgrade point to 'commit' structure
                 (
-                    NodeRef::Unmodified(RemoteNodeRef(NodeId(0), h.clone())),
+                    NodeRef::Unmodified(RemoteNodeRef(NodeId::root(), h.clone())),
                     Some(h),
                 )
             }
@@ -154,18 +154,27 @@ impl Component for State {
         // println!("pre-msg state is: {:?}", &self);
         match msg {
             Msg::StartSave => {
-                if let NodeRef::Modified(modified_root_id) = self.entry_point {
+                if let NodeRef::Modified(modified_root_id) = &self.entry_point {
+                    let modified_root_id = modified_root_id.clone();
                     // construct map of all nodes that have been modified
-                    let mut extra_nodes = HashMap::new();
-                    for (id, node) in self.nodes.iter().filter(|(_, n)| n.hash.is_none()) {
-                        // hash==None -> modified node
-                        extra_nodes.insert(id.clone(), node.inner.clone());
+                    let mut extra_nodes: HashMap<NodeId, Node<NodeRef>> = HashMap::new();
+                    let head_node = self.nodes.get(&modified_root_id)
+                        .expect("root node lookup failed!").inner.clone();
+
+                    let mut stack: Vec<NodeId> = head_node.children.iter().filter_map( |node_ref| match node_ref {
+                        NodeRef::Modified(id) => Some(id.clone()),
+                        _ => None,
+                    }).collect();
+
+                    // NOTE: should hit all relevant nodes, seems to not be?
+                    while let Some(id) = stack.pop() {
+                        let node = self.nodes.get(&id)
+                            .expect("node lookup failed");
+                        extra_nodes.insert(id, node.inner.clone());
                     }
 
                     let req = notes_types::api::PutReq {
-                        head_node: extra_nodes
-                            .remove(&modified_root_id)
-                            .expect("root node lookup failed!"),
+                        head_node,
                         extra_nodes,
                         cas_hash: self.last_known_hash.clone(),
                     };
@@ -206,7 +215,7 @@ impl Component for State {
                 self.save_task = None; // re-enable updates
                 let root_hash = resp.root_hash.promote::<CannonicalNode>();
                 self.last_known_hash = Some(root_hash.clone()); // set last known hash for future CAS use
-                let root_node_ref = RemoteNodeRef(root_id, root_hash.clone());
+                let root_node_ref = RemoteNodeRef(root_id.clone(), root_hash.clone());
                 // update entry point to newly-persisted root node
                 self.entry_point = NodeRef::Unmodified(root_node_ref);
 
@@ -225,13 +234,14 @@ impl Component for State {
                     let id = NodeId::from_generic(id.0).unwrap(); // FIXME - type conversion gore
                     let mut node = self.nodes.get_mut(&id).expect("hash mismatch, BUG");
                     node.hash = Some(hash.clone());
-                    if let Some(parent_id) = node.parent {
+                    if let Some(parent_id) = &node.parent {
+                        let parent_id = parent_id.clone();
                         drop(node);
                         let parent_node =
                             self.nodes.get_mut(&parent_id).expect("hash mismatch, BUG");
                         parent_node.map_mut(|node_ref| {
-                            if node_ref.node_id() == id {
-                                *node_ref = NodeRef::Unmodified(RemoteNodeRef(id, hash.clone()));
+                            if node_ref.node_id() == &id {
+                                *node_ref = NodeRef::Unmodified(RemoteNodeRef(id.clone(), hash.clone()));
                             }
                         })
                     }
@@ -331,12 +341,12 @@ impl Component for State {
 
                 if let Some(node) = self.nodes.get_mut(&parent) {
                     let new_node_id = gen_node_id();
-                    node.children.insert(at_idx, NodeRef::Modified(new_node_id)); // insert reference to new node
+                    node.children.insert(at_idx, NodeRef::Modified(new_node_id.clone())); // insert reference to new node
                     let new_node = InMemNode {
                         hash: None,
                         inner: Node::new(Some(parent)),
                     };
-                    self.nodes.insert(new_node_id, new_node); // insert new node
+                    self.nodes.insert(new_node_id.clone(), new_node); // insert new node
 
                     // enter edit mode with empty header
                     self.edit_state = Some(EditState {
@@ -526,7 +536,7 @@ impl State {
         while let Some(node) = self.nodes.get_mut(&target) {
             if let Some(_stale_hash) = &node.hash {
                 // if this is the root/entry point node, demote it to modified
-                if self.entry_point.node_id() == target {
+                if self.entry_point.node_id() == &target {
                     self.entry_point = NodeRef::Modified(target.clone());
                 };
                 node.hash = None;
@@ -535,9 +545,9 @@ impl State {
             // update pointer to previous node to indicate modification
             if let Some(prev) = prev {
                 node.map_mut(|node_ref| {
-                    if node_ref.node_id() == prev {
+                    if node_ref.node_id() == &prev {
                         // downgrade any pointers to the prev node to modified
-                        *node_ref = NodeRef::Modified(prev);
+                        *node_ref = NodeRef::Modified(prev.clone());
                     }
                 })
             }
@@ -559,13 +569,7 @@ impl State {
 
 fn gen_node_id() -> NodeId {
     let u = rand::random::<u128>();
-    if u == 0 {
-        // RESERVED VALUE for root node
-        // TODO: loop? idk, stack overflow v. unlikely
-        gen_node_id()
-    } else {
-        NodeId(u)
-    }
+    NodeId(format!("{}", u))
 }
 
 // THOUGHTS:

@@ -7,13 +7,16 @@ use dag_store_types::types::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(PartialEq, Eq, Copy, Clone, Hash, Serialize, Deserialize, Debug)]
-pub struct NodeId(pub u128);
+#[derive(PartialEq, Eq, Clone, Hash, Serialize, Deserialize, Debug)]
+pub struct NodeId(pub String); // cannot be u128 b/c large numbers are stored using scientific notation w/ limited precision
 
 impl NodeId {
+    pub fn root() -> Self {
+        NodeId("root".to_string())
+    }
+
     pub fn from_generic(g: String) -> Result<Self> {
-        let id = u128::from_str_radix(&g, 10)?; // panics if invalid...
-        Ok(NodeId(id))
+        Ok(NodeId(g))
     }
 
     pub fn into_generic(self) -> api::ClientId {
@@ -28,10 +31,10 @@ pub enum NodeRef {
 }
 
 impl NodeRef {
-    pub fn node_id(&self) -> NodeId {
+    pub fn node_id(&self) -> &NodeId {
         match self {
-            NodeRef::Modified(id) => *id,
-            NodeRef::Unmodified(RemoteNodeRef(id, _hash)) => *id,
+            NodeRef::Modified(id) => id,
+            NodeRef::Unmodified(RemoteNodeRef(id, _hash)) => id,
         }
     }
 }
@@ -124,7 +127,7 @@ impl Node<NodeRef> {
             children: self
                 .children
                 .iter()
-                .map(|node_ref| node_ref.node_id())
+                .map(|node_ref| node_ref.node_id().clone())
                 .collect(),
             header: self.header,
             body: self.body,

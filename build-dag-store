@@ -4,9 +4,5 @@ set -euxo pipefail
 # build dag-store inside docker container
 docker run -v $PWD:/volume -v cargo-cache:/root/.cargo/registry --rm -t clux/muslrust cargo build --bin dag-store --target x86_64-unknown-linux-musl --release
 
-# dockerize dag-store
-cp target/x86_64-unknown-linux-musl/release/dag-store docker/dag-store/
-cd docker/dag-store
-docker build -t ishtar-orbital/dag-store .
-rm dag-store
-cd ../..
+mkdir -p bin
+cp target/x86_64-unknown-linux-musl/release/dag-store bin/dag-store

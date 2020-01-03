@@ -1,19 +1,9 @@
 #!/bin/bash
 set -euxo pipefail
 
-# build notes frontend wasm
-cd notes-frontend
-cargo web deploy --output ../docker/notes-server/deploy
-cd ..
 
 # build notes-server inside docker container
 docker run -v $PWD:/volume -v $PWD/../honeycomb-tracing:/honeycomb-tracing -v cargo-cache:/root/.cargo/registry --rm -t clux/muslrust cargo build --bin notes-server --target x86_64-unknown-linux-musl --release
 
-# dockerize notes-server
-cp target/x86_64-unknown-linux-musl/release/notes-server docker/notes-server
-cd docker/notes-server
-docker build -t ishtar-orbital/notes-server .
-rm notes-server
-cd ../..
-
-rm -r docker/notes-server/deploy
+mkdir -p bin
+cp target/x86_64-unknown-linux-musl/release/notes-server bin/notes-server

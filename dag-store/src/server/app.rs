@@ -17,7 +17,7 @@ use std::sync::Arc;
 use tonic::{Code, Request, Response, Status};
 use tracing::{event, info, instrument, Level};
 
-// TODO: parameterize over E where E is the underlying error type (different for txn vs. main scope)
+// TODO (maybe): parameterize over E where E is the underlying error type (different for txn vs. main scope)
 pub struct Runtime {
     pub cache: Arc<Cache>,
     pub mutable_hash_store: Arc<dyn MutableHashStore>,
@@ -86,7 +86,7 @@ impl Runtime {
             e
         })?;
 
-        info!("dag cache put handler"); //TODO,, better msgs
+        info!("dag cache put handler"); //TODO,, better log msgs
 
         let hash = put_and_cache(
             self.hashed_blob_store.clone(),

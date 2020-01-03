@@ -1,2 +1,6 @@
 target/*
 .idea/*
+bin/dag-store
+bin/notes-server
+web/*
+tmpdir/*

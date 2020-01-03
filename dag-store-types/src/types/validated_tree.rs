@@ -48,6 +48,7 @@ impl ValidatedTree {
             // all nodes in map visited
             Ok(ValidatedTree { root_node, nodes })
         } else {
+            println!("error: unreachable nodes(unexpected), total {:?}, visited: {:?}", nodes.len(), node_visited_count);
             Err(DagTreeBuildErr::UnreachableNodes) // not all nodes in map are part of tree
         }
     }

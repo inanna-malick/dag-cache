@@ -105,7 +105,6 @@ async fn get_initial_state(
     register_trace_root();
     println!("fetching initialstate");
 
-    // TODO: using hardcoded local path - moving to structopt args would be nice
     let mut client = DagStoreClient::connect(url)
         .await
         .map_err(|e| Box::new(e))?;
@@ -175,11 +174,10 @@ async fn main() {
                     match res {
                         Ok(resp) => {
                             println!(" get route resp: {:?}", &resp);
-                            // lmao how does this fail? seems to happen on
                             Ok(warp::reply::json(&resp))
                         }
                         Err(e) => {
-                            println!("err on get: {:?}", e);
+                            println!("err on getting nodes: {:?}", e);
                             Err(reject::custom::<Error>(Error(e)))
                         }
                     }
@@ -228,7 +226,7 @@ async fn main() {
                 match res {
                     Ok(resp) => Ok(warp::reply::json(&resp)),
                     Err(e) => {
-                        println!("err on get: {:?}", e);
+                        println!("err on post: {:?}", e);
                         Err(reject::custom::<Error>(Error(e)))
                     }
                 }
@@ -236,7 +234,7 @@ async fn main() {
         });
 
     // lmao, hardcoded - would be part of deployable, ideally
-    // let static_route = warp::fs::dir("/home/pk/dev/dag-cache/notes-frontend/target/deploy");
+    // let static_route = warp::fs::dir("/home/pk/devd/target/deploy");
     let static_route = warp::fs::dir(get_ctx().static_dir.clone());
 
     let routes = get_route.or(post_route).or(index_route).or(static_route);

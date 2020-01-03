@@ -1,0 +1,26 @@
+#!/bin/bash
+set -euxo pipefail
+
+
+cd notes-frontend
+[ -f "deploy-bkup" ] && rm -r deploy-bkup
+mv deploy deploy-bkup
+cargo web deploy --output deploy
+cd ..
+
+cargo run --bin dag-store -- --honeycomb_key_file docker/honeycomb_key.txt \
+              --fs_path tmpdir &
+cargo run --bin notes-server -- --honeycomb_key_file docker/honeycomb_key.txt \
+                 --dag_store_url http://localhost:8088 \
+                 -p 3030 \
+                 --static_dir notes-frontend/deploy &
+
+# bin/dag-store --honeycomb_key_file docker/honeycomb_key.txt \
+#                 --fs_path tmpdir &
+# bin/notes-server --honeycomb_key_file docker/honeycomb_key.txt \
+#                    --dag_store_url http://localhost:8088 \
+#                    -p 3030 \
+#                    --static_dir web &
+
+trap "trap - SIGTERM && kill -- -$$" SIGINT SIGTERM EXIT
+wait
