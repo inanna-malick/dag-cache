@@ -5,8 +5,9 @@ members = [
     "dag-store-types",
     "notes-server",
     "notes-types",
+    "notes-frontend",
 ]
 
 exclude = [
-    "notes-frontend",  # FIXME: requires cargo _web_ to build
-    ]
+  "notes-frontend/wasm",
+]

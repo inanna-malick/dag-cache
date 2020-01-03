@@ -21,6 +21,10 @@ use tonic::metadata::MetadataValue;
 use tracing::instrument;
 use warp::{reject, Filter};
 
+use headers::HeaderMapExt;
+use hyper::body::Chunk;
+
+
 // TODO: struct w/ domain types & etc
 #[derive(Debug)]
 struct Error(Box<dyn std::error::Error + Send + Sync + 'static>);
@@ -235,12 +239,66 @@ async fn main() {
 
     // lmao, hardcoded - would be part of deployable, ideally
     // let static_route = warp::fs::dir("/home/pk/devd/target/deploy");
-    let static_route = warp::fs::dir(get_ctx().static_dir.clone());
+    let static_route = warp::get()
+        .and(warp::path::param::<String>())
+        .map(
+            |path: String| match notes_frontend::get_static_asset(&path) {
+                None => Trivial::not_found(),
+                Some(blob) => {
+                    println!("!!!: static route for {:?}, returning {:?}", &path, blob);
+
+                    let len = blob.len() as u64;
+                    // TODO: arbitrary chunk size (1024), revisit later maybe (FIXME)
+                    let stream = futures::stream::iter(
+                        blob.chunks(1024)
+                            // .map(bytes::Bytes::from_static)
+                            .map(Chunk::from)
+                            .map( |x| {
+                                let res: Result<Chunk, Box<dyn std::error::Error + Send + Sync>> = Ok(x);
+                                res
+                            }),
+                    );
+                    let body = hyper::Body::wrap_stream(stream);
+
+                    let mut resp = hyper::Response::new(body);
+
+                    let mime = mime_guess::from_path(path).first_or_octet_stream();
+
+                    resp.headers_mut().typed_insert(headers::ContentLength(len));
+                    resp.headers_mut()
+                        .typed_insert(headers::ContentType::from(mime));
+                    resp.headers_mut()
+                        .typed_insert(headers::AcceptRanges::bytes());
+
+                    Trivial(resp)
+                    // Ok(resp)
+                }
+            },
+        );
 
     let routes = get_route.or(post_route).or(index_route).or(static_route);
 
     let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), get_ctx().port);
     warp::serve(routes).run(socket).await;
+}
+
+struct Trivial(hyper::Response<hyper::Body>);
+
+impl Trivial {
+    fn not_found() -> Self {
+        let r = hyper::Response::builder()
+            .status(hyper::StatusCode::NOT_FOUND)
+            .body(hyper::Body::empty())
+            .unwrap(); // ASSERTION: builder will never fail
+
+        Trivial(r)
+    }
+}
+
+impl warp::Reply for Trivial {
+    fn into_response(self) -> warp::reply::Response {
+        self.0
+    }
 }
 
 #[cfg(test)]

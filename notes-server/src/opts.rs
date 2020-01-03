@@ -22,14 +22,10 @@ pub struct Opt {
 
     #[structopt(short = "u", long = "dag_store_url")]
     dag_store_url: String,
-
-    #[structopt(short = "s", long = "static_dir")]
-    static_dir: String,
 }
 
 pub struct Runtime {
     pub port: u16,
-    pub static_dir: String,
     pub dag_store_url: String,
     pub hb: Handlebars,
 }
@@ -102,7 +98,6 @@ impl Opt {
         Runtime {
             port: self.port,
             dag_store_url: self.dag_store_url,
-            static_dir: self.static_dir,
             hb,
         }
     }
