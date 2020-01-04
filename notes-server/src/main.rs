@@ -70,11 +70,7 @@ fn add_tracing_to_meta<T>(request: &mut tonic::Request<T>) {
         ctx.encode(&mut buf)
             .expect("error writing proto msg to buffer");
 
-        println!("writing binary into meta: {:?}", &buf);
-
         meta.insert_bin("trace-ctx-bin", MetadataValue::from_bytes(&buf));
-
-        println!("modified meta: {:?}", &meta);
     };
 }
 
@@ -177,7 +173,6 @@ async fn main() {
 
                     match res {
                         Ok(resp) => {
-                            println!(" get route resp: {:?}", &resp);
                             Ok(warp::reply::json(&resp))
                         }
                         Err(e) => {
@@ -245,8 +240,6 @@ async fn main() {
             |path: String| match notes_frontend::get_static_asset(&path) {
                 None => Trivial::not_found(),
                 Some(blob) => {
-                    println!("!!!: static route for {:?}, returning {:?}", &path, blob);
-
                     let len = blob.len() as u64;
                     // TODO: arbitrary chunk size (1024), revisit later maybe (FIXME)
                     let stream = futures::stream::iter(
