@@ -18,7 +18,7 @@ use std::{
 };
 use structopt::StructOpt;
 use tonic::metadata::MetadataValue;
-use tracing::instrument;
+use tracing::{instrument, error};
 use warp::{reject, Filter};
 
 use headers::HeaderMapExt;
@@ -51,7 +51,6 @@ fn get_ctx() -> Arc<Runtime> {
 
 fn register_trace_root() {
     let trace_id = TraceId::generate();
-    println!("generated trace id {:?}", &trace_id);
     TraceCtx {
         trace_id,
         parent_span: None,
@@ -79,7 +78,6 @@ async fn get_nodes(
     raw_hash: String,
 ) -> Result<notes_types::api::GetResp, Box<dyn std::error::Error + Send + Sync + 'static>> {
     register_trace_root();
-    println!("parsed hash {} from path", raw_hash);
 
     let mut client = DagStoreClient::connect(url)
         .await
@@ -102,7 +100,6 @@ async fn get_initial_state(
     url: String,
 ) -> Result<Option<domain::Hash>, Box<dyn std::error::Error + Send + Sync + 'static>> {
     register_trace_root();
-    println!("fetching initialstate");
 
     let mut client = DagStoreClient::connect(url)
         .await
@@ -132,7 +129,6 @@ async fn put_nodes(
     put_req: notes_types::api::PutReq,
 ) -> Result<bulk_put::Resp, Box<dyn std::error::Error + Send + Sync + 'static>> {
     register_trace_root();
-    println!("got req {:?} body", put_req);
 
     let put_req = put_req.into_generic()?;
 
@@ -173,7 +169,7 @@ async fn main() {
                     match res {
                         Ok(resp) => Ok(warp::reply::json(&resp)),
                         Err(e) => {
-                            println!("err on getting nodes: {:?}", e);
+                            error!("err on getting nodes: {:?}", e);
                             Err(reject::custom::<Error>(Error(e)))
                         }
                     }
@@ -188,7 +184,7 @@ async fn main() {
 
             match res {
                 Ok(resp) => {
-                    println!("initial state resp: {:?}", &resp);
+                    error!("initial state resp: {:?}", &resp);
                     let t = match resp {
                         Some(h) => crate::opts::WithTemplate {
                             name: "index.html",
@@ -202,7 +198,7 @@ async fn main() {
                     Ok(get_ctx().render(t))
                 }
                 Err(e) => {
-                    println!("err on get initial state: {:?}", e);
+                    error!("err on get initial state: {:?}", e);
                     Err(reject::custom::<Error>(Error(e)))
                 }
             }
@@ -222,7 +218,7 @@ async fn main() {
                 match res {
                     Ok(resp) => Ok(warp::reply::json(&resp)),
                     Err(e) => {
-                        println!("err on post: {:?}", e);
+                        error!("err on post: {:?}", e);
                         Err(reject::custom::<Error>(Error(e)))
                     }
                 }

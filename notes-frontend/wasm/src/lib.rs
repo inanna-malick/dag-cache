@@ -152,18 +152,22 @@ impl Component for State {
                         .inner
                         .clone();
 
-                    let mut stack: Vec<NodeId> = head_node
-                        .children
-                        .iter()
-                        .filter_map(|node_ref| match node_ref {
-                            NodeRef::Modified(id) => Some(id.clone()),
-                            _ => None,
-                        })
-                        .collect();
+                    let mut stack: Vec<NodeId> = Vec::new();
 
-                    // NOTE: should hit all relevant nodes, seems to (sometimes) not be? (note: may be fixed as part of u64 rounding bug)
+
+                    for node_ref in head_node.children.iter() {
+                        if let NodeRef::Modified(id) = node_ref {
+                            stack.push(id.clone());
+                        };
+                    };
+
                     while let Some(id) = stack.pop() {
                         let node = self.nodes.get(&id).expect("node lookup failed");
+                        for node_ref in node.children.iter() {
+                            if let NodeRef::Modified(id) = node_ref {
+                                stack.push(id.clone());
+                            };
+                        };
                         extra_nodes.insert(id, node.inner.clone());
                     }
 
