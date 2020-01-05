@@ -10,6 +10,12 @@ pub enum DagCacheError {
     CASViolationError { actual_hash: Option<Hash> },
 }
 
+impl DagCacheError {
+    pub fn unexpected<E: std::error::Error>(e: E) -> Self {
+        DagCacheError::UnexpectedError(format!("unexpected error: {}", e))
+    }
+}
+
 #[cfg(feature = "grpc")]
 impl From<DagCacheError> for Status {
     fn from(error: DagCacheError) -> Status {
@@ -28,7 +34,6 @@ impl From<DagCacheError> for Status {
         }
     }
 }
-
 impl From<ProtoDecodingError> for DagCacheError {
     fn from(error: ProtoDecodingError) -> DagCacheError { DagCacheError::ProtoDecodingError(error) }
 }

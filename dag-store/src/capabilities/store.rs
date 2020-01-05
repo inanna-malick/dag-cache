@@ -1,58 +1,62 @@
 use crate::capabilities::{HashedBlobStore, MutableHashStore};
 use dag_store_types::types::domain::{Hash, Node};
 use dag_store_types::types::encodings;
-use dag_store_types::types::errors::{DagCacheError, ProtoDecodingError};
-use serde_json;
-use sled::Db;
-use tracing::info;
+use dag_store_types::types::errors::DagCacheError;
+use prost::Message;
 use tracing::instrument;
 
 /// store backed by local fs sled db (embedded)
-pub struct FileSystemStore(Db);
+pub struct FileSystemStore(sled::Db);
 
 impl FileSystemStore {
     pub fn new(path: String) -> Self {
-        let db = Db::open(path).unwrap();
+        let db = sled::open(path).unwrap();
         FileSystemStore(db)
+    }
+
+    fn get_and_decode<X: Message + Default>(&self, k: &str) -> Result<Option<X>, DagCacheError> {
+        let res = self.0.get(k).map_err(DagCacheError::unexpected)?;
+        let proto: Option<X> = res
+            .map(std::io::Cursor::new)
+            .map(Message::decode)
+            .transpose()
+            .map_err(DagCacheError::unexpected)?;
+
+        Ok(proto)
     }
 
     #[instrument(skip(self))]
     fn get_blob(&self, hash: Hash) -> Result<Node, DagCacheError> {
-        match self.0.get(hash.to_string_canonical()) {
-            Ok(Some(value)) => {
-                let node = serde_json::from_reader(value.as_ref()).map_err(|e| {
-                    ProtoDecodingError(format!("error parsing proto file: {:?}", e))
-                })?;
-                Ok(node)
-            }
-            // TODO: actual handling for errors - time to revamp error schema?
-            Ok(None) => panic!("value not found"),
-            Err(e) => panic!("operational problem encountered: {}", e),
-        }
+        let proto = self.get_and_decode(&hash.to_string_canonical())?;
+        let proto = proto
+            .ok_or_else(|| DagCacheError::UnexpectedError("broken link in sled db!".to_string()))?;
+        let res =  Node::from_proto(proto)?;
+        Ok(res)
     }
 
     #[instrument(skip(self, v))]
     fn put_blob(&self, v: Node) -> Result<Hash, DagCacheError> {
-        // TODO: serialize as proto now that I'm not interacting with IPFS! yay :)
-        let bytes = serde_json::to_vec(&v).expect("json _serialize_ failed (should be impossible)");
-
         let hash = v.canonical_hash();
 
-        self.0.insert(hash.to_string_canonical(), bytes).unwrap(); // todo: expose error instead of panic
+        let mut buf = vec![];
+        v.into_proto()
+            .encode(&mut buf)
+            .map_err(DagCacheError::unexpected)?;
+
+        self.0
+            .insert(hash.to_string_canonical(), buf)
+            .map_err(DagCacheError::unexpected)?;
 
         Ok(hash)
     }
 
     #[instrument(skip(self))]
     fn get_mhs(&self, k: &str) -> Result<Option<Hash>, DagCacheError> {
-        match self.0.get(k) {
-            Ok(x) => Ok(x.map(decode)),
-            // TODO: actual handling for errors - time to revamp error schema?
-            Err(e) => panic!("operational problem encountered: {}", e),
-        }
+        let proto = self.get_and_decode(k)?;
+        let res = proto.map(Hash::from_proto).transpose()?;
+        Ok(res)
     }
 
-    // TODO: expose ONLY check and set, not put
     #[instrument(skip(self))]
     fn cas_mhs(
         &self,
@@ -60,13 +64,9 @@ impl FileSystemStore {
         previous_hash: Option<Hash>,
         proposed_hash: Hash,
     ) -> Result<(), DagCacheError> {
-        println!("cas mhs!");
-
-        info!("inside cas mhs");
         let cas_res =
             self.0
-                .compare_and_swap(k, previous_hash.map(encode), Some(encode(proposed_hash))); // FIXME: refactor error structure
-        info!("cas mhs res: {:?}", &cas_res);
+                .compare_and_swap(k, previous_hash.map(encode), Some(encode(proposed_hash)));
         let cas_res = cas_res.unwrap();
 
         cas_res.map_err(

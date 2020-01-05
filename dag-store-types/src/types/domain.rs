@@ -3,9 +3,9 @@ use crate::types::encodings::{Base58, Base64};
 use crate::types::errors::ProtoDecodingError;
 #[cfg(feature = "grpc")]
 use crate::types::grpc;
+use blake2::{Blake2b, Digest};
 use serde::{Deserialize, Serialize};
 use serde::{Deserializer, Serializer};
-use blake2::{Blake2b, Digest};
 
 #[derive(PartialEq, Hash, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct ClientId(pub String); // string? u128? idk
@@ -63,9 +63,7 @@ impl Header {
 pub struct Hash(pub Base58);
 
 impl Hash {
-    pub fn to_string_canonical(&self) -> String {
-        format!("{}.blake2", self)
-    }
+    pub fn to_string_canonical(&self) -> String { format!("{}.blake2", self) }
 
     #[cfg(feature = "grpc")]
     pub fn into_proto(self) -> grpc::Hash {
@@ -138,6 +136,7 @@ pub struct Node {
 }
 
 impl Node {
+    /// stable hashing function (not using proto because there's no canonical encoding)
     pub fn canonical_hash(&self) -> Hash {
         let mut hasher = Blake2b::new();
         for link in self.links.iter() {
