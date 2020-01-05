@@ -3,8 +3,6 @@ use notes_types::notes::CannonicalNode;
 use stdweb::js;
 
 fn main() {
-    // TODO: replace this call with HTML template of some sort
-    // - can include props in page instead of two-step static index + fetch
     let value = js!({
         return window.starting_hash;
     });

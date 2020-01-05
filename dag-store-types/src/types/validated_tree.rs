@@ -1,73 +1,78 @@
 use crate::types::api::bulk_put::{Node, NodeLink};
 use crate::types::api::ClientId;
 use std::collections::HashMap;
+use std::hash::Hash;
+use serde::{Deserialize, Serialize};
 
-// ephemeral, used for data structure in memory
-#[derive(Debug)]
-pub struct ValidatedTree {
-    pub root_node: Node,
-    pub nodes: HashMap<ClientId, Node>,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ValidatedTree_<K: Eq + Hash, V> {
+    pub root_node: V,
+    pub nodes: HashMap<K, V>,
 }
 
-// TODO: tests
+pub type ValidatedTree = ValidatedTree_<ClientId, Node>;
+
 impl ValidatedTree {
     pub fn validate(
         root_node: Node,
         nodes: HashMap<ClientId, Node>,
-    ) -> Result<ValidatedTree, DagTreeBuildErr> {
+    ) -> Result<ValidatedTree, ValidatedTreeBuildErr<ClientId>> {
+        ValidatedTree::validate_(root_node, nodes, |x| x.links.clone().into_iter().filter_map( |x| match x {
+            NodeLink::Local(csh) => Some(csh),
+            NodeLink::Remote(_) => None,
+        }))
+    }
+}
+
+// TODO: tests
+impl<K: Eq + Hash, V> ValidatedTree_<K, V> {
+    pub fn validate_<F: Fn(&V) -> I, I: Iterator<Item = K>>(
+        root_node: V,
+        nodes: HashMap<K, V>,
+        extract_keys: F,
+    ) -> Result<Self, ValidatedTreeBuildErr<K>> {
         let mut node_visited_count = 0;
         let mut stack = Vec::new();
 
-        for node_link in root_node.links.iter() {
-            match node_link {
-                // reference to node in map, must verify
-                NodeLink::Local(csh) => stack.push(csh.clone()),
-                // no-op, valid by definition
-                NodeLink::Remote(_) => {}
-            }
+        for link in extract_keys(&root_node) {
+            stack.push(link);
         }
 
         while let Some(node_id) = stack.pop() {
             node_visited_count += 1;
             match nodes.get(&node_id) {
                 Some(node) => {
-                    for node_link in node.links.iter() {
-                        match node_link {
-                            // reference to node in map, must verify
-                            NodeLink::Local(csh) => stack.push(csh.clone()),
-                            // no-op, valid by definition
-                            NodeLink::Remote(_) => {}
-                        }
+                    for link in extract_keys(node) {
+                            stack.push(link);
                     }
                 }
-                None => return Err(DagTreeBuildErr::InvalidLink(node_id)),
+                None => return Err(ValidatedTreeBuildErr::InvalidLink(node_id)),
             }
         }
 
         if nodes.len() == node_visited_count {
             // all nodes in map visited
-            Ok(ValidatedTree { root_node, nodes })
+            Ok(ValidatedTree_ { root_node, nodes })
         } else {
-            println!("error: unreachable nodes(unexpected), total {:?}, visited: {:?}", nodes.len(), node_visited_count);
-            Err(DagTreeBuildErr::UnreachableNodes) // not all nodes in map are part of tree
+            Err(ValidatedTreeBuildErr::UnreachableNodes) // not all nodes in map are part of tree
         }
     }
 }
 
 #[derive(Debug)]
-pub enum DagTreeBuildErr {
-    InvalidLink(ClientId),
+pub enum ValidatedTreeBuildErr<K> {
+    InvalidLink(K),
     UnreachableNodes,
 }
 
-impl std::fmt::Display for DagTreeBuildErr {
+impl<K: std::fmt::Debug> std::fmt::Display for ValidatedTreeBuildErr<K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self) // TODO: more idiomatic way of doing this
     }
 }
 
-impl std::error::Error for DagTreeBuildErr {
-    fn description(&self) -> &str { "dag cache build error" }
+impl<K: std::fmt::Debug> std::error::Error for ValidatedTreeBuildErr<K> {
+    fn description(&self) -> &str { "validated tree build error" }
 
     fn cause(&self) -> Option<&dyn std::error::Error> { None }
 }

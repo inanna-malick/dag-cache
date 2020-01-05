@@ -24,7 +24,6 @@ use warp::{reject, Filter};
 use headers::HeaderMapExt;
 use hyper::body::Chunk;
 
-
 // TODO: struct w/ domain types & etc
 #[derive(Debug)]
 struct Error(Box<dyn std::error::Error + Send + Sync + 'static>);
@@ -172,9 +171,7 @@ async fn main() {
                     let res = get_nodes(url, raw_hash).await;
 
                     match res {
-                        Ok(resp) => {
-                            Ok(warp::reply::json(&resp))
-                        }
+                        Ok(resp) => Ok(warp::reply::json(&resp)),
                         Err(e) => {
                             println!("err on getting nodes: {:?}", e);
                             Err(reject::custom::<Error>(Error(e)))
@@ -246,8 +243,9 @@ async fn main() {
                         blob.chunks(1024)
                             // .map(bytes::Bytes::from_static)
                             .map(Chunk::from)
-                            .map( |x| {
-                                let res: Result<Chunk, Box<dyn std::error::Error + Send + Sync>> = Ok(x);
+                            .map(|x| {
+                                let res: Result<Chunk, Box<dyn std::error::Error + Send + Sync>> =
+                                    Ok(x);
                                 res
                             }),
                     );

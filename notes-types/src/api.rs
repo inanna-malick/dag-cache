@@ -4,6 +4,7 @@ use dag_store_types::types::{api, validated_tree::ValidatedTree};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
+use dag_store_types::types::validated_tree::ValidatedTree_;
 
 pub static CAS_KEY: &str = "notes-app";
 
@@ -37,18 +38,17 @@ impl GetResp {
 }
 
 // TODO: will need to make this heterogenous - must allow tree w/ commits + notes
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PutReq {
-    pub head_node: notes::Node<notes::NodeRef>,
-    pub extra_nodes: HashMap<notes::NodeId, notes::Node<notes::NodeRef>>,
+    pub tree: ValidatedTree_<notes::NodeId, notes::Node<notes::NodeRef>>,
     pub cas_hash: Option<TypedHash<notes::CannonicalNode>>,
 }
 
 impl PutReq {
     pub fn into_generic(self) -> Result<api::bulk_put::Req> {
-        let head = self.head_node.into_generic()?;
+        let head = self.tree.root_node.into_generic()?;
         let mut extra_nodes = HashMap::new();
-        for (id, node) in self.extra_nodes.into_iter() {
+        for (id, node) in self.tree.nodes.into_iter() {
             let node = node.into_generic()?;
             extra_nodes.insert(id.into_generic(), node);
         }

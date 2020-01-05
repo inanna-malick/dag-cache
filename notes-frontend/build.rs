@@ -4,12 +4,12 @@ use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
-
-// NOTE: currently only tested with hardcoded flat deploy dir
+// NOTE: currently only tested with flat deploy dir
 fn main() {
     let out_dir = env::var("OUT_DIR").unwrap();
-    let dest_path = Path::new(&out_dir).join("wasm_blobs");
-    let _ = fs::create_dir(&dest_path); //.unwrap(); dir may already exist
+    let dest_path = Path::new(&out_dir).join("wasm_blobs_output_dir");
+    let _ = fs::remove_dir_all(&dest_path); // may already exist, nuke if that is the case
+    fs::create_dir(&dest_path).unwrap();
 
     let current_dir = std::env::current_dir().unwrap();
 
@@ -38,38 +38,35 @@ fn main() {
                 let identifier = src.clone().replace(".", "_").to_uppercase();
                 Some((src, identifier, path))
             }
-        }).collect();
+        })
+        .collect();
 
-    // let mut f_contents = vec!["use phf::phf_map;".to_string()];
-
-
-    let mut f_contents = blobs.iter().map(|(_, identifier, dest_path)| {
+    let mut f_contents = blobs
+        .iter()
+        .map(|(_, identifier, dest_path)| {
             format!(
                 r#"static {}: &'static [u8] = include_bytes!("{}");"#,
-                identifier, dest_path.to_str().unwrap()
+                identifier,
+                dest_path.to_str().unwrap()
             )
-    }).collect::<Vec<String>>();
+        })
+        .collect::<Vec<String>>();
 
-    // f_contents.append(&mut static_blobs);
-
-
-    let mut hashmap: Vec<String> = vec!["pub static WASM: phf::Map<&'static str, &'static [u8]> = phf_map! {".to_string()];
-    let mut hashmap_vals: Vec<String> = blobs.iter().map( |(src_path, identifier, _)| {
-            format!(
-                r#""{}" => {},"#,
-                src_path, identifier
-            )
-    }).collect();
+    let mut hashmap: Vec<String> =
+        vec!["pub static WASM: phf::Map<&'static str, &'static [u8]> = phf_map! {".to_string()];
+    let mut hashmap_vals: Vec<String> = blobs
+        .iter()
+        .map(|(src_path, identifier, _)| format!(r#""{}" => {},"#, src_path, identifier))
+        .collect();
     hashmap.append(&mut hashmap_vals);
     hashmap.append(&mut vec!["};".to_string()]);
 
     f_contents.append(&mut hashmap);
 
+    f.write_all(&f_contents.join("\n").into_bytes()).unwrap();
 
-
-    println!("output {:?}", &f_contents);
-
-    f.write_all(&f_contents.join("\n").into_bytes())
-    .unwrap();
+    // TODO: figure out how to just register everything in wasm subdir
+    println!("cargo:rerun-if-changed=wasm/src/main.rs");
+    println!("cargo:rerun-if-changed=wasm/src/lib.rs");
     // unimplemented!("afaik only way to get println output from build.rs is to fail here");
 }

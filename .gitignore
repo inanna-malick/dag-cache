@@ -4,3 +4,4 @@ bin/dag-store
 bin/notes-server
 web/*
 tmpdir/*
+honeycomb.key

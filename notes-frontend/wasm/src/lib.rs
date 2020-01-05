@@ -2,6 +2,7 @@
 
 use dag_store_types::types::api as api_types;
 use dag_store_types::types::domain::TypedHash;
+use dag_store_types::types::validated_tree::ValidatedTree_;
 use notes_types::notes::{CannonicalNode, Node, NodeId, NodeRef, RemoteNodeRef};
 use rand;
 use std::collections::HashMap;
@@ -79,15 +80,14 @@ pub enum Msg {
     Fetch(RemoteNodeRef), // HTTP fetch from store
     FetchComplete(RemoteNodeRef, notes_types::api::GetResp), // HTTP fetch from store (domain type)
     StartSave,            // init backup of everything in store - blocking operation, probably
-    SaveComplete(NodeId, api_types::bulk_put::Resp),
+    SaveComplete(api_types::bulk_put::Resp),
     NoOp,
     // TODO: use https://gomakethings.com/how-to-test-if-an-element-is-in-the-viewport-with-vanilla-javascript/
     // TODO: to trigger lazy loading when a lazy-loaded element enters the viewport (is on-screen)
     // LazyLoadOnScroll,
 }
 
-#[derive(serde::Deserialize, Debug)]
-#[derive(PartialEq, Properties)]
+#[derive(serde::Deserialize, Debug, PartialEq, Properties)]
 pub struct Arg {
     #[props(required)]
     pub hash: Option<TypedHash<CannonicalNode>>,
@@ -97,15 +97,11 @@ impl Component for State {
     type Message = Msg;
     type Properties = Arg;
 
-    // TODO: pass in init hash in properties?
     fn create(opt_hash: Self::Properties, mut link: ComponentLink<Self>) -> Self {
         let mut nodes = HashMap::new();
 
-        println!("starting with: {:?}", &opt_hash);
-
         let (entry_point, last_known_hash) = match opt_hash {
             Arg { hash: None } => {
-                // todo use backend storage (pointer only, rest is easy)
                 let fresh_root = InMemNode {
                     hash: None,             // not persisted
                     inner: Node::new(None), // None b/c node is root (no parent)
@@ -114,19 +110,13 @@ impl Component for State {
                 nodes.insert(id.clone(), fresh_root);
                 (NodeRef::Modified(id), None)
             }
-            Arg { hash: Some(h) } => {
-                // todo: need hash _and_ node id, fuck me/FIXME
-                // TODO (temp): magic hash for root node, always just use '0'.
-                // TODO (actual): root object is 'Root { root_id: x, root_hash: y, metadata: ...}, id'd by hash.
-                // ^^ provides upgrade point to 'commit' structure
-                (
-                    NodeRef::Unmodified(RemoteNodeRef(NodeId::root(), h.clone())),
-                    Some(h),
-                )
-            }
+            Arg { hash: Some(h) } => (
+                NodeRef::Unmodified(RemoteNodeRef(NodeId::root(), h.clone())),
+                Some(h),
+            ),
         };
 
-        // should handle repeatedly waking up save process - checks root node, saves (recursively) if modifed
+        // repeatedly wake up save process - checks root node, save (recursively) if modifed
         let mut interval_service = IntervalService::new();
         let thirty_seconds = std::time::Duration::new(10, 0);
         let callback = link.send_back(move |_: ()| Msg::StartSave);
@@ -149,61 +139,49 @@ impl Component for State {
     }
 
     fn update(&mut self, msg: Self::Message) -> ShouldRender {
-        println!("msg: {:?}", &msg);
-
-        // println!("pre-msg state is: {:?}", &self);
         match msg {
             Msg::StartSave => {
                 if let NodeRef::Modified(modified_root_id) = &self.entry_point {
                     let modified_root_id = modified_root_id.clone();
                     // construct map of all nodes that have been modified
                     let mut extra_nodes: HashMap<NodeId, Node<NodeRef>> = HashMap::new();
-                    let head_node = self.nodes.get(&modified_root_id)
-                        .expect("root node lookup failed!").inner.clone();
+                    let head_node = self
+                        .nodes
+                        .get(&modified_root_id)
+                        .expect("root node lookup failed!")
+                        .inner
+                        .clone();
 
-                    let mut stack: Vec<NodeId> = head_node.children.iter().filter_map( |node_ref| match node_ref {
-                        NodeRef::Modified(id) => Some(id.clone()),
-                        _ => None,
-                    }).collect();
+                    let mut stack: Vec<NodeId> = head_node
+                        .children
+                        .iter()
+                        .filter_map(|node_ref| match node_ref {
+                            NodeRef::Modified(id) => Some(id.clone()),
+                            _ => None,
+                        })
+                        .collect();
 
-                    // NOTE: should hit all relevant nodes, seems to not be?
+                    // NOTE: should hit all relevant nodes, seems to (sometimes) not be? (note: may be fixed as part of u64 rounding bug)
                     while let Some(id) = stack.pop() {
-                        let node = self.nodes.get(&id)
-                            .expect("node lookup failed");
+                        let node = self.nodes.get(&id).expect("node lookup failed");
                         extra_nodes.insert(id, node.inner.clone());
                     }
 
+                    // unable to validate tree, error is in above algorithm
+                    let tree = ValidatedTree_::validate_(head_node, extra_nodes, |n| {
+                        n.children.clone().into_iter().filter_map ( |x| match x {
+                            NodeRef::Modified(x) => Some(x),
+                            _ => None
+                        })
+                    })
+                    .expect("failure validating tree while building put request");
+
                     let req = notes_types::api::PutReq {
-                        head_node,
-                        extra_nodes,
+                        tree,
                         cas_hash: self.last_known_hash.clone(),
                     };
 
-                    let request = Request::post("/nodes")
-                        // why is this is neccessary given Json body type on builder - mb I'm doing it wrong?
-                        .header("Content-Type", "application/json")
-                        .body(Json(&req))
-                        .unwrap();
-
-                    let callback = self.link.send_back(
-                        move |response: Response<
-                            Json<Result<api_types::bulk_put::Resp, failure::Error>>,
-                        >| {
-                            let (meta, Json(res)) = response.into_parts();
-                            if let Ok(body) = res {
-                                if meta.status.is_success() {
-                                    Msg::SaveComplete(modified_root_id.clone(), body)
-                                } else {
-                                    panic!("lmao, todo (panic during resp handler)")
-                                }
-                            } else {
-                                panic!("lmao, todo (panic in outer put resp callback {:?}", meta)
-                            }
-                        },
-                    );
-
-                    let task = self.fetch_service.fetch(request, callback);
-                    self.save_task = Some(task);
+                    self.push_nodes(req);
                 } else {
                     println!("no modified nodes found, not saving");
                     // no-op if root node not modified
@@ -211,7 +189,9 @@ impl Component for State {
             }
             // TODO: handle CAS violation, currently will just explode, lmao
             // kinda gnarly, basically just writes every saved node to the nodes store and in the process wipes out the modified nodes
-            Msg::SaveComplete(root_id, resp) => {
+            Msg::SaveComplete(resp) => {
+                let root_id = NodeId::root();
+
                 self.save_task = None; // re-enable updates
                 let root_hash = resp.root_hash.promote::<CannonicalNode>();
                 self.last_known_hash = Some(root_hash.clone()); // set last known hash for future CAS use
@@ -226,22 +206,22 @@ impl Component for State {
                 }
 
                 // update root node with hash
-                let mut node = self.nodes.get_mut(&root_id).expect("hash mismatch, BUG");
+                let mut node = self.nodes.get_mut(&root_id).unwrap();
                 node.hash = Some(root_hash);
 
                 for (id, hash) in resp.additional_uploaded.into_iter() {
                     let hash = hash.promote::<CannonicalNode>();
                     let id = NodeId::from_generic(id.0).unwrap(); // FIXME - type conversion gore
-                    let mut node = self.nodes.get_mut(&id).expect("hash mismatch, BUG");
+                    let mut node = self.nodes.get_mut(&id).unwrap();
                     node.hash = Some(hash.clone());
                     if let Some(parent_id) = &node.parent {
                         let parent_id = parent_id.clone();
                         drop(node);
-                        let parent_node =
-                            self.nodes.get_mut(&parent_id).expect("hash mismatch, BUG");
+                        let parent_node = self.nodes.get_mut(&parent_id).unwrap();
                         parent_node.map_mut(|node_ref| {
                             if node_ref.node_id() == &id {
-                                *node_ref = NodeRef::Unmodified(RemoteNodeRef(id.clone(), hash.clone()));
+                                *node_ref =
+                                    NodeRef::Unmodified(RemoteNodeRef(id.clone(), hash.clone()));
                             }
                         })
                     }
@@ -341,7 +321,8 @@ impl Component for State {
 
                 if let Some(node) = self.nodes.get_mut(&parent) {
                     let new_node_id = gen_node_id();
-                    node.children.insert(at_idx, NodeRef::Modified(new_node_id.clone())); // insert reference to new node
+                    node.children
+                        .insert(at_idx, NodeRef::Modified(new_node_id.clone())); // insert reference to new node
                     let new_node = InMemNode {
                         hash: None,
                         inner: Node::new(Some(parent)),
@@ -360,13 +341,13 @@ impl Component for State {
             }
             Msg::NoOp => {}
         }
-        // println!("post-msg state is: {:?}", &self);
         true
     }
 
     fn view(&self) -> Html<Self> {
         html! {
-            <div class="todomvc-wrapper">
+            <div class="wrapper">
+                <div> { render_is_modified_widget(&self.entry_point) } </div>
                 <ul class = "top-level">
                     { self.render_node(&self.entry_point) }
                 </ul>
@@ -565,6 +546,32 @@ impl State {
             }
         }
     }
+
+    fn push_nodes(&mut self, req: notes_types::api::PutReq) -> () {
+        let request = Request::post("/nodes")
+            // why is this is neccessary given Json body type on builder - mb I'm doing it wrong?
+            .header("Content-Type", "application/json")
+            .body(Json(&req))
+            .unwrap();
+
+        let callback = self.link.send_back(
+            move |response: Response<Json<Result<api_types::bulk_put::Resp, failure::Error>>>| {
+                let (meta, Json(res)) = response.into_parts();
+                if let Ok(body) = res {
+                    if meta.status.is_success() {
+                        Msg::SaveComplete(body)
+                    } else {
+                        panic!("lmao, todo (panic during resp handler)")
+                    }
+                } else {
+                    panic!("lmao, todo (panic in outer put resp callback {:?}", meta)
+                }
+            },
+        );
+
+        let task = self.fetch_service.fetch(request, callback);
+        self.save_task = Some(task);
+    }
 }
 
 fn gen_node_id() -> NodeId {
@@ -572,17 +579,11 @@ fn gen_node_id() -> NodeId {
     NodeId(format!("{}", u))
 }
 
-// THOUGHTS:
-// walking path to root, maintaining, etc is cumbersome. what if I just had a single node -> parent id mapping?
-// NOTE: could just have an Option<parent_id> field on each node.. why not, eh? always known when inserting node, wouldn't introduce merkle-breaking circularity
 
-// keeping two maps is cumbersome/seems to cause problems w/ state-tracking. what if I just had one map w/ each node having an optional Hash
-// would slightly complicate saving, but would simplify everything else (eg no need to walk map to do anything other than unset ipfs hash for parents)
-// NOTE: would lose NodeRef type-level distinction between local and non/local nodes on modified_nodes, but w/e - same info kept via option field
-// PROBLEM: ^^ would lose lazy-load ability - if map key loses ipfs hash, can't do lazy load on failed lookup
-// NOTE: can fix, by using Node<NodeRef>, with remote node refs used to indicate a required lazy load <- i don't really like this..
-// NOTE: fix via Node<(NodeId, Option<Hash>)> <- would capture req'd info, also could do initial lookup via (SHIT, isomorphic to above..)
-// NOTE: but... would always have node_id for lookup, fall back to hash only if that fails.. yeah, that works
-// could provide helper:
-
-// fn modify_node_local<F: FnOnce(Node<NodeId>)>(node_id: NodeId, f: F)
+// TODO: unicode, css, etc (currently just a debug indicator)
+fn render_is_modified_widget<X: yew::html::Component>(x: &NodeRef) -> Html<X> {
+    match x {
+        NodeRef::Modified(_) => html! { <span> {"[[modified!]]"} </span> },
+        NodeRef::Unmodified(_) => html! { <span> {"[[unmodified!]]"} </span> },
+    }
+}
