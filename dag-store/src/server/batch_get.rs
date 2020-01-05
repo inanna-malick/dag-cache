@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio;
 use tracing::{error, info};
 
-pub fn ipfs_fetch(
+pub fn batch_get(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
     hash: Hash,
@@ -18,13 +18,13 @@ pub fn ipfs_fetch(
     let (send, receive) = mpsc::channel(128); // randomly chose this channel buffer size..
     let memoizer = Arc::new(CHashMap::new());
 
-    ipfs_fetch_ana_internal(store, cache, hash, send, memoizer);
+    batch_get_ana_internal(store, cache, hash, send, memoizer);
 
     receive
 }
 
 // anamorphism - an unfolding change
-fn ipfs_fetch_ana_internal(
+fn batch_get_ana_internal(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
     hash: Hash,
@@ -36,7 +36,7 @@ fn ipfs_fetch_ana_internal(
         hash,
         || {
             tokio::spawn(async move {
-                ipfs_fetch_worker(store, cache, hash2, resp_chan, to_populate).await
+                batch_get_worker(store, cache, hash2, resp_chan, to_populate).await
             });
         },
         |()| (),
@@ -44,7 +44,7 @@ fn ipfs_fetch_ana_internal(
 }
 
 // worker thread - uses one-shot channel to return result to avoid unbounded stack growth
-async fn ipfs_fetch_worker(
+async fn batch_get_worker(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
     hash: Hash,
@@ -65,7 +65,7 @@ async fn ipfs_fetch_worker(
             match sr {
                 Ok(()) => {
                     for link in links.into_iter() {
-                        ipfs_fetch_ana_internal(
+                        batch_get_ana_internal(
                             store.clone(),
                             cache.clone(),
                             link.hash,

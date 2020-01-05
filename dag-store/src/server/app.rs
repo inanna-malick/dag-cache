@@ -60,7 +60,7 @@ impl Runtime {
         })?;
 
         // TODO: wrapper that holds span, instrument, basically - should be possible! maybe build inline?
-        let s = batch_get::ipfs_fetch(
+        let s = batch_get::batch_get(
             self.hashed_blob_store.clone(),
             self.cache.clone(),
             domain_hash,
@@ -113,7 +113,7 @@ impl Runtime {
         })?;
 
         info!("dag cache put handler request, cas: {:?}", &request.cas);
-        let resp = batch_put::ipfs_publish_cata_with_cas(
+        let resp = batch_put::batch_put_cata_with_cas(
             self.mutable_hash_store.clone(),
             self.hashed_blob_store.clone(),
             self.cache.clone(),

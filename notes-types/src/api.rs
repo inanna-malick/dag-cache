@@ -1,10 +1,10 @@
 use crate::notes;
 use dag_store_types::types::domain::TypedHash;
+use dag_store_types::types::validated_tree::ValidatedTree_;
 use dag_store_types::types::{api, validated_tree::ValidatedTree};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
-use dag_store_types::types::validated_tree::ValidatedTree_;
 
 pub static CAS_KEY: &str = "notes-app";
 

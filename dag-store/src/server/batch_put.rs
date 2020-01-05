@@ -18,7 +18,7 @@ use tracing::info;
 // that is the _transaction-scoped_ tree - pretty sure this is supported. will likely need to move to dyn
 // (fat pointers) to avoid excessive code gen but idk
 
-pub async fn ipfs_publish_cata_with_cas(
+pub async fn batch_put_cata_with_cas(
     mhs: Arc<dyn MutableHashStore>,
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
@@ -28,7 +28,7 @@ pub async fn ipfs_publish_cata_with_cas(
     match cas {
         Some(cas) => {
             info!("some cas, writing to store via cata");
-            let res = ipfs_publish_cata(store, cache, tree).await?;
+            let res = batch_put_cata(store, cache, tree).await?;
             info!("some cas, got res: {:?}", &res);
             mhs.cas(
                 &cas.cas_key,
@@ -40,7 +40,7 @@ pub async fn ipfs_publish_cata_with_cas(
             Ok(res)
         }
         None => {
-            let res = ipfs_publish_cata(store, cache, tree).await?;
+            let res = batch_put_cata(store, cache, tree).await?;
             Ok(res)
         }
     }
@@ -48,7 +48,7 @@ pub async fn ipfs_publish_cata_with_cas(
 
 // catamorphism - a consuming change
 // recursively publish DAG node tree to IPFS, starting with leaf nodes
-pub async fn ipfs_publish_cata(
+pub async fn batch_put_cata(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
     tree: ValidatedTree,
@@ -56,7 +56,7 @@ pub async fn ipfs_publish_cata(
     let focus = tree.root_node.clone();
     let tree = Arc::new(tree);
     let (_size, root_hash, additional_uploaded) =
-        ipfs_publish_cata_unsafe(store, cache, tree, focus).await?;
+        batch_put_cata_unsafe(store, cache, tree, focus).await?;
     Ok(bulk_put::Resp {
         root_hash,
         additional_uploaded,
@@ -64,7 +64,7 @@ pub async fn ipfs_publish_cata(
 }
 
 // unsafe b/c it can take any 'focus' ClientId and not just the root node of tree
-async fn ipfs_publish_cata_unsafe(
+async fn batch_put_cata_unsafe(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
     tree: Arc<ValidatedTree>, // todo use async/await I guess, mb can avoid needing Arc? ugh
@@ -72,7 +72,7 @@ async fn ipfs_publish_cata_unsafe(
 ) -> Result<(u64, Hash, Vec<(ClientId, Hash)>), DagCacheError> {
     let (send, receive) = oneshot::channel();
 
-    let f = ipfs_publish_worker(store, cache, tree, send, node);
+    let f = batch_put_worker(store, cache, tree, send, node);
     tokio::spawn(f);
 
     let recvd = receive.await;
@@ -105,7 +105,7 @@ async fn upload_link(
             let node = tree.nodes[&client_id].clone();
 
             let (size, hash, mut additional_uploaded) =
-                ipfs_publish_cata_unsafe(store, cache.clone(), tree.clone(), node.clone()).await?;
+                batch_put_cata_unsafe(store, cache.clone(), tree.clone(), node.clone()).await?;
             let hdr = Header {
                 name: client_id.to_string(),
                 size,
@@ -119,7 +119,7 @@ async fn upload_link(
 }
 
 // needed to not have async cycle? idk lmao FIXME refactor
-fn ipfs_publish_worker(
+fn batch_put_worker(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
     tree: Arc<ValidatedTree>,
@@ -129,7 +129,7 @@ fn ipfs_publish_worker(
     // TODO: ask rain
     node: bulk_put::Node,
 ) -> Box<dyn Future<Output = ()> + Unpin + Send> {
-    let f = ipfs_publish_worker_async(store, cache, tree, node)
+    let f = batch_put_worker_async(store, cache, tree, node)
         .map(move |res| {
             let chan_send_res = chan.send(res);
             if let Err(err) = chan_send_res {
@@ -142,7 +142,7 @@ fn ipfs_publish_worker(
 }
 
 // worker thread - uses one-shot channel to return result to avoid unbounded stack growth
-async fn ipfs_publish_worker_async(
+async fn batch_put_worker_async(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
     tree: Arc<ValidatedTree>,
@@ -212,7 +212,7 @@ mod tests {
         }
     }
 
-    // uses mock capabilities, does not require local ipfs daemon
+    // uses mock capabilities, does not require local fs state
     #[tokio::test]
     async fn test_batch_upload() {
         //build some client side 'hashes' - base58 of 1, 2, 3, 4
@@ -252,9 +252,9 @@ mod tests {
 
         let cache = Arc::new(Cache::new(16));
 
-        let _published = ipfs_publish_cata(store.clone(), cache, validated_tree)
+        let _published = batch_put_cata(store.clone(), cache, validated_tree)
             .await
-            .expect("ipfs publish cata error");
+            .expect("publish cata error");
 
         let map = store.0.lock().unwrap();
 

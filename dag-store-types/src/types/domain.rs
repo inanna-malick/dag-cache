@@ -5,6 +5,7 @@ use crate::types::errors::ProtoDecodingError;
 use crate::types::grpc;
 use serde::{Deserialize, Serialize};
 use serde::{Deserializer, Serializer};
+use blake2::{Blake2b, Digest};
 
 #[derive(PartialEq, Hash, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct ClientId(pub String); // string? u128? idk
@@ -62,6 +63,10 @@ impl Header {
 pub struct Hash(pub Base58);
 
 impl Hash {
+    pub fn to_string_canonical(&self) -> String {
+        format!("{}.blake2", self)
+    }
+
     #[cfg(feature = "grpc")]
     pub fn into_proto(self) -> grpc::Hash {
         let base_58 = self.0;
@@ -133,6 +138,18 @@ pub struct Node {
 }
 
 impl Node {
+    pub fn canonical_hash(&self) -> Hash {
+        let mut hasher = Blake2b::new();
+        for link in self.links.iter() {
+            hasher.input(&link.name);
+            hasher.input(&(link.hash.0).0);
+            hasher.input(link.size.to_be_bytes());
+        }
+        hasher.input(&self.data.0);
+        let hash = hasher.result();
+        Hash::from_raw(Base58::from_bytes(hash.to_vec()))
+    }
+
     #[cfg(feature = "grpc")]
     pub fn into_proto(self) -> grpc::Node {
         grpc::Node {

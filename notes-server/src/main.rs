@@ -18,7 +18,7 @@ use std::{
 };
 use structopt::StructOpt;
 use tonic::metadata::MetadataValue;
-use tracing::{instrument, error};
+use tracing::{error, instrument};
 use warp::{reject, Filter};
 
 use headers::HeaderMapExt;

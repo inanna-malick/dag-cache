@@ -50,8 +50,6 @@ dag-store-types = { path = "../dag-store-types", features = ["grpc"] }
 honeycomb-tracing = { git = "https://github.com/pkinsky/honeycomb-tracing", branch = "v2" }
 libhoney-rust = "0.1.3"
 
-blake2 = "0.8.1"
-
 [dev-dependencies]
 rand = "0.7"
 

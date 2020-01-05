@@ -26,7 +26,7 @@ pub enum EditFocus {
     NodeBody,
 }
 
-// NOTE: optional ipfs hash indicates if node is modified or not
+// NOTE: optional hash indicates if node is modified or not
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct InMemNode {
     hash: Option<TypedHash<CannonicalNode>>,

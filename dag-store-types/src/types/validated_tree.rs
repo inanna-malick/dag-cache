@@ -1,8 +1,8 @@
 use crate::types::api::bulk_put::{Node, NodeLink};
 use crate::types::api::ClientId;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hash::Hash;
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ValidatedTree_<K: Eq + Hash, V> {
@@ -17,10 +17,12 @@ impl ValidatedTree {
         root_node: Node,
         nodes: HashMap<ClientId, Node>,
     ) -> Result<ValidatedTree, ValidatedTreeBuildErr<ClientId>> {
-        ValidatedTree::validate_(root_node, nodes, |x| x.links.clone().into_iter().filter_map( |x| match x {
-            NodeLink::Local(csh) => Some(csh),
-            NodeLink::Remote(_) => None,
-        }))
+        ValidatedTree::validate_(root_node, nodes, |x| {
+            x.links.clone().into_iter().filter_map(|x| match x {
+                NodeLink::Local(csh) => Some(csh),
+                NodeLink::Remote(_) => None,
+            })
+        })
     }
 }
 
@@ -43,7 +45,7 @@ impl<K: Eq + Hash, V> ValidatedTree_<K, V> {
             match nodes.get(&node_id) {
                 Some(node) => {
                     for link in extract_keys(node) {
-                            stack.push(link);
+                        stack.push(link);
                     }
                 }
                 None => return Err(ValidatedTreeBuildErr::InvalidLink(node_id)),

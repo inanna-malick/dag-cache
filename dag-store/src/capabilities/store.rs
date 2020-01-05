@@ -1,5 +1,4 @@
 use crate::capabilities::{HashedBlobStore, MutableHashStore};
-use blake2::{Blake2b, Digest};
 use dag_store_types::types::domain::{Hash, Node};
 use dag_store_types::types::encodings;
 use dag_store_types::types::errors::{DagCacheError, ProtoDecodingError};
@@ -11,14 +10,6 @@ use tracing::instrument;
 /// store backed by local fs sled db (embedded)
 pub struct FileSystemStore(Db);
 
-// TODO: better type names - IPFS -> Something Else (m)
-fn mk_hash(v: &[u8]) -> Hash {
-    let mut hasher = Blake2b::new();
-    hasher.input(v);
-    let hash = hasher.result();
-    Hash::from_raw(encodings::Base58::from_bytes(hash.to_vec()))
-}
-
 impl FileSystemStore {
     pub fn new(path: String) -> Self {
         let db = Db::open(path).unwrap();
@@ -27,7 +18,7 @@ impl FileSystemStore {
 
     #[instrument(skip(self))]
     fn get_blob(&self, hash: Hash) -> Result<Node, DagCacheError> {
-        match self.0.get(format!("{}.blake2", hash)) {
+        match self.0.get(hash.to_string_canonical()) {
             Ok(Some(value)) => {
                 let node = serde_json::from_reader(value.as_ref()).map_err(|e| {
                     ProtoDecodingError(format!("error parsing proto file: {:?}", e))
@@ -45,9 +36,9 @@ impl FileSystemStore {
         // TODO: serialize as proto now that I'm not interacting with IPFS! yay :)
         let bytes = serde_json::to_vec(&v).expect("json _serialize_ failed (should be impossible)");
 
-        let hash = mk_hash(&bytes);
+        let hash = v.canonical_hash();
 
-        self.0.insert(format!("{}.blake2", hash), bytes).unwrap(); // todo: expose error instead of panic
+        self.0.insert(hash.to_string_canonical(), bytes).unwrap(); // todo: expose error instead of panic
 
         Ok(hash)
     }
