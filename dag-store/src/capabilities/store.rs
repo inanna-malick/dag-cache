@@ -52,8 +52,8 @@ impl FileSystemStore {
 
     #[instrument(skip(self))]
     fn get_mhs(&self, k: &str) -> Result<Option<Hash>, DagCacheError> {
-        let proto = self.get_and_decode(k)?;
-        let res = proto.map(Hash::from_proto).transpose()?;
+        let res = self.0.get(k).map_err(DagCacheError::unexpected)?;
+        let res = res.map(decode);
         Ok(res)
     }
 

@@ -182,7 +182,6 @@ impl server::DagStore for Runtime {
 
 /// Extract a tracing id from the provided metadata
 fn extract_tracing_id_and_record(meta: &tonic::metadata::MetadataMap) -> Result<(), Status> {
-    println!("got meta: {:?}", &meta);
     match meta.get_bin("trace-ctx-bin") {
         Some(b) => {
             let b = b.to_bytes().map_err(|e| {
@@ -192,7 +191,6 @@ fn extract_tracing_id_and_record(meta: &tonic::metadata::MetadataMap) -> Result<
                     format!("died converting to bytes: {:?}", e),
                 )
             })?;
-            println!("got key for binary from meta: {:?}", &b);
             let trace_ctx = grpc::TraceCtx::decode(b).map_err(|e| {
                 event!(Level::ERROR, msg = "unable to parse trace-ctx-bin metadata value as proto", error = ?e);
                 Status::new(
@@ -215,7 +213,6 @@ fn extract_tracing_id_and_record(meta: &tonic::metadata::MetadataMap) -> Result<
         }
         None => {
             let trace_id = TraceId::generate();
-            println!("generated trace id {:?}", &trace_id);
             TraceCtx {
                 trace_id,
                 parent_span: None,

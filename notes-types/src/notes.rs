@@ -37,6 +37,13 @@ impl NodeRef {
             NodeRef::Unmodified(RemoteNodeRef(id, _hash)) => id,
         }
     }
+
+    pub fn into_node_id(self) -> NodeId {
+        match self {
+            NodeRef::Modified(id) => id,
+            NodeRef::Unmodified(RemoteNodeRef(id, _hash)) => id,
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Hash, Serialize, Deserialize, Debug)]

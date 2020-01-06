@@ -18,7 +18,7 @@ use std::{
 };
 use structopt::StructOpt;
 use tonic::metadata::MetadataValue;
-use tracing::{error, instrument};
+use tracing::{error, info, instrument};
 use warp::{reject, Filter};
 
 use headers::HeaderMapExt;
@@ -184,7 +184,7 @@ async fn main() {
 
             match res {
                 Ok(resp) => {
-                    error!("initial state resp: {:?}", &resp);
+                    info!("initial state resp: {:?}", &resp);
                     let t = match resp {
                         Some(h) => crate::opts::WithTemplate {
                             name: "index.html",

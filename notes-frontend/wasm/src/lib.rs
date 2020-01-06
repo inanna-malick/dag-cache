@@ -9,8 +9,11 @@ use std::collections::HashMap;
 use stdweb::js;
 use yew::events::IKeyboardEvent;
 use yew::format::{Json, Nothing};
-use yew::services::fetch::{FetchService, FetchTask, Request, Response};
-use yew::services::interval::{IntervalService, IntervalTask};
+use yew::services::{
+    dialog::DialogService,
+    fetch::{FetchService, FetchTask, Request, Response},
+    interval::{IntervalService, IntervalTask},
+};
 use yew::{html, Component, ComponentLink, Html, Properties, ShouldRender};
 
 macro_rules! println {
@@ -57,7 +60,7 @@ pub struct EditState {
 #[derive(Debug)]
 pub struct State {
     nodes: HashMap<NodeId, InMemNode>, // note: node ref's can contain stale hashes.. is ok?
-    entry_point: NodeRef, // NOTE: can contain stale hashes.. is this the wrong way to store root? mb just node id?
+    root_node_id: NodeRef, // NOTE: can contain stale hashes.. is this the wrong way to store root? mb just node id?
     // node (header or body) being edited, as property of state & note node tree
     // focus includes path to root from that node
     last_known_hash: Option<TypedHash<CannonicalNode>>, // for CAS
@@ -81,6 +84,7 @@ pub enum Msg {
     FetchComplete(RemoteNodeRef, notes_types::api::GetResp), // HTTP fetch from store (domain type)
     StartSave,            // init backup of everything in store - blocking operation, probably
     SaveComplete(api_types::bulk_put::Resp),
+    Delete(NodeId),
     NoOp,
     // TODO: use https://gomakethings.com/how-to-test-if-an-element-is-in-the-viewport-with-vanilla-javascript/
     // TODO: to trigger lazy loading when a lazy-loaded element enters the viewport (is on-screen)
@@ -100,7 +104,7 @@ impl Component for State {
     fn create(opt_hash: Self::Properties, mut link: ComponentLink<Self>) -> Self {
         let mut nodes = HashMap::new();
 
-        let (entry_point, last_known_hash) = match opt_hash {
+        let (root_node_id, last_known_hash) = match opt_hash {
             Arg { hash: None } => {
                 let fresh_root = InMemNode {
                     hash: None,             // not persisted
@@ -125,7 +129,7 @@ impl Component for State {
 
         State {
             nodes: nodes,
-            entry_point,
+            root_node_id,
             last_known_hash,
             edit_state: None,
             // TODO: split out display-relevant state and capabilities
@@ -141,7 +145,7 @@ impl Component for State {
     fn update(&mut self, msg: Self::Message) -> ShouldRender {
         match msg {
             Msg::StartSave => {
-                if let NodeRef::Modified(modified_root_id) = &self.entry_point {
+                if let NodeRef::Modified(modified_root_id) = &self.root_node_id {
                     let modified_root_id = modified_root_id.clone();
                     // construct map of all nodes that have been modified
                     let mut extra_nodes: HashMap<NodeId, Node<NodeRef>> = HashMap::new();
@@ -154,12 +158,11 @@ impl Component for State {
 
                     let mut stack: Vec<NodeId> = Vec::new();
 
-
                     for node_ref in head_node.children.iter() {
                         if let NodeRef::Modified(id) = node_ref {
                             stack.push(id.clone());
                         };
-                    };
+                    }
 
                     while let Some(id) = stack.pop() {
                         let node = self.nodes.get(&id).expect("node lookup failed");
@@ -167,15 +170,15 @@ impl Component for State {
                             if let NodeRef::Modified(id) = node_ref {
                                 stack.push(id.clone());
                             };
-                        };
+                        }
                         extra_nodes.insert(id, node.inner.clone());
                     }
 
                     // unable to validate tree, error is in above algorithm
                     let tree = ValidatedTree_::validate_(head_node, extra_nodes, |n| {
-                        n.children.clone().into_iter().filter_map ( |x| match x {
+                        n.children.clone().into_iter().filter_map(|x| match x {
                             NodeRef::Modified(x) => Some(x),
-                            _ => None
+                            _ => None,
                         })
                     })
                     .expect("failure validating tree while building put request");
@@ -201,7 +204,7 @@ impl Component for State {
                 self.last_known_hash = Some(root_hash.clone()); // set last known hash for future CAS use
                 let root_node_ref = RemoteNodeRef(root_id.clone(), root_hash.clone());
                 // update entry point to newly-persisted root node
-                self.entry_point = NodeRef::Unmodified(root_node_ref);
+                self.root_node_id = NodeRef::Unmodified(root_node_ref);
 
                 // build client id -> hash map for lookups
                 let mut node_id_to_hash = HashMap::new();
@@ -313,15 +316,59 @@ impl Component for State {
             Msg::CommitEdit => {
                 self.commit_edit();
             }
+            Msg::Delete(node_id) => {
+                // doing this here makes my life significantly simpler,
+                // at the cost of having to re-enter edit state sometimes
+                self.commit_edit();
+
+                let mut svc = DialogService::new();
+                let node = self
+                    .nodes
+                    .get(&node_id)
+                    .expect("error - attempting to delete nonexisting node");
+
+                if svc.confirm(&format!("delete node with header {}", node.header)) {
+                    // set node & parents to modified before removing it
+                    self.set_parent_nodes_to_modified(&node_id);
+
+                    let node = self
+                        .nodes
+                        .remove(&node_id)
+                        .expect("error - attempting to delete nonexisting node");
+
+                    if let Some(parent) = &node.parent {
+                        let parent = self.nodes.get_mut(&parent).expect("broken pointer");
+                        parent
+                            .children
+                            .retain(|node_ref| node_ref.node_id() != &node_id)
+                    }
+
+                    let mut stack: Vec<NodeId> = node
+                        .inner
+                        .children
+                        .into_iter()
+                        .map(|x| x.into_node_id())
+                        .collect();
+
+                    // garbage-collect any locally present children of deleted node
+                    while let Some(next_id) = stack.pop() {
+                        // children of deleted nodes may not exist locally, fine if not exists
+                        if let Some(node) = self.nodes.remove(&next_id) {
+                            for next_id in node.inner.children.into_iter().map(|x| x.into_node_id())
+                            {
+                                stack.push(next_id);
+                            }
+                        }
+                    }
+                };
+            }
             Msg::CreateOn { parent, at_idx } => {
                 // we're modifying this node, so walk back to root and make sure all parent nodes reflect modification
                 //TODO: still needed, figure out new sig
                 self.set_parent_nodes_to_modified(&parent);
 
                 // close out any pre-existing edit ops
-                if let Some(_) = &self.edit_state {
-                    self.commit_edit(); // may call set_parent_nodes_to_modified & overlap w/ above walk_path_to_root nodes
-                };
+                self.commit_edit(); // may call set_parent_nodes_to_modified & overlap w/ above walk_path_to_root nodes
 
                 if let Some(node) = self.nodes.get_mut(&parent) {
                     let new_node_id = gen_node_id();
@@ -351,9 +398,9 @@ impl Component for State {
     fn view(&self) -> Html<Self> {
         html! {
             <div class="wrapper">
-                <div> { render_is_modified_widget(&self.entry_point) } </div>
+                <div> { render_is_modified_widget(&self.root_node_id) } </div>
                 <ul class = "top-level">
-                    { self.render_node(&self.entry_point) }
+                    { self.render_node(&self.root_node_id) }
                 </ul>
             </div>
         }
@@ -361,30 +408,27 @@ impl Component for State {
 }
 
 impl State {
-    // weird type, essentially want to defer throw-or-not to caller & dislike using bool flags
-    // NOTE: should never happen while save task is Some(_) -- all view components that would fire this disabled (ditto adding subnode)
-    fn commit_edit(&mut self) {
-        match self.edit_state.take() {
-            // NOTE: use take to remove edit focus, if any
-            None => {
-                panic!("tried to commit edit but no edit focus exists");
-            }
-            Some(es) => {
-                if let Some(node) = self.nodes.get_mut(&es.node_focus) {
-                    match es.component_focus {
-                        EditFocus::NodeHeader => {
-                            node.header = es.edited_contents;
-                        }
-                        EditFocus::NodeBody => {
-                            node.body = es.edited_contents;
-                        }
-                    };
-                    self.set_parent_nodes_to_modified(&es.node_focus); // set as modified from this node to root
-                } else {
-                    panic!("no node found while committing edits");
+    fn commit_edit(&mut self) -> Option<(EditFocus, NodeId)>{
+        // use take to remove edit focus, if any
+        if let Some(es) = self.edit_state.take() {
+            let node = self
+                .nodes
+                .get_mut(&es.node_focus)
+                .expect("unable to commit edit, broken pointer");
+
+            let res = match es.component_focus {
+                EditFocus::NodeHeader => {
+                    node.header = es.edited_contents;
+                    Some((EditFocus::NodeHeader, es.node_focus.clone()))
                 }
-            }
-        };
+                EditFocus::NodeBody => {
+                    node.body = es.edited_contents;
+                    Some((EditFocus::NodeBody, es.node_focus.clone()))
+                }
+            };
+            self.set_parent_nodes_to_modified(&es.node_focus); // set as modified from this node to root
+            res
+        } else { None }
     }
 
     fn render_node(&self, node_ref: &NodeRef) -> Html<Self> {
@@ -465,8 +509,14 @@ impl State {
                 </div>
             }
         } else {
+            let node_id_2 = node_id.clone();
             html! {
-                <div class="node-header" ondoubleclick=|_| Msg::EnterHeaderEdit{target: node_id.clone()}>{ &node.header }</div>
+                <div>
+                    <button class="delete-button" onclick=|_| Msg::Delete(node_id.clone())>
+                        {"X"}
+                    </button>
+                    <div class="node-header" onclick=|_| Msg::EnterHeaderEdit{target: node_id_2.clone()}>{ &node.header }</div>
+                </div>
             }
         }
     }
@@ -508,7 +558,7 @@ impl State {
             }
         } else {
             html! {
-                <div class = "node-body" ondoubleclick=|_| Msg::EnterBodyEdit{ target: node_id.clone() }>{ &node.body }</div>
+                <div class = "node-body" onclick=|_| Msg::EnterBodyEdit{ target: node_id.clone() }>{ &node.body }</div>
             }
         }
     }
@@ -521,8 +571,8 @@ impl State {
         while let Some(node) = self.nodes.get_mut(&target) {
             if let Some(_stale_hash) = &node.hash {
                 // if this is the root/entry point node, demote it to modified
-                if self.entry_point.node_id() == &target {
-                    self.entry_point = NodeRef::Modified(target.clone());
+                if self.root_node_id.node_id() == &target {
+                    self.root_node_id = NodeRef::Modified(target.clone());
                 };
                 node.hash = None;
             };
@@ -556,7 +606,7 @@ impl State {
             // why is this is neccessary given Json body type on builder - mb I'm doing it wrong?
             .header("Content-Type", "application/json")
             .body(Json(&req))
-            .unwrap();
+            .expect("push node request");
 
         let callback = self.link.send_back(
             move |response: Response<Json<Result<api_types::bulk_put::Resp, failure::Error>>>| {
@@ -582,7 +632,6 @@ fn gen_node_id() -> NodeId {
     let u = rand::random::<u128>();
     NodeId(format!("{}", u))
 }
-
 
 // TODO: unicode, css, etc (currently just a debug indicator)
 fn render_is_modified_widget<X: yew::html::Component>(x: &NodeRef) -> Html<X> {
