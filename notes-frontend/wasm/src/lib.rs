@@ -71,25 +71,34 @@ pub struct State {
     interval_service: IntervalService,
     interval_task: IntervalTask, // I guess I just need to hold on to this forever (???)
     save_task: Option<FetchTask>, // this one is good, can be dropped to abort save tasks
+    expanded_nodes: HashMap<NodeId, bool>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Msg {
+    Maximize(NodeId),
+    Minimize(NodeId),
+    Backend(BackendMsg),
+    Edit(EditMsg),
+    NoOp,
+}
+
+pub enum EditMsg {
     EnterHeaderEdit { target: NodeId },
     EnterBodyEdit { target: NodeId },
     UpdateEdit(String),
     CommitEdit,
     CreateOn { at_idx: usize, parent: NodeId },
+    Delete(NodeId),
+}
+
+pub enum BackendMsg {
     Fetch(RemoteNodeRef), // HTTP fetch from store
     FetchComplete(RemoteNodeRef, notes_types::api::GetResp), // HTTP fetch from store (domain type)
     StartSave,            // init backup of everything in store - blocking operation, probably
     SaveComplete(api_types::bulk_put::Resp),
-    Delete(NodeId),
-    NoOp,
-    // TODO: use https://gomakethings.com/how-to-test-if-an-element-is-in-the-viewport-with-vanilla-javascript/
-    // TODO: to trigger lazy loading when a lazy-loaded element enters the viewport (is on-screen)
-    // LazyLoadOnScroll,
 }
+
 
 #[derive(serde::Deserialize, Debug, PartialEq, Properties)]
 pub struct Arg {
@@ -139,6 +148,7 @@ impl Component for State {
             save_task: None, // no active save op
             interval_service,
             interval_task,
+            expanded_nodes: HashMap::new(),
         }
     }
 
@@ -281,15 +291,12 @@ impl Component for State {
                     self.commit_edit();
                 };
 
-                if let Some(node) = self.nodes.get(&target) {
-                    self.edit_state = Some(EditState {
-                        component_focus: EditFocus::NodeHeader,
-                        node_focus: target,
-                        edited_contents: node.header.clone(),
-                    });
-                } else {
-                    panic!("node lookup failed (BUG)");
-                }
+                let node = self.nodes.get(&target).expect("broken pointer");
+                self.edit_state = Some(EditState {
+                    component_focus: EditFocus::NodeHeader,
+                    node_focus: target,
+                    edited_contents: node.header.clone(),
+                });
             }
             Msg::EnterBodyEdit { target } => {
                 // commit pre-existing edit if exists
@@ -297,24 +304,32 @@ impl Component for State {
                     self.commit_edit();
                 };
 
-                if let Some(node) = self.nodes.get(&target) {
-                    self.edit_state = Some(EditState {
-                        component_focus: EditFocus::NodeBody,
-                        node_focus: target,
-                        edited_contents: node.body.clone(),
-                    });
-                } else {
-                    panic!("node lookup failed (BUG)");
-                }
+                let node = self.nodes.get(&target).expect("broken pointer");
+                self.edit_state = Some(EditState {
+                    component_focus: EditFocus::NodeBody,
+                    node_focus: target,
+                    edited_contents: node.body.clone(),
+                });
             }
-            Msg::UpdateEdit(new_s) => match &mut self.edit_state {
-                None => {
-                    panic!("error, no edit state to update");
-                }
-                Some(es) => es.edited_contents = new_s,
-            },
+            Msg::UpdateEdit(new_s) => {
+                let es: &mut EditState = self
+                    .edit_state
+                    .as_mut()
+                    .expect("no edit state, attempting to update");
+                es.edited_contents = new_s;
+            }
             Msg::CommitEdit => {
                 self.commit_edit();
+            }
+            Msg::Maximize(node_id) => {
+                self.set_expanded(node_id, true);
+            }
+            Msg::Minimize(node_id) => {
+                // doing this here makes my life significantly simpler,
+                // at the cost of having to re-enter edit state sometimes
+                // (Specifically, for case where minimized node is parent of edit focus)
+                self.commit_edit();
+                self.set_expanded(node_id, false);
             }
             Msg::Delete(node_id) => {
                 // doing this here makes my life significantly simpler,
@@ -370,25 +385,22 @@ impl Component for State {
                 // close out any pre-existing edit ops
                 self.commit_edit(); // may call set_parent_nodes_to_modified & overlap w/ above walk_path_to_root nodes
 
-                if let Some(node) = self.nodes.get_mut(&parent) {
-                    let new_node_id = gen_node_id();
-                    node.children
-                        .insert(at_idx, NodeRef::Modified(new_node_id.clone())); // insert reference to new node
-                    let new_node = InMemNode {
-                        hash: None,
-                        inner: Node::new(Some(parent)),
-                    };
-                    self.nodes.insert(new_node_id.clone(), new_node); // insert new node
+                let node = self.nodes.get_mut(&parent).expect("broken pointer");
+                let new_node_id = gen_node_id();
+                node.children
+                    .insert(at_idx, NodeRef::Modified(new_node_id.clone())); // insert reference to new node
+                let new_node = InMemNode {
+                    hash: None,
+                    inner: Node::new(Some(parent)),
+                };
+                self.nodes.insert(new_node_id.clone(), new_node); // insert new node
 
-                    // enter edit mode with empty header
-                    self.edit_state = Some(EditState {
-                        component_focus: EditFocus::NodeHeader,
-                        node_focus: new_node_id,
-                        edited_contents: "".to_string(),
-                    });
-                } else {
-                    panic!("node lookup failed (BUG)");
-                }
+                // enter edit mode with empty header
+                self.edit_state = Some(EditState {
+                    component_focus: EditFocus::NodeHeader,
+                    node_focus: new_node_id,
+                    edited_contents: "".to_string(),
+                });
             }
             Msg::NoOp => {}
         }
@@ -408,7 +420,10 @@ impl Component for State {
 }
 
 impl State {
-    fn commit_edit(&mut self) -> Option<(EditFocus, NodeId)>{
+    fn update_backend(&mut self, msg: BackendMsg) -> ShouldRender {
+    }
+
+    fn commit_edit(&mut self) -> Option<(EditFocus, NodeId)> {
         // use take to remove edit focus, if any
         if let Some(es) = self.edit_state.take() {
             let node = self
@@ -428,48 +443,62 @@ impl State {
             };
             self.set_parent_nodes_to_modified(&es.node_focus); // set as modified from this node to root
             res
-        } else { None }
+        } else {
+            None
+        }
     }
 
     fn render_node(&self, node_ref: &NodeRef) -> Html<Self> {
         let node_ref = node_ref.clone();
         let is_saving = self.save_task.is_some();
-        if let Some(node) = self.nodes.get(&node_ref.node_id()) {
-            let node_child_count = node.children.len();
-            let children: &Vec<NodeRef> = &node.children;
-            html! {
-                <li class = "node">
-                    { self.render_node_header(&node_ref.node_id(), &node) }
-                    { self.render_node_body(&node_ref.node_id(), &node) }
-                        <ul class = "nested-list">
-                            { for children.iter().map(|node_ref| {
-                                    self.render_node(node_ref)
-                                })
-                            }
-                        <button class="add-subnode" onclick=|_|
-                            if is_saving {
-                                Msg::NoOp
-                            } else { Msg::CreateOn{ at_idx: node_child_count,
-                                                    parent: node_ref.node_id().clone(),
-                            }
-                            }>
-                            {"add subnode"}
-                        </button>
-                    </ul>
-                </li>
-            }
-        } else {
-            if let NodeRef::Unmodified(remote_node_ref) = node_ref {
+
+        if self.is_expanded(node_ref.node_id()) {
+
+            if let Some(node) = self.nodes.get(&node_ref.node_id()) {
+                let node_child_count = node.children.len();
+                let children: &Vec<NodeRef> = &node.children;
                 html! {
-                    <li class = "node-lazy">
-                    <button class="load-node" onclick=|_| Msg::Fetch(remote_node_ref.clone())>
-                    {"load node"}
-                    </button>
+                    <li class = "node">
+                        { self.render_node_header(&node_ref.node_id(), &node) }
+                        { self.render_node_body(&node_ref.node_id(), &node) }
+                            <ul class = "nested-list">
+                                { for children.iter().map(|node_ref| {
+                                        self.render_node(node_ref)
+                                    })
+                                }
+                            <button class="add-subnode" onclick=|_|
+                                if is_saving {
+                                    Msg::NoOp
+                                } else { Msg::CreateOn{ at_idx: node_child_count,
+                                                        parent: node_ref.node_id().clone(),
+                                }
+                                }>
+                                {"++"}
+                            </button>
+                        </ul>
                     </li>
                 }
             } else {
-                panic!("can't lazily load modified node ref")
+                if let NodeRef::Unmodified(remote_node_ref) = node_ref {
+                    html! {
+                        <li class = "node-lazy">
+                        <button class="load-node" onclick=|_| Msg::Fetch(remote_node_ref.clone())>
+                        {"load node"}
+                        </button>
+                        </li>
+                    }
+                } else {
+                    panic!("can't lazily load modified node ref")
+                }
             }
+        } else {
+            let node_id = node_ref.node_id().clone();
+            html! {
+                <button class="maximize-button" onclick=|_| Msg::Maximize(node_id.clone())>
+                {"[+]"}
+                </button>
+            }
+
         }
     }
 
@@ -509,13 +538,18 @@ impl State {
                 </div>
             }
         } else {
+            // TODO: get back to where I have 'copy' (likely u64 internal repr)
             let node_id_2 = node_id.clone();
+            let node_id_3 = node_id.clone();
             html! {
                 <div>
                     <button class="delete-button" onclick=|_| Msg::Delete(node_id.clone())>
                         {"X"}
                     </button>
-                    <div class="node-header" onclick=|_| Msg::EnterHeaderEdit{target: node_id_2.clone()}>{ &node.header }</div>
+                    <button class="minimize-button" onclick=|_| Msg::Minimize(node_id_2.clone())>
+                    {"[-]"}
+                    </button>
+                    <div class="node-header" onclick=|_| Msg::EnterHeaderEdit{target: node_id_3.clone()}>{ &node.header }</div>
                 </div>
             }
         }
@@ -625,6 +659,14 @@ impl State {
 
         let task = self.fetch_service.fetch(request, callback);
         self.save_task = Some(task);
+    }
+
+    fn set_expanded(&mut self, node_id: NodeId, is_expanded: bool) {
+        self.expanded_nodes.insert(node_id, is_expanded);
+    }
+
+    fn is_expanded(&self, node_id: &NodeId) -> bool {
+        *self.expanded_nodes.get(node_id).unwrap_or(&true)
     }
 }
 
