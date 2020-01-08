@@ -14,7 +14,7 @@ fn main() {
     let current_dir = std::env::current_dir().unwrap();
 
     // TODO: figure out how to pass in --release flag conditionally (probably exists in env for build.rs)
-    Command::new("cargo")
+    let output = Command::new("cargo")
         .arg("web")
         .arg("deploy")
         .arg("--output")
@@ -22,6 +22,12 @@ fn main() {
         .current_dir(current_dir.join("wasm"))
         .output()
         .expect("failed to execute cargo web deploy");
+
+    if !output.status.success() {
+        std::io::stdout().write_all(&output.stdout).unwrap();
+        std::io::stderr().write_all(&output.stderr).unwrap();
+        panic!("failed to build wasm files")
+    }
 
     let f_dest_path = Path::new(&out_dir).join("wasm_blobs.rs");
     let mut f = fs::File::create(&f_dest_path).unwrap();

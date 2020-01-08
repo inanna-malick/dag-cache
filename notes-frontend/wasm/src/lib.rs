@@ -60,7 +60,9 @@ pub struct EditState {
 #[derive(Debug)]
 pub struct State {
     nodes: HashMap<NodeId, InMemNode>, // note: node ref's can contain stale hashes.. is ok?
-    root_node_id: NodeRef, // NOTE: can contain stale hashes.. is this the wrong way to store root? mb just node id?
+    root_node: NodeRef, // NOTE: can contain stale hashes.. is this the wrong way to store root? mb just node id?
+    // TODO: maintain in-memory navigation stack to enable navigating back (navigating to parent isn't safe w/o hash b/c remote nodes
+    focus_node: NodeRef, // to allow zooming in on subnodes
     // node (header or body) being edited, as property of state & note node tree
     // focus includes path to root from that node
     last_known_hash: Option<TypedHash<CannonicalNode>>, // for CAS
@@ -78,11 +80,15 @@ pub struct State {
 pub enum Msg {
     Maximize(NodeId),
     Minimize(NodeId),
+    FocusOn(NodeRef), // set top-level focus to node
+    FocusOnRoot,      // up one node from current node
+
     Backend(BackendMsg),
     Edit(EditMsg),
     NoOp,
 }
 
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub enum EditMsg {
     EnterHeaderEdit { target: NodeId },
     EnterBodyEdit { target: NodeId },
@@ -92,13 +98,13 @@ pub enum EditMsg {
     Delete(NodeId),
 }
 
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub enum BackendMsg {
-    Fetch(RemoteNodeRef), // HTTP fetch from store
+    Fetch(RemoteNodeRef),                                    // HTTP fetch from store
     FetchComplete(RemoteNodeRef, notes_types::api::GetResp), // HTTP fetch from store (domain type)
-    StartSave,            // init backup of everything in store - blocking operation, probably
+    StartSave, // init backup of everything in store - blocking operation, probably
     SaveComplete(api_types::bulk_put::Resp),
 }
-
 
 #[derive(serde::Deserialize, Debug, PartialEq, Properties)]
 pub struct Arg {
@@ -113,7 +119,7 @@ impl Component for State {
     fn create(opt_hash: Self::Properties, mut link: ComponentLink<Self>) -> Self {
         let mut nodes = HashMap::new();
 
-        let (root_node_id, last_known_hash) = match opt_hash {
+        let (root_node, last_known_hash) = match opt_hash {
             Arg { hash: None } => {
                 let fresh_root = InMemNode {
                     hash: None,             // not persisted
@@ -132,13 +138,14 @@ impl Component for State {
         // repeatedly wake up save process - checks root node, save (recursively) if modifed
         let mut interval_service = IntervalService::new();
         let thirty_seconds = std::time::Duration::new(10, 0);
-        let callback = link.send_back(move |_: ()| Msg::StartSave);
+        let callback = link.send_back(move |_: ()| Msg::Backend(BackendMsg::StartSave));
 
         let interval_task = interval_service.spawn(thirty_seconds, callback);
 
         State {
             nodes: nodes,
-            root_node_id,
+            focus_node: root_node.clone(),
+            root_node,
             last_known_hash,
             edit_state: None,
             // TODO: split out display-relevant state and capabilities
@@ -154,8 +161,166 @@ impl Component for State {
 
     fn update(&mut self, msg: Self::Message) -> ShouldRender {
         match msg {
-            Msg::StartSave => {
-                if let NodeRef::Modified(modified_root_id) = &self.root_node_id {
+            Msg::Maximize(node_id) => {
+                self.set_expanded(node_id, true);
+            }
+            Msg::Minimize(node_id) => {
+                // doing this here makes my life significantly simpler,
+                // at the cost of having to re-enter edit state sometimes
+                // (for case where minimized node is parent of edit focus)
+                self.commit_edit();
+                self.set_expanded(node_id, false);
+            }
+            Msg::FocusOnRoot => {
+                self.focus_node = self.root_node.clone();
+            }
+            Msg::FocusOn(node_ref) => {
+                // doing this here makes my life significantly simpler,
+                // at the cost of having to re-enter edit state sometimes
+                // (for case where edit focus node is parent/sibling of focus node)
+                self.commit_edit();
+
+                self.focus_node = node_ref;
+            }
+            Msg::Edit(e) => self.update_edit(e),
+            Msg::Backend(b) => self.update_backend(b),
+            Msg::NoOp => {}
+        }
+        true
+    }
+
+    fn view(&self) -> Html<Self> {
+        html! {
+            <div class="wrapper">
+                <button class="focus-on-root" onclick=|_| Msg::FocusOnRoot>
+                {"[^]"}
+                </button>
+                <div> { render_is_modified_widget(&self.root_node) } </div>
+                <ul class = "top-level">
+                    { self.render_node(&self.focus_node) }
+                </ul>
+            </div>
+        }
+    }
+}
+
+impl State {
+    fn update_edit(&mut self, msg: EditMsg) {
+        match msg {
+            EditMsg::EnterHeaderEdit { target } => {
+                // commit pre-existing edit if exists
+                if let Some(_) = &self.edit_state {
+                    self.commit_edit();
+                };
+
+                let node = self.nodes.get(&target).expect("broken pointer");
+                self.edit_state = Some(EditState {
+                    component_focus: EditFocus::NodeHeader,
+                    node_focus: target,
+                    edited_contents: node.header.clone(),
+                });
+            }
+            EditMsg::EnterBodyEdit { target } => {
+                // commit pre-existing edit if exists
+                if let Some(_) = &self.edit_state {
+                    self.commit_edit();
+                };
+
+                let node = self.nodes.get(&target).expect("broken pointer");
+                self.edit_state = Some(EditState {
+                    component_focus: EditFocus::NodeBody,
+                    node_focus: target,
+                    edited_contents: node.body.clone(),
+                });
+            }
+            EditMsg::UpdateEdit(new_s) => {
+                let es: &mut EditState = self
+                    .edit_state
+                    .as_mut()
+                    .expect("no edit state, attempting to update");
+                es.edited_contents = new_s;
+            }
+            EditMsg::CommitEdit => {
+                self.commit_edit();
+            }
+            EditMsg::Delete(node_id) => {
+                // doing this here makes my life significantly simpler,
+                // at the cost of having to re-enter edit state sometimes
+                self.commit_edit();
+
+                let mut svc = DialogService::new();
+                let node = self
+                    .nodes
+                    .get(&node_id)
+                    .expect("error - attempting to delete nonexisting node");
+
+                if svc.confirm(&format!("delete node with header {}", node.header)) {
+                    // set node & parents to modified before removing it
+                    self.set_parent_nodes_to_modified(&node_id);
+
+                    let node = self
+                        .nodes
+                        .remove(&node_id)
+                        .expect("error - attempting to delete nonexisting node");
+
+                    if let Some(parent) = &node.parent {
+                        let parent = self.nodes.get_mut(&parent).expect("broken pointer");
+                        parent
+                            .children
+                            .retain(|node_ref| node_ref.node_id() != &node_id)
+                    }
+
+                    let mut stack: Vec<NodeId> = node
+                        .inner
+                        .children
+                        .into_iter()
+                        .map(|x| x.into_node_id())
+                        .collect();
+
+                    // garbage-collect any locally present children of deleted node
+                    while let Some(next_id) = stack.pop() {
+                        // children of deleted nodes may not exist locally, fine if not exists
+                        if let Some(node) = self.nodes.remove(&next_id) {
+                            for next_id in node.inner.children.into_iter().map(|x| x.into_node_id())
+                            {
+                                stack.push(next_id);
+                            }
+                        }
+                    }
+                };
+            }
+            EditMsg::CreateOn { parent, at_idx } => {
+                // we're modifying this node, so walk back to root and make sure all parent nodes reflect modification
+                //TODO: still needed, figure out new sig
+                self.set_parent_nodes_to_modified(&parent);
+
+                // close out any pre-existing edit ops
+                self.commit_edit(); // may call set_parent_nodes_to_modified & overlap w/ above walk_path_to_root nodes
+
+                let node = self.nodes.get_mut(&parent).expect("broken pointer");
+                let new_node_id = gen_node_id();
+                node.children
+                    .insert(at_idx, NodeRef::Modified(new_node_id.clone())); // insert reference to new node
+                let new_node = InMemNode {
+                    hash: None,
+                    inner: Node::new(Some(parent)),
+                };
+                self.nodes.insert(new_node_id.clone(), new_node); // insert new node
+
+                // enter edit mode with empty header
+                self.edit_state = Some(EditState {
+                    component_focus: EditFocus::NodeHeader,
+                    node_focus: new_node_id,
+                    edited_contents: "".to_string(),
+                });
+            }
+        }
+    }
+
+    fn update_backend(&mut self, msg: BackendMsg) {
+        match msg {
+            BackendMsg::StartSave => {
+                if let NodeRef::Modified(modified_root_id) = &self.root_node {
                     let modified_root_id = modified_root_id.clone();
                     // construct map of all nodes that have been modified
                     let mut extra_nodes: HashMap<NodeId, Node<NodeRef>> = HashMap::new();
@@ -206,7 +371,7 @@ impl Component for State {
             }
             // TODO: handle CAS violation, currently will just explode, lmao
             // kinda gnarly, basically just writes every saved node to the nodes store and in the process wipes out the modified nodes
-            Msg::SaveComplete(resp) => {
+            BackendMsg::SaveComplete(resp) => {
                 let root_id = NodeId::root();
 
                 self.save_task = None; // re-enable updates
@@ -214,7 +379,7 @@ impl Component for State {
                 self.last_known_hash = Some(root_hash.clone()); // set last known hash for future CAS use
                 let root_node_ref = RemoteNodeRef(root_id.clone(), root_hash.clone());
                 // update entry point to newly-persisted root node
-                self.root_node_id = NodeRef::Unmodified(root_node_ref);
+                self.root_node = NodeRef::Unmodified(root_node_ref);
 
                 // build client id -> hash map for lookups
                 let mut node_id_to_hash = HashMap::new();
@@ -244,7 +409,7 @@ impl Component for State {
                     }
                 }
             }
-            Msg::Fetch(remote_node_ref) => {
+            BackendMsg::Fetch(remote_node_ref) => {
                 let request = Request::get(format!("/node/{}", (remote_node_ref.1).to_string()))
                     .body(Nothing)
                     .unwrap();
@@ -257,7 +422,10 @@ impl Component for State {
                     >| {
                         if let (meta, Json(Ok(body))) = response.into_parts() {
                             if meta.status.is_success() {
-                                Msg::FetchComplete(remote_node_ref_2.clone(), body)
+                                Msg::Backend(BackendMsg::FetchComplete(
+                                    remote_node_ref_2.clone(),
+                                    body,
+                                ))
                             } else {
                                 panic!("lmao, todo (panic during resp handler)")
                             }
@@ -270,7 +438,7 @@ impl Component for State {
                 let task = self.fetch_service.fetch(request, callback);
                 self.fetch_tasks.insert(remote_node_ref, task); // stash task handle
             }
-            Msg::FetchComplete(node_ref, get_resp) => {
+            BackendMsg::FetchComplete(node_ref, get_resp) => {
                 self.fetch_tasks.remove(&node_ref); // drop fetch task (cancels, presumably)
                 let fetched_node = InMemNode {
                     hash: Some(node_ref.1),
@@ -285,142 +453,7 @@ impl Component for State {
                     self.nodes.insert(node_ref.0, fetched_node);
                 }
             }
-            Msg::EnterHeaderEdit { target } => {
-                // commit pre-existing edit if exists
-                if let Some(_) = &self.edit_state {
-                    self.commit_edit();
-                };
-
-                let node = self.nodes.get(&target).expect("broken pointer");
-                self.edit_state = Some(EditState {
-                    component_focus: EditFocus::NodeHeader,
-                    node_focus: target,
-                    edited_contents: node.header.clone(),
-                });
-            }
-            Msg::EnterBodyEdit { target } => {
-                // commit pre-existing edit if exists
-                if let Some(_) = &self.edit_state {
-                    self.commit_edit();
-                };
-
-                let node = self.nodes.get(&target).expect("broken pointer");
-                self.edit_state = Some(EditState {
-                    component_focus: EditFocus::NodeBody,
-                    node_focus: target,
-                    edited_contents: node.body.clone(),
-                });
-            }
-            Msg::UpdateEdit(new_s) => {
-                let es: &mut EditState = self
-                    .edit_state
-                    .as_mut()
-                    .expect("no edit state, attempting to update");
-                es.edited_contents = new_s;
-            }
-            Msg::CommitEdit => {
-                self.commit_edit();
-            }
-            Msg::Maximize(node_id) => {
-                self.set_expanded(node_id, true);
-            }
-            Msg::Minimize(node_id) => {
-                // doing this here makes my life significantly simpler,
-                // at the cost of having to re-enter edit state sometimes
-                // (Specifically, for case where minimized node is parent of edit focus)
-                self.commit_edit();
-                self.set_expanded(node_id, false);
-            }
-            Msg::Delete(node_id) => {
-                // doing this here makes my life significantly simpler,
-                // at the cost of having to re-enter edit state sometimes
-                self.commit_edit();
-
-                let mut svc = DialogService::new();
-                let node = self
-                    .nodes
-                    .get(&node_id)
-                    .expect("error - attempting to delete nonexisting node");
-
-                if svc.confirm(&format!("delete node with header {}", node.header)) {
-                    // set node & parents to modified before removing it
-                    self.set_parent_nodes_to_modified(&node_id);
-
-                    let node = self
-                        .nodes
-                        .remove(&node_id)
-                        .expect("error - attempting to delete nonexisting node");
-
-                    if let Some(parent) = &node.parent {
-                        let parent = self.nodes.get_mut(&parent).expect("broken pointer");
-                        parent
-                            .children
-                            .retain(|node_ref| node_ref.node_id() != &node_id)
-                    }
-
-                    let mut stack: Vec<NodeId> = node
-                        .inner
-                        .children
-                        .into_iter()
-                        .map(|x| x.into_node_id())
-                        .collect();
-
-                    // garbage-collect any locally present children of deleted node
-                    while let Some(next_id) = stack.pop() {
-                        // children of deleted nodes may not exist locally, fine if not exists
-                        if let Some(node) = self.nodes.remove(&next_id) {
-                            for next_id in node.inner.children.into_iter().map(|x| x.into_node_id())
-                            {
-                                stack.push(next_id);
-                            }
-                        }
-                    }
-                };
-            }
-            Msg::CreateOn { parent, at_idx } => {
-                // we're modifying this node, so walk back to root and make sure all parent nodes reflect modification
-                //TODO: still needed, figure out new sig
-                self.set_parent_nodes_to_modified(&parent);
-
-                // close out any pre-existing edit ops
-                self.commit_edit(); // may call set_parent_nodes_to_modified & overlap w/ above walk_path_to_root nodes
-
-                let node = self.nodes.get_mut(&parent).expect("broken pointer");
-                let new_node_id = gen_node_id();
-                node.children
-                    .insert(at_idx, NodeRef::Modified(new_node_id.clone())); // insert reference to new node
-                let new_node = InMemNode {
-                    hash: None,
-                    inner: Node::new(Some(parent)),
-                };
-                self.nodes.insert(new_node_id.clone(), new_node); // insert new node
-
-                // enter edit mode with empty header
-                self.edit_state = Some(EditState {
-                    component_focus: EditFocus::NodeHeader,
-                    node_focus: new_node_id,
-                    edited_contents: "".to_string(),
-                });
-            }
-            Msg::NoOp => {}
         }
-        true
-    }
-
-    fn view(&self) -> Html<Self> {
-        html! {
-            <div class="wrapper">
-                <div> { render_is_modified_widget(&self.root_node_id) } </div>
-                <ul class = "top-level">
-                    { self.render_node(&self.root_node_id) }
-                </ul>
-            </div>
-        }
-    }
-}
-
-impl State {
-    fn update_backend(&mut self, msg: BackendMsg) -> ShouldRender {
     }
 
     fn commit_edit(&mut self) -> Option<(EditFocus, NodeId)> {
@@ -453,13 +486,12 @@ impl State {
         let is_saving = self.save_task.is_some();
 
         if self.is_expanded(node_ref.node_id()) {
-
             if let Some(node) = self.nodes.get(&node_ref.node_id()) {
                 let node_child_count = node.children.len();
                 let children: &Vec<NodeRef> = &node.children;
                 html! {
                     <li class = "node">
-                        { self.render_node_header(&node_ref.node_id(), &node) }
+                        { self.render_node_header(&node_ref, &node) }
                         { self.render_node_body(&node_ref.node_id(), &node) }
                             <ul class = "nested-list">
                                 { for children.iter().map(|node_ref| {
@@ -469,11 +501,11 @@ impl State {
                             <button class="add-subnode" onclick=|_|
                                 if is_saving {
                                     Msg::NoOp
-                                } else { Msg::CreateOn{ at_idx: node_child_count,
-                                                        parent: node_ref.node_id().clone(),
-                                }
-                                }>
-                                {"++"}
+                                } else { Msg::Edit(
+                                    EditMsg::CreateOn{ at_idx: node_child_count,
+                                                       parent: node_ref.node_id().clone(),
+                                })}>
+                                {"[++]"}
                             </button>
                         </ul>
                     </li>
@@ -482,7 +514,7 @@ impl State {
                 if let NodeRef::Unmodified(remote_node_ref) = node_ref {
                     html! {
                         <li class = "node-lazy">
-                        <button class="load-node" onclick=|_| Msg::Fetch(remote_node_ref.clone())>
+                        <button class="load-node" onclick=|_| Msg::Backend(BackendMsg::Fetch(remote_node_ref.clone()))>
                         {"load node"}
                         </button>
                         </li>
@@ -498,12 +530,12 @@ impl State {
                 {"[+]"}
                 </button>
             }
-
         }
     }
 
-    fn render_node_header<T>(&self, node_id: &NodeId, node: &Node<T>) -> Html<Self> {
-        let node_id = node_id.clone();
+    fn render_node_header<T>(&self, node_ref: &NodeRef, node: &Node<T>) -> Html<Self> {
+        let node_ref = node_ref.clone();
+        let node_id = node_ref.node_id().clone();
 
         if let Some(focus_str) = &self
             .edit_state
@@ -517,7 +549,7 @@ impl State {
             let onkeypress_send = if is_saving {
                 Msg::NoOp
             } else {
-                Msg::CommitEdit
+                Msg::Edit(EditMsg::CommitEdit)
             };
             html! {
                 <div>
@@ -525,7 +557,7 @@ impl State {
                     type="text"
                     value=&focus_str
                     id = "edit-focus"
-                    oninput=|e| Msg::UpdateEdit(e.value)
+                    oninput=|e| Msg::Edit(EditMsg::UpdateEdit(e.value))
                     onkeypress=|e| {
                         if e.key() == "Enter" { onkeypress_send.clone() } else { Msg::NoOp }
                     }
@@ -543,13 +575,18 @@ impl State {
             let node_id_3 = node_id.clone();
             html! {
                 <div>
-                    <button class="delete-button" onclick=|_| Msg::Delete(node_id.clone())>
+                    <button class="delete-button" onclick=|_| Msg::Edit(EditMsg::Delete(node_id.clone()))>
                         {"X"}
                     </button>
                     <button class="minimize-button" onclick=|_| Msg::Minimize(node_id_2.clone())>
                     {"[-]"}
                     </button>
-                    <div class="node-header" onclick=|_| Msg::EnterHeaderEdit{target: node_id_3.clone()}>{ &node.header }</div>
+                    <button class="focus-on" onclick=|_| Msg::FocusOn(node_ref.clone())>
+                    {"[z]"}
+                    </button>
+                    <div class="node-header" onclick=|_| Msg::Edit(EditMsg::EnterHeaderEdit{target: node_id_3.clone()})>
+                    { &node.header }
+                    </div>
                 </div>
             }
         }
@@ -570,15 +607,14 @@ impl State {
             let onkeypress_send = if is_saving {
                 Msg::NoOp
             } else {
-                Msg::CommitEdit
+                Msg::Edit(EditMsg::CommitEdit)
             };
             html! {
                 <div>
-                    <input class="edit node-body"
-                    type="text"
+                    <textarea class="edit node-body"
                     value=&focus_str
                     id = "edit-focus"
-                    oninput=|e| Msg::UpdateEdit(e.value)
+                    oninput=|e| Msg::Edit(EditMsg::UpdateEdit(e.value))
                     onkeypress=|e| {
                         if e.key() == "Enter" { onkeypress_send.clone() } else { Msg::NoOp }
                     }
@@ -592,7 +628,9 @@ impl State {
             }
         } else {
             html! {
-                <div class = "node-body" onclick=|_| Msg::EnterBodyEdit{ target: node_id.clone() }>{ &node.body }</div>
+                <div class = "node-body" onclick=|_| Msg::Edit(EditMsg::EnterBodyEdit{ target: node_id.clone() })>
+                { &node.body }
+                </div>
             }
         }
     }
@@ -605,8 +643,8 @@ impl State {
         while let Some(node) = self.nodes.get_mut(&target) {
             if let Some(_stale_hash) = &node.hash {
                 // if this is the root/entry point node, demote it to modified
-                if self.root_node_id.node_id() == &target {
-                    self.root_node_id = NodeRef::Modified(target.clone());
+                if self.root_node.node_id() == &target {
+                    self.root_node = NodeRef::Modified(target.clone());
                 };
                 node.hash = None;
             };
@@ -647,7 +685,7 @@ impl State {
                 let (meta, Json(res)) = response.into_parts();
                 if let Ok(body) = res {
                     if meta.status.is_success() {
-                        Msg::SaveComplete(body)
+                        Msg::Backend(BackendMsg::SaveComplete(body))
                     } else {
                         panic!("lmao, todo (panic during resp handler)")
                     }
@@ -671,8 +709,14 @@ impl State {
 }
 
 fn gen_node_id() -> NodeId {
-    let u = rand::random::<u128>();
-    NodeId(format!("{}", u))
+    let u = rand::random::<u64>();
+    if u == 0 {
+        gen_node_id()
+    } else {
+        // TODO: some better way of ensuring it never =='s 0 (reserved root id)
+        // TODO: eg put gen method next to NodeId::root() method
+        NodeId(format!("id-{}", u))
+    }
 }
 
 // TODO: unicode, css, etc (currently just a debug indicator)
