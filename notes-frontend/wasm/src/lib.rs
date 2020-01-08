@@ -125,7 +125,7 @@ impl Component for State {
                     hash: None,             // not persisted
                     inner: Node::new(None), // None b/c node is root (no parent)
                 };
-                let id = gen_node_id();
+                let id = NodeId::root();
                 nodes.insert(id.clone(), fresh_root);
                 (NodeRef::Modified(id), None)
             }
@@ -175,6 +175,7 @@ impl Component for State {
                 self.focus_node = self.root_node.clone();
             }
             Msg::FocusOn(node_ref) => {
+                println!("focus on: {:?}", &node_ref);
                 // doing this here makes my life significantly simpler,
                 // at the cost of having to re-enter edit state sometimes
                 // (for case where edit focus node is parent/sibling of focus node)
@@ -205,7 +206,16 @@ impl Component for State {
 }
 
 impl State {
+    fn get_node(&self, id: &NodeId) -> &InMemNode {
+        self.nodes.get(id).expect(&format!("broken pointer: {:?}", id))
+    }
+
+    fn get_node_mut(&mut self, id: &NodeId) -> &mut InMemNode {
+        self.nodes.get_mut(id).expect(&format!("broken pointer (mut): {:?}", id))
+    }
+
     fn update_edit(&mut self, msg: EditMsg) {
+        println!("handle edit msg: {:?}", &msg);
         match msg {
             EditMsg::EnterHeaderEdit { target } => {
                 // commit pre-existing edit if exists
@@ -213,7 +223,7 @@ impl State {
                     self.commit_edit();
                 };
 
-                let node = self.nodes.get(&target).expect("broken pointer");
+                let node = self.get_node(&target);
                 self.edit_state = Some(EditState {
                     component_focus: EditFocus::NodeHeader,
                     node_focus: target,
@@ -226,7 +236,7 @@ impl State {
                     self.commit_edit();
                 };
 
-                let node = self.nodes.get(&target).expect("broken pointer");
+                let node = self.get_node(&target);
                 self.edit_state = Some(EditState {
                     component_focus: EditFocus::NodeBody,
                     node_focus: target,
@@ -264,7 +274,7 @@ impl State {
                         .expect("error - attempting to delete nonexisting node");
 
                     if let Some(parent) = &node.parent {
-                        let parent = self.nodes.get_mut(&parent).expect("broken pointer");
+                        let parent = self.get_node_mut(&parent);
                         parent
                             .children
                             .retain(|node_ref| node_ref.node_id() != &node_id)
@@ -297,7 +307,7 @@ impl State {
                 // close out any pre-existing edit ops
                 self.commit_edit(); // may call set_parent_nodes_to_modified & overlap w/ above walk_path_to_root nodes
 
-                let node = self.nodes.get_mut(&parent).expect("broken pointer");
+                let node = self.get_node_mut(&parent);
                 let new_node_id = gen_node_id();
                 node.children
                     .insert(at_idx, NodeRef::Modified(new_node_id.clone())); // insert reference to new node
@@ -318,6 +328,7 @@ impl State {
     }
 
     fn update_backend(&mut self, msg: BackendMsg) {
+        println!("handle backend msg: {:?}", &msg);
         match msg {
             BackendMsg::StartSave => {
                 if let NodeRef::Modified(modified_root_id) = &self.root_node {
@@ -340,7 +351,7 @@ impl State {
                     }
 
                     while let Some(id) = stack.pop() {
-                        let node = self.nodes.get(&id).expect("node lookup failed");
+                        let node = self.get_node(&id);
                         for node_ref in node.children.iter() {
                             if let NodeRef::Modified(id) = node_ref {
                                 stack.push(id.clone());
@@ -388,18 +399,18 @@ impl State {
                 }
 
                 // update root node with hash
-                let mut node = self.nodes.get_mut(&root_id).unwrap();
+                let mut node = self.get_node_mut(&root_id);
                 node.hash = Some(root_hash);
 
                 for (id, hash) in resp.additional_uploaded.into_iter() {
                     let hash = hash.promote::<CannonicalNode>();
                     let id = NodeId::from_generic(id.0).unwrap(); // FIXME - type conversion gore
-                    let mut node = self.nodes.get_mut(&id).unwrap();
+                    let mut node = self.get_node_mut(&id);
                     node.hash = Some(hash.clone());
                     if let Some(parent_id) = &node.parent {
                         let parent_id = parent_id.clone();
                         drop(node);
-                        let parent_node = self.nodes.get_mut(&parent_id).unwrap();
+                        let parent_node = self.get_node_mut(&parent_id);
                         parent_node.map_mut(|node_ref| {
                             if node_ref.node_id() == &id {
                                 *node_ref =
@@ -412,7 +423,7 @@ impl State {
             BackendMsg::Fetch(remote_node_ref) => {
                 let request = Request::get(format!("/node/{}", (remote_node_ref.1).to_string()))
                     .body(Nothing)
-                    .unwrap();
+                    .expect("fetch req builder failed");
 
                 let remote_node_ref_2 = remote_node_ref.clone();
 
@@ -459,10 +470,7 @@ impl State {
     fn commit_edit(&mut self) -> Option<(EditFocus, NodeId)> {
         // use take to remove edit focus, if any
         if let Some(es) = self.edit_state.take() {
-            let node = self
-                .nodes
-                .get_mut(&es.node_focus)
-                .expect("unable to commit edit, broken pointer");
+            let node = self.get_node_mut(&es.node_focus);
 
             let res = match es.component_focus {
                 EditFocus::NodeHeader => {
@@ -640,14 +648,17 @@ impl State {
     fn set_parent_nodes_to_modified(&mut self, starting_point: &NodeId) {
         let mut prev = None;
         let mut target = starting_point.clone();
-        while let Some(node) = self.nodes.get_mut(&target) {
+        loop {
+            let node = self.get_node(&target);
             if let Some(_stale_hash) = &node.hash {
                 // if this is the root/entry point node, demote it to modified
                 if self.root_node.node_id() == &target {
                     self.root_node = NodeRef::Modified(target.clone());
                 };
-                node.hash = None;
             };
+
+            let node = self.get_node_mut(&target);
+            node.hash = None;
 
             // update pointer to previous node to indicate modification
             if let Some(prev) = prev {
@@ -710,13 +721,7 @@ impl State {
 
 fn gen_node_id() -> NodeId {
     let u = rand::random::<u64>();
-    if u == 0 {
-        gen_node_id()
-    } else {
-        // TODO: some better way of ensuring it never =='s 0 (reserved root id)
-        // TODO: eg put gen method next to NodeId::root() method
-        NodeId(format!("id-{}", u))
-    }
+    NodeId(format!("id-{}", u))
 }
 
 // TODO: unicode, css, etc (currently just a debug indicator)

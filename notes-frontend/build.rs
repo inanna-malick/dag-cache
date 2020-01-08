@@ -6,6 +6,12 @@ use std::process::Command;
 
 // NOTE: currently only tested with flat deploy dir
 fn main() {
+    // TODO: use to thread through RELEASE flag if needed
+    // for (key, value) in std::env::vars() {
+    //     println!("{}: {}", key, value);
+    // }
+    // panic!("dead");
+
     let out_dir = env::var("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("wasm_blobs_output_dir");
     let _ = fs::remove_dir_all(&dest_path); // may already exist, nuke if that is the case
