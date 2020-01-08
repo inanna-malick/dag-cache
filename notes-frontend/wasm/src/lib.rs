@@ -95,6 +95,7 @@ pub enum EditMsg {
     UpdateEdit(String),
     CommitEdit,
     CreateOn { at_idx: usize, parent: NodeId },
+    // TODO: msg type for moving node up/down in list (eg swapping node position in child tree)
     Delete(NodeId),
 }
 
