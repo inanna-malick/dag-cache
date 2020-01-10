@@ -272,10 +272,7 @@ impl State {
                 self.commit_edit();
 
                 let mut svc = DialogService::new();
-                let node = self
-                    .nodes
-                    .get(&node_id)
-                    .expect("error - attempting to delete nonexisting node");
+                let node = self.get_node(&node_id);
 
                 if svc.confirm(&format!("delete node with header {}", node.header)) {
                     // set node & parents to modified before removing it
@@ -348,12 +345,7 @@ impl State {
                     let modified_root_id = modified_root_id.clone();
                     // construct map of all nodes that have been modified
                     let mut extra_nodes: HashMap<NodeId, Node<NodeRef>> = HashMap::new();
-                    let head_node = self
-                        .nodes
-                        .get(&modified_root_id)
-                        .expect("root node lookup failed!")
-                        .inner
-                        .clone();
+                    let head_node = self.get_node(&modified_root_id).inner.clone();
 
                     let mut stack: Vec<NodeId> = Vec::new();
 
