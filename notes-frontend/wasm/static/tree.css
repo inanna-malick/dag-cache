@@ -23,18 +23,18 @@ button {
 	  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Style the caret/arrow */
-.node-header {
-    cursor: pointer;
-    user-select: none; /* Prevent text selection */
+.smallButton {
+	  border-radius:5px;
+	  display:inline-block;
+	  cursor:pointer;
+	  color: #fdf6e3;
+    width: 30px;
+    background-color: #6c71c4;
+	  padding: 1px 1px;
+	  text-decoration:none;
 }
-
-/* Create the caret/arrow with a unicode, and style it */
-.node-header::before {
-    content: "\25B6";
-    color: #d33682;
-    /* display: inline-block; */
-    margin-right: 6px;
+.smallButton:hover {
+	  background-color: #268bd2;
 }
 
 div.node {

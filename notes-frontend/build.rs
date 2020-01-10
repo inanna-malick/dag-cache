@@ -80,5 +80,6 @@ fn main() {
     // TODO: figure out how to just register everything in wasm subdir
     println!("cargo:rerun-if-changed=wasm/src/main.rs");
     println!("cargo:rerun-if-changed=wasm/src/lib.rs");
+    println!("cargo:rerun-if-changed=wasm/static/tree.css");
     // unimplemented!("afaik only way to get println output from build.rs is to fail here");
 }

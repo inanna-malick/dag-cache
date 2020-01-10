@@ -51,7 +51,7 @@ impl Opt {
                 ..libhoney::transmission::Options::default()
             },
         };
-        let layer = TelemetryLayer::new("ipfs_dag_cache".to_string(), honeycomb_config)
+        let layer = TelemetryLayer::new("dag-store".to_string(), honeycomb_config)
             .and_then(tracing_subscriber::fmt::Layer::builder().finish())
             .and_then(LevelFilter::INFO);
 

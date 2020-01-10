@@ -194,7 +194,7 @@ impl Component for State {
     fn view(&self) -> Html<Self> {
         html! {
             <div class="wrapper">
-                <button class="focus-on-root" onclick=|_| Msg::FocusOnRoot>
+                <button class="smallButton" onclick=|_| Msg::FocusOnRoot>
                 {"[^]"}
                 </button>
                 <div> { render_is_modified_widget(&self.root_node) } </div>
@@ -507,14 +507,14 @@ impl State {
                                         self.render_node(node_ref)
                                     })
                                 }
-                            <button class="add-subnode" onclick=|_|
+                            <button class="smallButton" onclick=|_|
                                 if is_saving {
                                     Msg::NoOp
                                 } else { Msg::Edit(
                                     EditMsg::CreateOn{ at_idx: node_child_count,
                                                        parent: node_ref.node_id().clone(),
                                 })}>
-                                {"[++]"}
+                                {"[+]"}
                             </button>
                         </ul>
                     </li>
@@ -535,7 +535,7 @@ impl State {
         } else {
             let node_id = node_ref.node_id().clone();
             html! {
-                <button class="maximize-button" onclick=|_| Msg::Maximize(node_id.clone())>
+                <button class="smallButton" onclick=|_| Msg::Maximize(node_id.clone())>
                 {"[+]"}
                 </button>
             }
@@ -555,11 +555,13 @@ impl State {
         {
             let is_saving = self.save_task.is_some();
             // FIXME: lazy hack, disallow commiting edits during save task lifetime (TODO: refactor, dedup)
-            let onkeypress_send = if is_saving {
+            let commit_msg = if is_saving {
                 Msg::NoOp
             } else {
                 Msg::Edit(EditMsg::CommitEdit)
             };
+            let onkeypress_send = commit_msg.clone();
+            let onblur_send = commit_msg.clone();
             html! {
                 <div>
                     <input class="edit node-header"
@@ -567,6 +569,7 @@ impl State {
                     value=&focus_str
                     id = "edit-focus"
                     oninput=|e| Msg::Edit(EditMsg::UpdateEdit(e.value))
+                    onblur = |_| onblur_send.clone()
                     onkeypress=|e| {
                         if e.key() == "Enter" { onkeypress_send.clone() } else { Msg::NoOp }
                     }
@@ -584,13 +587,13 @@ impl State {
             let node_id_3 = node_id.clone();
             html! {
                 <div>
-                    <button class="delete-button" onclick=|_| Msg::Edit(EditMsg::Delete(node_id.clone()))>
+                    <button class="smallButton" onclick=|_| Msg::Edit(EditMsg::Delete(node_id.clone()))>
                         {"X"}
                     </button>
-                    <button class="minimize-button" onclick=|_| Msg::Minimize(node_id_2.clone())>
+                    <button class="smallButton" onclick=|_| Msg::Minimize(node_id_2.clone())>
                     {"[-]"}
                     </button>
-                    <button class="focus-on" onclick=|_| Msg::FocusOn(node_ref.clone())>
+                    <button class="smallButton" onclick=|_| Msg::FocusOn(node_ref.clone())>
                     {"[z]"}
                     </button>
                     <div class="node-header" onclick=|_| Msg::Edit(EditMsg::EnterHeaderEdit{target: node_id_3.clone()})>
