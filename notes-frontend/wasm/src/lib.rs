@@ -620,27 +620,31 @@ impl State {
         {
             let is_saving = self.save_task.is_some();
             // FIXME: lazy hack, disallow commiting edits during save task lifetime (TODO: refactor, dedup)
-            let onkeypress_send = if is_saving {
+            let commit_msg = if is_saving {
                 Msg::NoOp
             } else {
                 Msg::Edit(EditMsg::CommitEdit)
             };
+            let onkeypress_send = commit_msg.clone();
+            let onblur_send = commit_msg.clone();
+
             html! {
                 <div>
                     <textarea class="edit node-body"
                     value=&focus_str
                     id = "edit-focus"
                     oninput=|e| Msg::Edit(EditMsg::UpdateEdit(e.value))
+                    onblur = |_| onblur_send.clone()
                     onkeypress=|e| {
                         if e.key() == "Enter" { onkeypress_send.clone() } else { Msg::NoOp }
                     }
                 />
                     <script>
-                { // focus immediately after loading
-                    "document.getElementById(\"edit-focus\").focus();"
-                }
-                </script>
-                    </div>
+                    { // focus immediately after loading
+                        "document.getElementById(\"edit-focus\").focus();"
+                    }
+                    </script>
+                </div>
             }
         } else {
             html! {
