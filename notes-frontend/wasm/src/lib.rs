@@ -78,15 +78,20 @@ pub struct State {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Msg {
-    Maximize(NodeId),
-    Minimize(NodeId),
-    FocusOn(NodeRef), // set top-level focus to node
-    FocusOnRoot,      // up one node from current node
-
+    Navigation(NavigationMsg),
     Backend(BackendMsg),
     Edit(EditMsg),
     NoOp,
 }
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub enum NavigationMsg {
+    Maximize(NodeId),
+    Minimize(NodeId),
+    FocusOn(NodeRef), // set top-level focus to node
+    FocusOnRoot,      // up one node from current node
+}
+
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum EditMsg {
@@ -162,28 +167,7 @@ impl Component for State {
 
     fn update(&mut self, msg: Self::Message) -> ShouldRender {
         match msg {
-            Msg::Maximize(node_id) => {
-                self.set_expanded(node_id, true);
-            }
-            Msg::Minimize(node_id) => {
-                // doing this here makes my life significantly simpler,
-                // at the cost of having to re-enter edit state sometimes
-                // (for case where minimized node is parent of edit focus)
-                self.commit_edit();
-                self.set_expanded(node_id, false);
-            }
-            Msg::FocusOnRoot => {
-                self.focus_node = self.root_node.clone();
-            }
-            Msg::FocusOn(node_ref) => {
-                println!("focus on: {:?}", &node_ref);
-                // doing this here makes my life significantly simpler,
-                // at the cost of having to re-enter edit state sometimes
-                // (for case where edit focus node is parent/sibling of focus node)
-                self.commit_edit();
-
-                self.focus_node = node_ref;
-            }
+            Msg::Navigation(n) => self.update_navigation(n),
             Msg::Edit(e) => self.update_edit(e),
             Msg::Backend(b) => self.update_backend(b),
             Msg::NoOp => {}
@@ -194,7 +178,7 @@ impl Component for State {
     fn view(&self) -> Html<Self> {
         html! {
             <div class="wrapper">
-                <button class="smallButton" onclick=|_| Msg::FocusOnRoot>
+                <button class="smallButton" onclick=|_| Msg::Navigation(NavigationMsg::FocusOnRoot)>
                 {"[^]"}
                 </button>
                 <div> { render_is_modified_widget(&self.root_node) } </div>
@@ -213,6 +197,34 @@ impl State {
 
     fn get_node_mut(&mut self, id: &NodeId) -> &mut InMemNode {
         self.nodes.get_mut(id).expect(&format!("broken pointer (mut): {:?}", id))
+    }
+
+    fn update_navigation(&mut self, msg: NavigationMsg) {
+        println!("handle navigation msg: {:?}", &msg);
+        match msg {
+            NavigationMsg::Maximize(node_id) => {
+                self.set_expanded(node_id, true);
+            }
+            NavigationMsg::Minimize(node_id) => {
+                // doing this here makes my life significantly simpler,
+                // at the cost of having to re-enter edit state sometimes
+                // (for case where minimized node is parent of edit focus)
+                self.commit_edit();
+                self.set_expanded(node_id, false);
+            }
+            NavigationMsg::FocusOnRoot => {
+                self.focus_node = self.root_node.clone();
+            }
+            NavigationMsg::FocusOn(node_ref) => {
+                println!("focus on: {:?}", &node_ref);
+                // doing this here makes my life significantly simpler,
+                // at the cost of having to re-enter edit state sometimes
+                // (for case where edit focus node is parent/sibling of focus node)
+                self.commit_edit();
+
+                self.focus_node = node_ref;
+            }
+        }
     }
 
     fn update_edit(&mut self, msg: EditMsg) {
@@ -535,7 +547,7 @@ impl State {
         } else {
             let node_id = node_ref.node_id().clone();
             html! {
-                <button class="smallButton" onclick=|_| Msg::Maximize(node_id.clone())>
+                <button class="smallButton" onclick=|_| Msg::Navigation(NavigationMsg::Maximize(node_id.clone()))>
                 {"[+]"}
                 </button>
             }
@@ -590,10 +602,10 @@ impl State {
                     <button class="smallButton" onclick=|_| Msg::Edit(EditMsg::Delete(node_id.clone()))>
                         {"X"}
                     </button>
-                    <button class="smallButton" onclick=|_| Msg::Minimize(node_id_2.clone())>
+                    <button class="smallButton" onclick=|_| Msg::Navigation(NavigationMsg::Minimize(node_id_2.clone()))>
                     {"[-]"}
                     </button>
-                    <button class="smallButton" onclick=|_| Msg::FocusOn(node_ref.clone())>
+                    <button class="smallButton" onclick=|_| Msg::Navigation(NavigationMsg::FocusOn(node_ref.clone()))>
                     {"[z]"}
                     </button>
                     <div class="node-header" onclick=|_| Msg::Edit(EditMsg::EnterHeaderEdit{target: node_id_3.clone()})>
