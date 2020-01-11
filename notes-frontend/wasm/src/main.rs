@@ -11,7 +11,7 @@ fn main() {
             if s.is_empty() {
                 notes::Arg { hash: None }
             } else {
-                let hash = Hash::from_string(&s)
+                let hash = Hash::from_base58(&s)
                     .expect("unable to parse hash (handlebar template bug, FIXME)")
                     .promote::<CannonicalNode>();
                 notes::Arg { hash: Some(hash) }

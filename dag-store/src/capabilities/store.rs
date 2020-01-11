@@ -1,6 +1,5 @@
 use crate::capabilities::{HashedBlobStore, MutableHashStore};
 use dag_store_types::types::domain::{Hash, Node};
-use dag_store_types::types::encodings;
 use dag_store_types::types::errors::DagCacheError;
 use prost::Message;
 use tracing::instrument;
@@ -30,7 +29,7 @@ impl FileSystemStore {
         let proto = self.get_and_decode(&hash.to_string_canonical())?;
         let proto = proto
             .ok_or_else(|| DagCacheError::UnexpectedError("broken link in sled db!".to_string()))?;
-        let res =  Node::from_proto(proto)?;
+        let res = Node::from_proto(proto)?;
         Ok(res)
     }
 
@@ -77,24 +76,31 @@ impl FileSystemStore {
     }
 }
 
-fn decode(hash: sled::IVec) -> Hash { Hash::from_raw(encodings::Base58::from_bytes(hash.to_vec())) }
+fn decode(hash: sled::IVec) -> Hash {
+    // FIXME/TODO: is this recoverable? not really, but I still don't like panic here
+    Hash::from_bytes(&hash).expect("invalid bytes for hash in CAS store, panic")
+}
 
 fn encode(hash: Hash) -> Vec<u8> {
-    let base58 = hash.0;
-    let bytes = base58.0;
-    bytes
+    hash.0.as_bytes().to_vec()
 }
 
 #[tonic::async_trait]
 impl HashedBlobStore for FileSystemStore {
-    async fn get(&self, hash: Hash) -> Result<Node, DagCacheError> { self.get_blob(hash) }
+    async fn get(&self, hash: Hash) -> Result<Node, DagCacheError> {
+        self.get_blob(hash)
+    }
 
-    async fn put(&self, v: Node) -> Result<Hash, DagCacheError> { self.put_blob(v) }
+    async fn put(&self, v: Node) -> Result<Hash, DagCacheError> {
+        self.put_blob(v)
+    }
 }
 
 #[tonic::async_trait]
 impl MutableHashStore for FileSystemStore {
-    async fn get(&self, k: &str) -> Result<Option<Hash>, DagCacheError> { self.get_mhs(k) }
+    async fn get(&self, k: &str) -> Result<Option<Hash>, DagCacheError> {
+        self.get_mhs(k)
+    }
 
     async fn cas(
         &self,

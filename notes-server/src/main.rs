@@ -4,7 +4,7 @@ mod opts;
 
 use dag_store_types::types::{
     api::{bulk_put, get, meta},
-    domain,
+    domain::{self, Hash},
     grpc::{self, client::DagStoreClient},
 };
 use honeycomb_tracing::{TraceCtx, TraceId};
@@ -50,12 +50,14 @@ fn get_ctx() -> Arc<Runtime> {
 }
 
 fn register_trace_root() {
+    println!("register trace root");
     let trace_id = TraceId::generate();
     TraceCtx {
         trace_id,
         parent_span: None,
     }
     .record_on_current_span();
+    println!("register trace root done");
 }
 
 fn add_tracing_to_meta<T>(request: &mut tonic::Request<T>) {
@@ -83,8 +85,9 @@ async fn get_nodes(
         .await
         .map_err(|e| Box::new(e))?;
 
-    // TODO: validate base58 here
-    let mut request = tonic::Request::new(grpc::Hash { hash: raw_hash });
+    let hash = Hash::from_base58(&raw_hash).map_err(|e| Box::new(e))?;
+
+    let mut request = tonic::Request::new(hash.into_proto());
     add_tracing_to_meta(&mut request);
 
     let response = client.get_node(request).await.map_err(|e| Box::new(e))?;
@@ -99,6 +102,7 @@ async fn get_nodes(
 async fn get_initial_state(
     url: String,
 ) -> Result<Option<domain::Hash>, Box<dyn std::error::Error + Send + Sync + 'static>> {
+    println!("get initial state first line");
     register_trace_root();
 
     let mut client = DagStoreClient::connect(url)
@@ -153,6 +157,10 @@ async fn put_nodes(
 async fn main() {
     let opt = Opt::from_args();
     let runtime = opt.into_runtime();
+    run(runtime).await
+}
+
+async fn run(runtime: Runtime) {
     unsafe {
         GLOBAL_CTX = Some(Arc::new(runtime));
     }
@@ -269,6 +277,8 @@ async fn main() {
     warp::serve(routes).run(socket).await;
 }
 
+
+// FIXME: should be omitable
 struct Trivial(hyper::Response<hyper::Body>);
 
 impl Trivial {
@@ -292,16 +302,69 @@ impl warp::Reply for Trivial {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use dag_store_types::types::validated_tree::ValidatedTree_;
+    use notes_types::notes::NodeRef;
 
-    // uses mock capabilities, does not require local ipfs daemon
+
+    use honeycomb_tracing::TelemetryLayer;
+    use tracing_subscriber::filter::LevelFilter;
+    use tracing_subscriber::layer::Layer;
+    use tracing_subscriber::registry;
+
+    // use std::net::SocketAddr;
+    use std::sync::Arc;
+    use dag_store::capabilities::cache::Cache;
+    use dag_store::capabilities::store::FileSystemStore;
+
+    pub fn init_test_env() {
+        let layer = TelemetryLayer::new_blackhole()
+            .and_then(tracing_subscriber::fmt::Layer::builder().finish())
+            .and_then(LevelFilter::INFO);
+
+        let subscriber = layer.with_subscriber(registry::Registry::default());
+
+        // attempt to set, failure means already set (other test suite, likely)
+        let _ = tracing::subscriber::set_global_default(subscriber);
+    }
+
+    fn spawn_dag_store(port: u32) -> tempdir::TempDir {
+        let tmp_dir = tempdir::TempDir::new("dag-store-test").unwrap();
+        let fs_path = tmp_dir.path().to_str().unwrap().to_string();
+        let store = Arc::new(FileSystemStore::new(fs_path));
+
+        let cache = Arc::new(Cache::new(64));
+
+        let runtime = dag_store::server::app::Runtime {
+            cache: cache,
+            mutable_hash_store: store.clone(),
+            hashed_blob_store: store,
+        };
+
+        let bind_to = format!("0.0.0.0:{}", &port);
+        let addr = bind_to.parse().unwrap();
+
+        tokio::spawn(async move {
+            dag_store::run(runtime, addr).await.unwrap();
+            ()
+        });
+
+        // return guard
+        tmp_dir
+    }
+
     #[tokio::test]
     async fn test_batch_upload() {
+        init_test_env();
+
+        let dag_store_port = 6666;
+        let tmp_dir = spawn_dag_store(dag_store_port);
+
         // TODO: test env might have to be manual - how to express test dep on other bin in project?
 
-        let url = "http://localhost:8088";
+        let dag_store_url = format!("http://localhost:{}", dag_store_port);
 
         // - get state, no hash.
-        let state = get_initial_state(url.to_string()).await.unwrap();
+        let state = get_initial_state(dag_store_url.to_string()).await.unwrap();
         assert_eq!(state, None);
 
         let node = notes_types::notes::Node {
@@ -311,23 +374,30 @@ mod tests {
             body: "body".to_string(),
         };
 
+        let tree = ValidatedTree_::validate_(node, HashMap::new(), |n| {
+            n.children.clone().into_iter().filter_map(|x| match x {
+                NodeRef::Modified(x) => Some(x),
+                _ => None,
+            })
+        })
+        .expect("failure validating tree while building put request");
+
         let put_req = notes_types::api::PutReq {
-            head_node: node,
-            extra_nodes: HashMap::new(),
+            tree,
             cas_hash: None,
         };
 
         // - push small tree with hash + no CAS hash
-        let hash = put_nodes(url.to_string(), put_req).await.unwrap().root_hash;
+        let hash = put_nodes(dag_store_url.to_string(), put_req).await.unwrap().root_hash;
 
         // FIXME: FIXME: FIXME:
         // FAILS HERE: state is just None instead of expected CAS (oh right, didn't impl that, did i?)
         // - get state, hash of small tree
-        let state = get_initial_state(url.to_string()).await.unwrap();
+        let state = get_initial_state(dag_store_url.to_string()).await.unwrap();
         assert_eq!(state, Some(hash.clone()));
 
         // - get tree, recursive expansion of same (NOTE: only one layer currently)
-        let get_resp = get_nodes(url.to_string(), hash.to_string()).await.unwrap();
+        let get_resp = get_nodes(dag_store_url.to_string(), hash.to_string()).await.unwrap();
 
         let expected_node = notes_types::notes::Node {
             parent: None, // _not_ T, constant type. NOTE: enforces that this is a TREE and not a DAG
@@ -338,5 +408,9 @@ mod tests {
 
         // test round trip
         assert_eq!(get_resp.requested_node, expected_node);
+
+        drop(tmp_dir);
     }
+
+
 }

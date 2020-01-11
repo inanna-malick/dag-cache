@@ -400,7 +400,7 @@ impl State {
                 // build client id -> hash map for lookups
                 let mut node_id_to_hash = HashMap::new();
                 for (id, hash) in resp.additional_uploaded.clone().into_iter() {
-                    node_id_to_hash.insert(NodeId::from_generic(id.0).unwrap(), hash.clone());
+                    node_id_to_hash.insert(NodeId::from_generic(id).unwrap(), hash.clone());
                 }
 
                 // update root node with hash
@@ -409,7 +409,7 @@ impl State {
 
                 for (id, hash) in resp.additional_uploaded.into_iter() {
                     let hash = hash.promote::<CannonicalNode>();
-                    let id = NodeId::from_generic(id.0).unwrap(); // FIXME - type conversion gore
+                    let id = NodeId::from_generic(id).unwrap(); // FIXME - type conversion gore
                     let mut node = self.get_node_mut(&id);
                     node.hash = Some(hash.clone());
                     if let Some(parent_id) = &node.parent {
@@ -426,7 +426,7 @@ impl State {
                 }
             }
             BackendMsg::Fetch(remote_node_ref) => {
-                let request = Request::get(format!("/node/{}", (remote_node_ref.1).to_string()))
+                let request = Request::get(format!("/node/{}", (remote_node_ref.1.to_base58()).to_string()))
                     .body(Nothing)
                     .expect("fetch req builder failed");
 
@@ -696,11 +696,15 @@ impl State {
         }
     }
 
+    // succeeds if root node has no children, fails if it does
     fn push_nodes(&mut self, req: notes_types::api::PutReq) -> () {
+        println!("sending push nodes req {:?}", req);
+        let req = Json(&req);
+        println!("sending push nodes req (json) {:?}", req);
         let request = Request::post("/nodes")
             // why is this is neccessary given Json body type on builder - mb I'm doing it wrong?
             .header("Content-Type", "application/json")
-            .body(Json(&req))
+            .body(req)
             .expect("push node request");
 
         let callback = self.link.send_back(
@@ -732,8 +736,12 @@ impl State {
 }
 
 fn gen_node_id() -> NodeId {
-    let u = rand::random::<u64>();
-    NodeId(format!("id-{}", u))
+    let u = rand::random::<u128>();
+    if u == 0 {
+        gen_node_id()
+    } else {
+        NodeId(u)
+    }
 }
 
 // TODO: unicode, css, etc (currently just a debug indicator)

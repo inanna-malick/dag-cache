@@ -1,26 +1,47 @@
 use crate::api::{ParseError, Result};
 use dag_store_types::types::{
     api,
-    domain::{self, TypedHash},
+    domain::{self, Id, TypedHash},
     encodings,
 };
 use serde::{Deserialize, Serialize};
+use serde::{Deserializer, Serializer};
 use std::collections::HashMap;
 
-#[derive(PartialEq, Eq, Clone, Hash, Serialize, Deserialize, Debug)]
-pub struct NodeId(pub String); // cannot be u128 b/c large numbers are stored using scientific notation w/ limited precision
+#[derive(PartialEq, Eq, Clone, Hash, Debug)]
+pub struct NodeId(pub u128);
 
 impl NodeId {
     pub fn root() -> Self {
-        NodeId("root".to_string())
+        Self(0)
     }
 
-    pub fn from_generic(g: String) -> Result<Self> {
-        Ok(NodeId(g))
+    pub fn from_generic(id: Id) -> Result<Self> {
+        Ok(Self(id.0))
     }
 
-    pub fn into_generic(self) -> api::ClientId {
-        api::ClientId(format!("{}", self.0))
+    pub fn into_generic(self) -> Id {
+        Id(self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for NodeId {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<NodeId, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let res: [u8; 16] = Deserialize::deserialize(deserializer)?;
+        Ok(NodeId(u128::from_be_bytes(res)))
+    }
+}
+
+impl Serialize for NodeId {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let bytes: [u8; 16] = self.0.to_be_bytes();
+        Serialize::serialize(&bytes, serializer)
     }
 }
 
@@ -95,9 +116,9 @@ impl Node<RemoteNodeRef> {
         let node: Node<NodeId> = Node::decode(&g.data.0[..])?;
 
         let mut hdr_map = HashMap::new();
-        // map from name(node id) to hash
+        // build map from node id to hash
         for hdr in g.links.into_iter() {
-            let id = NodeId::from_generic(hdr.name)?;
+            let id = NodeId::from_generic(hdr.id)?;
             hdr_map.insert(id, hdr.hash);
         }
 
@@ -151,10 +172,9 @@ impl Node<NodeRef> {
                     api::bulk_put::NodeLink::Local(id)
                 }
                 NodeRef::Unmodified(RemoteNodeRef(id, hash)) => {
-                    let name = id.into_generic();
                     let hdr = domain::Header {
-                        size: 0, // TODO: FIXME or drop size field. idk.
-                        name: name.0,
+                        size: 0, // TODO: FIXME impl or drop size field. idk.
+                        id: id.into_generic(),
                         hash: hash.demote(),
                     };
                     api::bulk_put::NodeLink::Remote(hdr)

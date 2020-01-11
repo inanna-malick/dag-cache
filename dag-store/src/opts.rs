@@ -20,13 +20,13 @@ pub struct Opt {
     pub port: u64,
 
     #[structopt(short = "f", long = "fs_path")]
-    fs_path: String,
+    pub fs_path: String,
 
     #[structopt(short = "n", long = "max_cache_entries", default_value = "1024")]
-    max_cache_entries: usize,
+    pub max_cache_entries: usize,
 
     #[structopt(short = "h", long = "honeycomb_key_file")]
-    honeycomb_key_file: String,
+    pub honeycomb_key_file: Option<String>,
 }
 
 impl Opt {
@@ -34,24 +34,33 @@ impl Opt {
     pub fn into_runtime(self) -> Runtime {
         let store = Arc::new(FileSystemStore::new(self.fs_path));
 
-        let mut file =
-            File::open(self.honeycomb_key_file).expect("failed opening honeycomb key file");
-        let mut honeycomb_key = String::new();
-        file.read_to_string(&mut honeycomb_key)
-            .expect("failed reading honeycomb key file");
+        let telemetry_layer = match self.honeycomb_key_file {
+            Some(honeycomb_key_file) => {
+                let mut file =
+                    File::open(honeycomb_key_file).expect("failed opening honeycomb key file");
+                let mut honeycomb_key = String::new();
+                file.read_to_string(&mut honeycomb_key)
+                    .expect("failed reading honeycomb key file");
 
-        let honeycomb_config = libhoney::Config {
-            options: libhoney::client::Options {
-                api_key: honeycomb_key,
-                dataset: "dag-cache".to_string(), // todo rename
-                ..libhoney::client::Options::default()
-            },
-            transmission_options: libhoney::transmission::Options {
-                max_batch_size: 1,
-                ..libhoney::transmission::Options::default()
-            },
+                let honeycomb_config = libhoney::Config {
+                    options: libhoney::client::Options {
+                        api_key: honeycomb_key,
+                        dataset: "dag-cache".to_string(), // todo rename
+                        ..libhoney::client::Options::default()
+                    },
+                    transmission_options: libhoney::transmission::Options {
+                        max_batch_size: 1,
+                        ..libhoney::transmission::Options::default()
+                    },
+                };
+                TelemetryLayer::new("dag-store".to_string(), honeycomb_config)
+            }
+            None => {
+                TelemetryLayer::new_blackhole()
+            }
         };
-        let layer = TelemetryLayer::new("dag-store".to_string(), honeycomb_config)
+
+        let layer = telemetry_layer
             .and_then(tracing_subscriber::fmt::Layer::builder().finish())
             .and_then(LevelFilter::INFO);
 

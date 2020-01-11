@@ -19,7 +19,8 @@ tonic = { version = "0.1.0-alpha.6", features = [], optional = true }
 serde = { version = "1.0.91", features = ["derive"] }
 honeycomb-tracing = { git = "https://github.com/pkinsky/honeycomb-tracing", branch = "v2", optional = true}
 tracing = { version = "0.1.9", optional = true }
-blake2 = "0.8.1"
+blake3 = "0.1"
+slice_as_array = "1.1.0"
 
 [dev-dependencies]
 rand = "0.7"

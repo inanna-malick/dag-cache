@@ -77,7 +77,16 @@ impl Opt {
         let subscriber = layer.with_subscriber(registry::Registry::default());
         tracing::subscriber::set_global_default(subscriber).expect("setting global default failed");
 
-        let template = "<!doctype html>
+        Runtime {
+            port: self.port,
+            dag_store_url: self.dag_store_url,
+            hb: mk_template(),
+        }
+    }
+}
+
+pub fn mk_template() -> Handlebars {
+    let template = "<!doctype html>
             <html>
                 <head>
                     <meta charset=\"utf-8\" />
@@ -92,13 +101,7 @@ impl Opt {
                 </body>
             </html>";
 
-        let mut hb = Handlebars::new();
-        hb.register_template_string("index.html", template).unwrap();
-
-        Runtime {
-            port: self.port,
-            dag_store_url: self.dag_store_url,
-            hb,
-        }
-    }
+    let mut hb = Handlebars::new();
+    hb.register_template_string("index.html", template).unwrap();
+    hb
 }

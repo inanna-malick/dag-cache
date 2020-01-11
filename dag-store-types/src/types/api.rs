@@ -1,4 +1,4 @@
-use crate::types::domain::{Hash, Header, Node, NodeWithHeader};
+use crate::types::domain::{Hash, Header, Id, Node, NodeWithHeader};
 #[cfg(feature = "grpc")]
 use crate::types::errors::ProtoDecodingError;
 #[cfg(feature = "grpc")]
@@ -6,25 +6,6 @@ use crate::types::grpc;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "grpc")]
 use std::collections::HashMap;
-
-#[derive(PartialEq, Hash, Eq, Clone, Debug, Serialize, Deserialize)]
-pub struct ClientId(pub String); // string? u128? idk
-
-impl ClientId {
-    pub fn new(x: String) -> ClientId { ClientId(x) }
-
-    #[cfg(feature = "grpc")]
-    pub fn from_proto(p: grpc::ClientId) -> Result<Self, ProtoDecodingError> {
-        Ok(ClientId(p.hash)) // TODO: validation?
-    }
-
-    #[cfg(feature = "grpc")]
-    pub fn into_proto(self) -> grpc::ClientId { grpc::ClientId { hash: self.0 } }
-}
-
-impl std::fmt::Display for ClientId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) }
-}
 
 pub mod bulk_put {
     use super::*;
@@ -34,7 +15,7 @@ pub mod bulk_put {
     #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
     pub struct Resp {
         pub root_hash: Hash,
-        pub additional_uploaded: Vec<(ClientId, Hash)>,
+        pub additional_uploaded: Vec<(Id, Hash)>,
     }
 
     #[cfg(feature = "grpc")]
@@ -59,14 +40,14 @@ pub mod bulk_put {
             ))?;
             let root_hash = Hash::from_proto(root_hash)?;
 
-            let additional_uploaded: Result<Vec<(ClientId, Hash)>, ProtoDecodingError> = p
+            let additional_uploaded: Result<Vec<(Id, Hash)>, ProtoDecodingError> = p
                 .additional_uploaded
                 .into_iter()
                 .map(|bp| {
                     let client_id = bp.client_id.ok_or(ProtoDecodingError(
                         "client_id not present on Bulk Put Resp proto pair".to_string(),
                     ))?;
-                    let client_id = ClientId::from_proto(client_id)?;
+                    let client_id = Id::from_proto(client_id)?;
 
                     let hash = bp.hash.ok_or(ProtoDecodingError(
                         "hash not present on Bulk Put Resp proto pair".to_string(),
@@ -187,7 +168,7 @@ pub mod bulk_put {
 
     #[derive(Clone, Debug)]
     pub struct NodeWithHash {
-        pub hash: ClientId,
+        pub hash: Id,
         pub node: Node,
     }
 
@@ -197,7 +178,7 @@ pub mod bulk_put {
             let hash = p.client_side_hash.ok_or(ProtoDecodingError(
                 "client side hash not present on BulkPutNodeWithHash proto".to_string(),
             ))?;
-            let hash = ClientId::from_proto(hash)?;
+            let hash = Id::from_proto(hash)?;
 
             let node = p.node.ok_or(ProtoDecodingError(
                 "node not present on BulkPutNodeWithHash proto".to_string(),
@@ -234,7 +215,7 @@ pub mod bulk_put {
 
     #[derive(Clone, Debug)]
     pub enum NodeLink {
-        Local(ClientId),
+        Local(Id),
         Remote(Header),
     }
 
@@ -255,7 +236,7 @@ pub mod bulk_put {
                     Header::from_proto(hdr).map(NodeLink::Remote)
                 }
                 Some(grpc::bulk_put_link::Link::InReq(csh)) => {
-                    let csh = ClientId::from_proto(csh)?;
+                    let csh = Id::from_proto(csh)?;
                     Ok(NodeLink::Local(csh))
                 }
                 None => Err(ProtoDecodingError(

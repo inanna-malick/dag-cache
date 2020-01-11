@@ -55,18 +55,18 @@ message BulkPutResp {
 
 message BulkPutRespPair {
   Hash hash = 1;
-  ClientId client_id = 2;
+  Id client_id = 2;
 }
 
 message BulkPutLink {
   oneof link {
     Header in_store = 1;
-    ClientId in_req = 2;
+    Id in_req = 2;
   }
 }
 
 message BulkPutNodeWithHash {
-  ClientId client_side_hash = 1;
+  Id client_side_hash = 1;
   BulkPutNode node = 2;
 }
 
@@ -75,18 +75,16 @@ message BulkPutNode {
   repeated BulkPutLink links = 2;
 }
 
-message ClientId {
-  string hash = 1; // some string, should be unique id (eg u128 uuid)
+message Id {
+  bytes id = 1; // [u8; 16], big-endian u128
 }
 
-
-
 message Hash {
-  string hash = 1; // base58 encoded string, to simplify grpc gui interactions
+  bytes hash = 1; // [u8; 32], blake3 output
 }
 
 message Header {
-  string name = 1; // using this naming scheme so clients can do lazy diffing w/o having to upload a whole tree
+  Id id = 1;
   Hash hash = 2;
   uint64 size = 3;
 }

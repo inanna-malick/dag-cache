@@ -1,5 +1,5 @@
 use crate::types::api::bulk_put::{Node, NodeLink};
-use crate::types::api::ClientId;
+use crate::types::domain::Id;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -10,13 +10,13 @@ pub struct ValidatedTree_<K: Eq + Hash, V> {
     pub nodes: HashMap<K, V>,
 }
 
-pub type ValidatedTree = ValidatedTree_<ClientId, Node>;
+pub type ValidatedTree = ValidatedTree_<Id, Node>;
 
 impl ValidatedTree {
     pub fn validate(
         root_node: Node,
-        nodes: HashMap<ClientId, Node>,
-    ) -> Result<ValidatedTree, ValidatedTreeBuildErr<ClientId>> {
+        nodes: HashMap<Id, Node>,
+    ) -> Result<ValidatedTree, ValidatedTreeBuildErr<Id>> {
         ValidatedTree::validate_(root_node, nodes, |x| {
             x.links.clone().into_iter().filter_map(|x| match x {
                 NodeLink::Local(csh) => Some(csh),
@@ -74,7 +74,11 @@ impl<K: std::fmt::Debug> std::fmt::Display for ValidatedTreeBuildErr<K> {
 }
 
 impl<K: std::fmt::Debug> std::error::Error for ValidatedTreeBuildErr<K> {
-    fn description(&self) -> &str { "validated tree build error" }
+    fn description(&self) -> &str {
+        "validated tree build error"
+    }
 
-    fn cause(&self) -> Option<&dyn std::error::Error> { None }
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        None
+    }
 }

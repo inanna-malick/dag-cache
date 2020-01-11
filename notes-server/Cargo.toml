@@ -41,6 +41,11 @@ libhoney-rust = "0.1.3"
 
 structopt = "0.2"
 
+
+[dev-dependencies]
+dag-store = { path = "../dag-store"}
+tempdir = "0.3.7"
+
 [profile.dev]
 opt-level = 0
 

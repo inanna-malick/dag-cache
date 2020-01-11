@@ -22,7 +22,7 @@ impl GetResp {
         let requested_node = notes::Node::from_generic(g.requested_node)?;
         let mut extra_nodes = HashMap::new();
         for x in g.extra_nodes.into_iter() {
-            let id = notes::NodeId::from_generic(x.header.name)?;
+            let id = notes::NodeId::from_generic(x.header.id)?;
             let node = notes::Node::from_generic(x.node)?;
             extra_nodes.insert(notes::RemoteNodeRef(id, x.header.hash.promote()), node);
         }

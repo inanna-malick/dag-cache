@@ -3,32 +3,39 @@ use crate::types::encodings::{Base58, Base64};
 use crate::types::errors::ProtoDecodingError;
 #[cfg(feature = "grpc")]
 use crate::types::grpc;
-use blake2::{Blake2b, Digest};
 use serde::{Deserialize, Serialize};
 use serde::{Deserializer, Serializer};
+use slice_as_array::slice_to_array_clone;
 
-#[derive(PartialEq, Hash, Eq, Clone, Debug, Serialize, Deserialize)]
-pub struct ClientId(pub String); // string? u128? idk
+#[derive(PartialEq, Hash, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct Id(pub u128);
 
-impl ClientId {
-    pub fn new(x: String) -> ClientId { ClientId(x) }
-
+impl Id {
     #[cfg(feature = "grpc")]
-    pub fn from_proto(p: grpc::ClientId) -> Result<Self, ProtoDecodingError> {
-        Ok(ClientId(p.hash)) // TODO: validation?
+    pub fn from_proto(p: grpc::Id) -> Result<Self, ProtoDecodingError> {
+        slice_to_array_clone!(&p.id, [u8; 16])
+            .ok_or(ProtoDecodingError("bad hash length".to_string()))
+            .map(u128::from_be_bytes)
+            .map(Self)
     }
 
     #[cfg(feature = "grpc")]
-    pub fn into_proto(self) -> grpc::ClientId { grpc::ClientId { hash: self.0 } }
+    pub fn into_proto(self) -> grpc::Id {
+        grpc::Id {
+            id: self.0.to_be_bytes().to_vec(),
+        }
+    }
 }
 
-impl std::fmt::Display for ClientId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) }
+impl std::fmt::Display for Id {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug, Serialize, Deserialize)]
 pub struct Header {
-    pub name: String,
+    pub id: Id,
     pub hash: Hash,
     pub size: u64,
 }
@@ -37,7 +44,7 @@ impl Header {
     #[cfg(feature = "grpc")]
     pub fn into_proto(self) -> grpc::Header {
         grpc::Header {
-            name: self.name,
+            id: Some(self.id.into_proto()),
             hash: Some(self.hash.into_proto()),
             size: self.size,
         }
@@ -49,47 +56,89 @@ impl Header {
             "hash field not present on Header proto".to_string(),
         ))?;
         let hash = Hash::from_proto(hash)?;
+
+        let id = p.id.ok_or(ProtoDecodingError(
+            "id field not present on Header proto".to_string(),
+        ))?;
+        let id = Id::from_proto(id)?;
+
         let hdr = Header {
-            name: p.name,
             size: p.size,
             hash,
+            id,
         };
         Ok(hdr)
     }
 }
 
-// NOTE: would be cool if I knew these were constant size instead of having a vec
-#[derive(Clone, Hash, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub struct Hash(pub Base58);
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
+pub struct Hash(pub blake3::Hash);
 
+// TODO: Base58 to/from string fn for URI use
 impl Hash {
-    pub fn to_string_canonical(&self) -> String { format!("{}.blake2", self) }
+    pub fn to_string_canonical(&self) -> String {
+        format!("{}.blake3", self)
+    }
+
+    pub fn from_base58(b58: &str) -> Result<Self, Base58HashDecodeError> {
+        let bytes = Base58::from_string(b58).map_err( |e| Base58HashDecodeError(format!("invalid b58: {:?}", e)))?;
+        Self::from_bytes(&bytes.0).ok_or(Base58HashDecodeError("invalid length".to_string()))
+    }
+
+    pub fn to_base58(&self) -> String {
+        let b58 = Base58::from_bytes(self.0.as_bytes().to_vec());
+        format!("{}", b58)
+    }
+
+
+    pub fn from_bytes(x: &[u8]) -> Option<Self> {
+        slice_to_array_clone!(x, [u8; 32])
+            .map(blake3::Hash::from)
+            .map(Self)
+    }
 
     #[cfg(feature = "grpc")]
     pub fn into_proto(self) -> grpc::Hash {
-        let base_58 = self.0;
-        let raw = base_58.to_string();
-        grpc::Hash { hash: raw }
+        grpc::Hash {
+            hash: self.0.as_bytes().to_vec(),
+        }
     }
 
     #[cfg(feature = "grpc")]
     pub fn from_proto(p: grpc::Hash) -> Result<Self, ProtoDecodingError> {
-        Base58::from_string(&p.hash)
-            .map(Hash)
-            .map_err(|e| ProtoDecodingError(format!("invalid base58 string in hash: {:?}", e)))
+        Self::from_bytes(&p.hash)
+            .ok_or(ProtoDecodingError("bad hash length".to_string()))
     }
 
-    pub fn from_string(x: &str) -> Result<Self, base58::FromBase58Error> {
-        Base58::from_string(x).map(Self::from_raw)
+    pub fn promote<T>(self) -> TypedHash<T> {
+        TypedHash(self, std::marker::PhantomData)
     }
+}
 
-    pub fn from_raw(raw: Base58) -> Hash { Hash(raw) }
+impl<'de> Deserialize<'de> for Hash {
+    fn deserialize<D>(deserializer: D) -> Result<Hash, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let res: [u8; 32] = Deserialize::deserialize(deserializer)?;
+        Ok(Hash(blake3::Hash::from(res)))
+    }
+}
 
-    pub fn promote<T>(self) -> TypedHash<T> { TypedHash(self, std::marker::PhantomData) }
+impl Serialize for Hash {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let bytes: &[u8; 32] = self.0.as_bytes();
+        Serialize::serialize(bytes, serializer)
+    }
 }
 
 impl std::fmt::Display for Hash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.to_base58().fmt(f)
+    }
 }
 
 // phantom type param used to distinguish between hashes of different types
@@ -97,17 +146,23 @@ impl std::fmt::Display for Hash {
 pub struct TypedHash<T>(Hash, std::marker::PhantomData<T>);
 
 impl<T> std::hash::Hash for TypedHash<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.0.hash(state); }
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
 }
 
 impl<T> TypedHash<T> {
-    pub fn demote(self) -> Hash { self.0 }
+    pub fn demote(self) -> Hash {
+        self.0
+    }
 }
 
 impl<T> core::ops::Deref for TypedHash<T> {
     type Target = Hash;
 
-    fn deref(&self) -> &Self::Target { &self.0 }
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 impl<'de, T> Deserialize<'de> for TypedHash<T> {
@@ -138,15 +193,15 @@ pub struct Node {
 impl Node {
     /// stable hashing function (not using proto because there's no canonical encoding)
     pub fn canonical_hash(&self) -> Hash {
-        let mut hasher = Blake2b::new();
+        let mut hasher = blake3::Hasher::new();
         for link in self.links.iter() {
-            hasher.input(&link.name);
-            hasher.input(&(link.hash.0).0);
-            hasher.input(link.size.to_be_bytes());
+            hasher.update(&link.id.0.to_be_bytes());
+            hasher.update(link.hash.0.as_bytes());
+            hasher.update(&link.size.to_be_bytes());
         }
-        hasher.input(&self.data.0);
-        let hash = hasher.result();
-        Hash::from_raw(Base58::from_bytes(hash.to_vec()))
+        hasher.update(&self.data.0);
+        let hash = hasher.finalize();
+        Hash(hash)
     }
 
     #[cfg(feature = "grpc")]
@@ -200,5 +255,30 @@ impl NodeWithHeader {
             .ok_or(ProtoDecodingError("missing node".to_string()))?;
         let node = Node::from_proto(node)?;
         Ok(Self { header, node })
+    }
+}
+
+
+
+
+
+// FIXME: figure out better error hierarchy
+
+#[derive(Debug)]
+pub struct Base58HashDecodeError(String);
+
+impl std::fmt::Display for Base58HashDecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self) // TODO: more idiomatic way of doing this
+    }
+}
+
+impl std::error::Error for Base58HashDecodeError {
+    fn description(&self) -> &str {
+        &self.0
+    }
+
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        None
     }
 }
