@@ -55,9 +55,7 @@ impl Opt {
                 };
                 TelemetryLayer::new("dag-store".to_string(), honeycomb_config)
             }
-            None => {
-                TelemetryLayer::new_blackhole()
-            }
+            None => TelemetryLayer::new_blackhole(),
         };
 
         let layer = telemetry_layer

@@ -40,6 +40,7 @@ impl GetResp {
 // TODO: will need to make this heterogenous - must allow tree w/ commits + notes
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PutReq {
+    // TODO: this fails to serialize b/c key type is not string which JSON requires
     pub tree: ValidatedTree_<notes::NodeId, notes::Node<notes::NodeRef>>,
     pub cas_hash: Option<TypedHash<notes::CannonicalNode>>,
 }

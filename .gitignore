@@ -5,3 +5,4 @@ bin/notes-server
 web/*
 tmpdir/*
 honeycomb.key
+notes-app-stage-*.png

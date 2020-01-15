@@ -142,10 +142,10 @@ impl Component for State {
 
         // repeatedly wake up save process - checks root node, save (recursively) if modifed
         let mut interval_service = IntervalService::new();
-        let ten_seconds = std::time::Duration::new(10, 0);
         let callback = link.send_back(move |_: ()| Msg::Backend(BackendMsg::StartSave));
 
-        let interval_task = interval_service.spawn(ten_seconds, callback);
+        let save_interval = std::time::Duration::new(60, 0);
+        let interval_task = interval_service.spawn(save_interval, callback);
 
         State {
             nodes: nodes,
@@ -177,6 +177,9 @@ impl Component for State {
     fn view(&self) -> Html<Self> {
         html! {
             <div class="wrapper">
+                <button class="smallButton trigger-save" onclick=|_| Msg::Backend(BackendMsg::StartSave) >
+                {"[S]"}
+                </button>
                 <button class="smallButton" onclick=|_| Msg::Navigation(NavigationMsg::FocusOnRoot)>
                 {"[^]"}
                 </button>
@@ -506,7 +509,7 @@ impl State {
                                         self.render_node(*node_ref)
                                     })
                                 }
-                            <button class="smallButton" onclick=|_|
+                            <button class="smallButton add-sub-node" onclick=|_|
                                 if is_saving {
                                     Msg::NoOp
                                 } else { Msg::Edit(
@@ -687,6 +690,12 @@ impl State {
 
     // succeeds if root node has no children, fails if it does
     fn push_nodes(&mut self, req: notes_types::api::PutReq) -> () {
+        let req_2 = serde_json::to_string(&req);
+        println!("req 2, serialized: {:?}", req_2);
+
+        let foo = serde_json::to_string(&NodeId(1234567890123));
+        println!("test node id, serialized: {:?}", foo);
+
         println!("sending push nodes req {:?}", req);
         let req = Json(&req);
         println!("sending push nodes req (json) {:?}", req);

@@ -273,7 +273,6 @@ async fn main() {
     warp::serve(routes).run(socket).await;
 }
 
-
 // FIXME: should be omitable
 struct Trivial(hyper::Response<hyper::Body>);
 
@@ -297,10 +296,9 @@ impl warp::Reply for Trivial {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use dag_store_types::types::validated_tree::ValidatedTree_;
     use notes_types::notes::*;
-
+    use std::collections::HashMap;
 
     use honeycomb_tracing::TelemetryLayer;
     use tracing_subscriber::filter::LevelFilter;
@@ -308,9 +306,9 @@ mod tests {
     use tracing_subscriber::registry;
 
     // use std::net::SocketAddr;
-    use std::sync::Arc;
     use dag_store::capabilities::cache::Cache;
     use dag_store::capabilities::store::FileSystemStore;
+    use std::sync::Arc;
 
     pub fn init_test_env() {
         let layer = TelemetryLayer::new_blackhole()
@@ -394,19 +392,26 @@ mod tests {
         };
 
         // - push small tree with hash + no CAS hash
-        let hash = put_nodes(dag_store_url.to_string(), put_req).await.unwrap().root_hash;
+        let hash = put_nodes(dag_store_url.to_string(), put_req)
+            .await
+            .unwrap()
+            .root_hash;
 
         let state = get_initial_state(dag_store_url.to_string()).await.unwrap();
         assert_eq!(state, Some(hash.clone()));
 
         // - get tree, recursive expansion of same (NOTE: only one layer currently)
-        let get_resp = get_nodes(dag_store_url.to_string(), hash.to_string()).await.unwrap();
+        let get_resp = get_nodes(dag_store_url.to_string(), hash.to_string())
+            .await
+            .unwrap();
 
         // TODO: test that root node _and_ extra nodes come back through
         // test round trip
-        assert_eq!(get_resp.requested_node.map(|n| n.0), node1.map(|n| n.into_node_id()));
+        assert_eq!(
+            get_resp.requested_node.map(|n| n.0),
+            node1.map(|n| n.into_node_id())
+        );
 
         drop(tmp_dir);
     }
-
 }

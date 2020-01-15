@@ -81,7 +81,8 @@ impl Hash {
     }
 
     pub fn from_base58(b58: &str) -> Result<Self, Base58HashDecodeError> {
-        let bytes = Base58::from_string(b58).map_err( |e| Base58HashDecodeError(format!("invalid b58: {:?}", e)))?;
+        let bytes = Base58::from_string(b58)
+            .map_err(|e| Base58HashDecodeError(format!("invalid b58: {:?}", e)))?;
         Self::from_bytes(&bytes.0).ok_or(Base58HashDecodeError("invalid length".to_string()))
     }
 
@@ -89,7 +90,6 @@ impl Hash {
         let b58 = Base58::from_bytes(self.0.as_bytes().to_vec());
         format!("{}", b58)
     }
-
 
     pub fn from_bytes(x: &[u8]) -> Option<Self> {
         slice_to_array_clone!(x, [u8; 32])
@@ -106,8 +106,7 @@ impl Hash {
 
     #[cfg(feature = "grpc")]
     pub fn from_proto(p: grpc::Hash) -> Result<Self, ProtoDecodingError> {
-        Self::from_bytes(&p.hash)
-            .ok_or(ProtoDecodingError("bad hash length".to_string()))
+        Self::from_bytes(&p.hash).ok_or(ProtoDecodingError("bad hash length".to_string()))
     }
 
     pub fn promote<T>(self) -> TypedHash<T> {
@@ -267,10 +266,6 @@ impl NodeWithHeader {
         Ok(Self { header, node })
     }
 }
-
-
-
-
 
 // FIXME: figure out better error hierarchy
 

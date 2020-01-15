@@ -1,8 +1,8 @@
 use crate::capabilities::put_and_cache;
 use crate::capabilities::{Cache, HashedBlobStore, MutableHashStore};
 use dag_store_types::types::{
-    api::{bulk_put},
-    domain::{Hash, Header, Node, Id},
+    api::bulk_put,
+    domain::{Hash, Header, Id, Node},
     errors::DagCacheError,
     validated_tree::ValidatedTree,
 };
@@ -106,11 +106,7 @@ async fn upload_link(
 
             let (size, hash, mut additional_uploaded) =
                 batch_put_cata_unsafe(store, cache.clone(), tree.clone(), node.clone()).await?;
-            let hdr = Header {
-                id,
-                size,
-                hash,
-            };
+            let hdr = Header { id, size, hash };
             additional_uploaded.push((id, hdr.hash.clone()));
             Ok((hdr, additional_uploaded))
         }
@@ -216,7 +212,7 @@ mod tests {
     #[tokio::test]
     async fn test_batch_upload() {
         //build some client side 'hashes' - base58 of 1, 2, 3, 4
-        let client_ids: Vec<Id> = (1..4).map(|x| Id(x) ).collect();
+        let client_ids: Vec<Id> = (1..4).map(|x| Id(x)).collect();
 
         let t0 = bulk_put::Node {
             links: vec![],
@@ -260,15 +256,7 @@ mod tests {
 
         let uploaded_values: Vec<(Vec<Id>, Base64)> = map
             .values()
-            .map(|Node { links, data }| {
-                (
-                    links
-                        .iter()
-                        .map(|x| Id(x.id.0))
-                        .collect(),
-                    data.clone(),
-                )
-            })
+            .map(|Node { links, data }| (links.iter().map(|x| Id(x.id.0)).collect(), data.clone()))
             .collect();
 
         assert!(&uploaded_values.contains(&(vec!(), t0.data))); // t1 uploaded
