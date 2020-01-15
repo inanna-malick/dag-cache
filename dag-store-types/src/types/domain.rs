@@ -142,8 +142,18 @@ impl std::fmt::Display for Hash {
 }
 
 // phantom type param used to distinguish between hashes of different types
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Debug)]
 pub struct TypedHash<T>(Hash, std::marker::PhantomData<T>);
+
+// if derived will place unneccessary Clone bound on T
+impl<T> Clone for TypedHash<T> {
+    fn clone(&self) -> Self {
+        Self(self.0, std::marker::PhantomData)
+    }
+}
+
+// if derived will place unneccessary Copy bound on T
+impl<T> Copy for TypedHash<T> {}
 
 impl<T> std::hash::Hash for TypedHash<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {

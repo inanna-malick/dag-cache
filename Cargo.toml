@@ -6,6 +6,7 @@ members = [
     "notes-server",
     "notes-types",
     "notes-frontend",
+    "headless-chrome-test",
 ]
 
 exclude = [

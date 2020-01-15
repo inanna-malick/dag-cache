@@ -157,10 +157,6 @@ async fn put_nodes(
 async fn main() {
     let opt = Opt::from_args();
     let runtime = opt.into_runtime();
-    run(runtime).await
-}
-
-async fn run(runtime: Runtime) {
     unsafe {
         GLOBAL_CTX = Some(Arc::new(runtime));
     }
@@ -303,7 +299,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use dag_store_types::types::validated_tree::ValidatedTree_;
-    use notes_types::notes::NodeRef;
+    use notes_types::notes::*;
 
 
     use honeycomb_tracing::TelemetryLayer;
@@ -327,7 +323,7 @@ mod tests {
         let _ = tracing::subscriber::set_global_default(subscriber);
     }
 
-    fn spawn_dag_store(port: u32) -> tempdir::TempDir {
+    fn spawn_dag_store(port: u16) -> tempdir::TempDir {
         let tmp_dir = tempdir::TempDir::new("dag-store-test").unwrap();
         let fs_path = tmp_dir.path().to_str().unwrap().to_string();
         let store = Arc::new(FileSystemStore::new(fs_path));
@@ -367,14 +363,24 @@ mod tests {
         let state = get_initial_state(dag_store_url.to_string()).await.unwrap();
         assert_eq!(state, None);
 
-        let node = notes_types::notes::Node {
-            parent: None, // _not_ T, constant type. NOTE: enforces that this is a TREE and not a DAG
-            children: Vec::new(),
+        let node1 = notes_types::notes::Node {
+            parent: None,
+            children: vec![NodeRef::Modified(NodeId(1))],
             header: "hdr".to_string(),
             body: "body".to_string(),
         };
 
-        let tree = ValidatedTree_::validate_(node, HashMap::new(), |n| {
+        let node2 = notes_types::notes::Node {
+            parent: Some(NodeId::root()),
+            children: Vec::new(),
+            header: "hdr 2".to_string(),
+            body: "body 2".to_string(),
+        };
+
+        let mut extra_nodes = HashMap::new();
+        extra_nodes.insert(NodeId(1), node2);
+
+        let tree = ValidatedTree_::validate_(node1.clone(), extra_nodes, |n| {
             n.children.clone().into_iter().filter_map(|x| match x {
                 NodeRef::Modified(x) => Some(x),
                 _ => None,
@@ -390,27 +396,17 @@ mod tests {
         // - push small tree with hash + no CAS hash
         let hash = put_nodes(dag_store_url.to_string(), put_req).await.unwrap().root_hash;
 
-        // FIXME: FIXME: FIXME:
-        // FAILS HERE: state is just None instead of expected CAS (oh right, didn't impl that, did i?)
-        // - get state, hash of small tree
         let state = get_initial_state(dag_store_url.to_string()).await.unwrap();
         assert_eq!(state, Some(hash.clone()));
 
         // - get tree, recursive expansion of same (NOTE: only one layer currently)
         let get_resp = get_nodes(dag_store_url.to_string(), hash.to_string()).await.unwrap();
 
-        let expected_node = notes_types::notes::Node {
-            parent: None, // _not_ T, constant type. NOTE: enforces that this is a TREE and not a DAG
-            children: Vec::new(),
-            header: "hdr".to_string(),
-            body: "body".to_string(),
-        };
-
+        // TODO: test that root node _and_ extra nodes come back through
         // test round trip
-        assert_eq!(get_resp.requested_node, expected_node);
+        assert_eq!(get_resp.requested_node.map(|n| n.0), node1.map(|n| n.into_node_id()));
 
         drop(tmp_dir);
     }
-
 
 }

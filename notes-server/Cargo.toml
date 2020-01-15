@@ -45,6 +45,7 @@ structopt = "0.2"
 [dev-dependencies]
 dag-store = { path = "../dag-store"}
 tempdir = "0.3.7"
+headless_chrome = "0.9"
 
 [profile.dev]
 opt-level = 0

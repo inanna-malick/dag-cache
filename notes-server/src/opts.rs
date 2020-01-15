@@ -57,8 +57,6 @@ impl Opt {
         file.read_to_string(&mut honeycomb_key)
             .expect("failed reading honeycomb key file");
 
-        // NOTE: underlying lib is not really something I trust rn? just write my own queue + batch sender state machine...
-        // TODO/FIXME/TODO/TODO: srsly, do this ^^
         let honeycomb_config = libhoney::Config {
             options: libhoney::client::Options {
                 api_key: honeycomb_key,

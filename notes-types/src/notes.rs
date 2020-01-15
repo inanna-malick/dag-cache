@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde::{Deserializer, Serializer};
 use std::collections::HashMap;
 
-#[derive(PartialEq, Eq, Clone, Hash, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
 pub struct NodeId(pub u128);
 
 impl NodeId {
@@ -45,29 +45,22 @@ impl Serialize for NodeId {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Hash, Serialize, Deserialize, Debug)]
+#[derive(PartialEq, Eq, Copy, Clone, Hash, Serialize, Deserialize, Debug)]
 pub enum NodeRef {
     Modified(NodeId),
     Unmodified(RemoteNodeRef),
 }
 
 impl NodeRef {
-    pub fn node_id(&self) -> &NodeId {
+    pub fn node_id(&self) -> NodeId {
         match self {
-            NodeRef::Modified(id) => id,
-            NodeRef::Unmodified(RemoteNodeRef(id, _hash)) => id,
-        }
-    }
-
-    pub fn into_node_id(self) -> NodeId {
-        match self {
-            NodeRef::Modified(id) => id,
-            NodeRef::Unmodified(RemoteNodeRef(id, _hash)) => id,
+            NodeRef::Modified(id) => *id,
+            NodeRef::Unmodified(RemoteNodeRef(id, _hash)) => *id,
         }
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Hash, Serialize, Deserialize, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Serialize, Deserialize, Debug)]
 pub struct RemoteNodeRef(pub NodeId, pub TypedHash<CannonicalNode>);
 
 #[derive(PartialEq, Eq, Clone, Serialize, Deserialize, Debug)]
@@ -155,7 +148,7 @@ impl Node<NodeRef> {
             children: self
                 .children
                 .iter()
-                .map(|node_ref| node_ref.node_id().clone())
+                .map(|node_ref| node_ref.node_id())
                 .collect(),
             header: self.header,
             body: self.body,
