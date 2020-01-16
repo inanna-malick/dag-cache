@@ -409,7 +409,7 @@ mod tests {
         // test round trip
         assert_eq!(
             get_resp.requested_node.map(|n| n.0),
-            node1.map(|n| n.into_node_id())
+            node1.map(|n| n.node_id())
         );
 
         drop(tmp_dir);

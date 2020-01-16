@@ -690,19 +690,9 @@ impl State {
 
     // succeeds if root node has no children, fails if it does
     fn push_nodes(&mut self, req: notes_types::api::PutReq) -> () {
-        let req_2 = serde_json::to_string(&req);
-        println!("req 2, serialized: {:?}", req_2);
-
-        let foo = serde_json::to_string(&NodeId(1234567890123));
-        println!("test node id, serialized: {:?}", foo);
-
-        println!("sending push nodes req {:?}", req);
-        let req = Json(&req);
-        println!("sending push nodes req (json) {:?}", req);
         let request = Request::post("/nodes")
-            // why is this is neccessary given Json body type on builder - mb I'm doing it wrong?
             .header("Content-Type", "application/json")
-            .body(req)
+            .body(Json(&req))
             .expect("push node request");
 
         let callback = self.link.send_back(

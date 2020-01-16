@@ -31,12 +31,11 @@ fn batch_get_ana_internal(
     resp_chan: mpsc::Sender<Result<Node, DagCacheError>>, // used to send completed nodes (eagerly)
     to_populate: Arc<CHashMap<Hash, ()>>,                 // used to memoize async fetches
 ) {
-    let hash2 = hash.clone();
     to_populate.clone().upsert(
         hash,
         || {
             tokio::spawn(async move {
-                batch_get_worker(store, cache, hash2, resp_chan, to_populate).await
+                batch_get_worker(store, cache, hash, resp_chan, to_populate).await
             });
         },
         |()| (),
@@ -51,7 +50,7 @@ async fn batch_get_worker(
     mut resp_chan: mpsc::Sender<Result<Node, DagCacheError>>,
     to_populate: Arc<CHashMap<Hash, ()>>, // used to memoize async fetches
 ) {
-    let res = get_and_cache(store.clone(), cache.clone(), hash.clone()).await;
+    let res = get_and_cache(store.clone(), cache.clone(), hash).await;
     match res {
         Ok(node) => {
             let links = node.links.clone();
