@@ -1,15 +1,14 @@
 #![deny(warnings)]
 
 mod opts;
-
 use dag_store_types::types::{
-    api::{bulk_put, get, meta},
+    api::{bulk_put, get},
     domain::{self, Hash},
-    grpc::{self, client::DagStoreClient},
+    grpc::{self, dag_store_client::DagStoreClient},
 };
-use honeycomb_tracing::{TraceCtx, TraceId};
+use headers::HeaderMapExt;
+use honeycomb_tracing::{current_dist_trace_ctx, SpanId, TraceCtx, TraceId};
 use opts::{Opt, Runtime};
-use prost::Message;
 use serde::Serialize;
 use serde_json::json;
 use std::{
@@ -20,9 +19,6 @@ use structopt::StructOpt;
 use tonic::metadata::MetadataValue;
 use tracing::{error, info, instrument};
 use warp::{reject, Filter};
-
-use headers::HeaderMapExt;
-use hyper::body::Chunk;
 
 // TODO: struct w/ domain types & etc
 #[derive(Debug)]
@@ -56,22 +52,24 @@ fn register_trace_root() {
         trace_id,
         parent_span: None,
     }
-    .record_on_current_span();
+    .register_dist_tracing_root()
+    .unwrap();
     println!("register trace root done");
 }
 
 fn add_tracing_to_meta<T>(request: &mut tonic::Request<T>) {
-    let current_trace_ctx = TraceCtx::eval_current_trace_ctx();
+    let meta = request.metadata_mut();
 
-    if let Some(ctx) = current_trace_ctx {
-        let meta = request.metadata_mut();
-        let ctx: grpc::TraceCtx = meta::trace_ctx_into_proto(ctx);
-        let mut buf = vec![];
-        ctx.encode(&mut buf)
-            .expect("error writing proto msg to buffer");
+    let (trace_id, span_id) = current_dist_trace_ctx().unwrap();
 
-        meta.insert_bin("trace-ctx-bin", MetadataValue::from_bytes(&buf));
-    };
+    meta.insert(
+        TraceId::meta_field_name(),
+        MetadataValue::from_str(&trace_id.to_string()).unwrap(),
+    );
+    meta.insert(
+        SpanId::meta_field_name(),
+        MetadataValue::from_str(&span_id.to_string()).unwrap(),
+    );
 }
 
 #[instrument]
@@ -239,16 +237,13 @@ async fn main() {
                 Some(blob) => {
                     let len = blob.len() as u64;
                     // TODO: arbitrary chunk size (1024), revisit later maybe (FIXME)
-                    let stream = futures::stream::iter(
-                        blob.chunks(1024)
-                            // .map(bytes::Bytes::from_static)
-                            .map(Chunk::from)
-                            .map(|x| {
-                                let res: Result<Chunk, Box<dyn std::error::Error + Send + Sync>> =
-                                    Ok(x);
-                                res
-                            }),
-                    );
+                    let stream = futures::stream::iter(blob.chunks(1024).map(|x| {
+                        let res: Result<
+                            &'static [u8],
+                            Box<dyn std::error::Error + Send + Sync + 'static>,
+                        > = Ok(x);
+                        res
+                    }));
                     let body = hyper::Body::wrap_stream(stream);
 
                     let mut resp = hyper::Response::new(body);
@@ -300,18 +295,16 @@ mod tests {
     use notes_types::notes::*;
     use std::collections::HashMap;
 
-    use honeycomb_tracing::TelemetryLayer;
+    use dag_store::capabilities::cache::Cache;
+    use dag_store::capabilities::store::FileSystemStore;
+    use honeycomb_tracing::mk_honeycomb_blackhole_tracing_layer;
+    use std::sync::Arc;
     use tracing_subscriber::filter::LevelFilter;
     use tracing_subscriber::layer::Layer;
     use tracing_subscriber::registry;
 
-    // use std::net::SocketAddr;
-    use dag_store::capabilities::cache::Cache;
-    use dag_store::capabilities::store::FileSystemStore;
-    use std::sync::Arc;
-
     pub fn init_test_env() {
-        let layer = TelemetryLayer::new_blackhole()
+        let layer = mk_honeycomb_blackhole_tracing_layer()
             .and_then(tracing_subscriber::fmt::Layer::builder().finish())
             .and_then(LevelFilter::INFO);
 

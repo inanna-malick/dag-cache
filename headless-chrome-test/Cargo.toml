@@ -5,16 +5,4 @@ authors = ["pk <pkinsky@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-tokio = "0.2.0-alpha.6"
-tokio-executor = "=0.2.0-alpha.6"
-serde = "1.0"
-serde_json = "1.0"
-
-# following 3 only used for static wasm/etc serving, could be moved to that crate
-hyper = "0.13.0-alpha.4"
-headers = "0.2.3"
-bytes = "0.5.3"
-
-dag-store-types = { path = "../dag-store-types", features = ["grpc"]}
-notes-types = { path = "../notes-types"}
 headless_chrome = "0.9"

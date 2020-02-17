@@ -3,13 +3,10 @@ syntax = "proto3";
 package dagstore;
 
 service DagStore {
-  // NOTE: using 'string' here will detract from upgradability but whatevs
   rpc GetHashForKey(GetHashForKeyReq) returns (GetHashForKeyResp) {}
 
   // get a node, return it plus any children of that node reachable via the in-memory cache
   rpc GetNode(Hash) returns (GetResp) {}
-
-  rpc GetNodes(Hash) returns (stream Node) {}
 
   rpc PutNode(Node) returns (Hash) {}
 
@@ -92,19 +89,4 @@ message Header {
 message Node {
   bytes data = 1;
   repeated Header links = 2;
-}
-
-
-// not part of GRPC defn, used as part of metadata
-// to propagate distributed tracing metadata
-message TraceCtx {
-    SpanId parent_span = 1;
-    string trace_id = 2;
-}
-
-// not part of GRPC defn, used as part of metadata
-// to propagate distributed tracing metadata
-message SpanId {
-  uint64 instance_id = 1;
-  uint64 tracing_id  = 2;
 }

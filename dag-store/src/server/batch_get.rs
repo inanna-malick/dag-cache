@@ -3,12 +3,13 @@ use crate::capabilities::{Cache, HashedBlobStore};
 use chashmap::CHashMap;
 use dag_store_types::types::domain::{Hash, Node};
 use dag_store_types::types::errors::DagCacheError;
-use futures::channel::mpsc;
-use futures::sink::SinkExt;
+use tokio::sync::mpsc;
+// use tokio::sink::SinkExt;
 use std::sync::Arc;
 use tokio;
 use tracing::{error, info};
 
+// NOTE: currently not exposed via GRPC, can re-enable if it becomes useful
 pub fn batch_get(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,

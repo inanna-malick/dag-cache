@@ -6,8 +6,8 @@ use dag_store_types::types::{
     errors::DagCacheError,
     validated_tree::ValidatedTree,
 };
-use futures::future::FutureExt;
 use futures::Future;
+use futures::FutureExt;
 use std::sync::Arc;
 use tokio;
 use tokio::sync::oneshot;

@@ -1,5 +1,5 @@
 use handlebars::Handlebars;
-use honeycomb_tracing::TelemetryLayer;
+use honeycomb_tracing::mk_honeycomb_tracing_layer;
 use std::error::Error;
 use std::fs::File;
 use std::io::prelude::*;
@@ -68,11 +68,14 @@ impl Opt {
                 ..libhoney::transmission::Options::default()
             },
         };
-        let layer = TelemetryLayer::new("notes-server".to_string(), honeycomb_config)
-            .and_then(tracing_subscriber::fmt::Layer::builder().finish())
-            .and_then(LevelFilter::INFO);
 
-        let subscriber = layer.with_subscriber(registry::Registry::default());
+        let telemetry_layer = mk_honeycomb_tracing_layer("notes-server", honeycomb_config);
+
+        let subscriber = telemetry_layer // publish to tracing
+            .and_then(tracing_subscriber::fmt::Layer::builder().finish()) // log to stdout
+            .and_then(LevelFilter::INFO) // omit low-level debug tracing (eg tokio executor)
+            .with_subscriber(registry::Registry::default()); // provide underlying span data store
+
         tracing::subscriber::set_global_default(subscriber).expect("setting global default failed");
 
         Runtime {

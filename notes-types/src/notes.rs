@@ -33,18 +33,17 @@ impl<'de> Deserialize<'de> for NodeId {
         let res: encodings::Base58 = Deserialize::deserialize(deserializer)?;
         let res: Vec<u8> = res.0;
 
-        let res =
-            if res.len() == 16 {
-                let mut array = [0; 16];
-                let bytes = &res[..array.len()]; // panics if not enough data
-                array.copy_from_slice(bytes);
-                Ok(array)
-            } else {
-                Err(serde::de::Error::custom(format!(
-                    "wrong byte array size, expected 16 got {}",
-                    res.len()
-                )))
-            };
+        let res = if res.len() == 16 {
+            let mut array = [0; 16];
+            let bytes = &res[..array.len()]; // panics if not enough data
+            array.copy_from_slice(bytes);
+            Ok(array)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "wrong byte array size, expected 16 got {}",
+                res.len()
+            )))
+        };
         let res = res?;
 
         Ok(NodeId(u128::from_be_bytes(res)))

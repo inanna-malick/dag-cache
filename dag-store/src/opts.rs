@@ -1,7 +1,7 @@
 use crate::capabilities::cache::Cache;
 use crate::capabilities::store::FileSystemStore;
 use crate::server::app::Runtime;
-use honeycomb_tracing::TelemetryLayer;
+use honeycomb_tracing::{mk_honeycomb_blackhole_tracing_layer, mk_honeycomb_tracing_layer};
 use std::fs::File;
 use std::io::prelude::*;
 use std::sync::Arc;
@@ -34,7 +34,7 @@ impl Opt {
     pub fn into_runtime(self) -> Runtime {
         let store = Arc::new(FileSystemStore::new(self.fs_path));
 
-        let telemetry_layer = match self.honeycomb_key_file {
+        match self.honeycomb_key_file {
             Some(honeycomb_key_file) => {
                 let mut file =
                     File::open(honeycomb_key_file).expect("failed opening honeycomb key file");
@@ -53,17 +53,31 @@ impl Opt {
                         ..libhoney::transmission::Options::default()
                     },
                 };
-                TelemetryLayer::new("dag-store".to_string(), honeycomb_config)
+
+                let telemetry_layer = mk_honeycomb_tracing_layer("dag-store", honeycomb_config);
+
+                let subscriber =
+                    telemetry_layer // publish to tracing
+                        .and_then(tracing_subscriber::fmt::Layer::builder().finish()) // log to stdout
+                        .and_then(LevelFilter::INFO) // omit low-level debug tracing (eg tokio executor)
+                        .with_subscriber(registry::Registry::default()); // provide underlying span data store
+
+                tracing::subscriber::set_global_default(subscriber)
+                    .expect("setting global default failed");
             }
-            None => TelemetryLayer::new_blackhole(),
+            None => {
+                let telemetry_layer = mk_honeycomb_blackhole_tracing_layer();
+
+                let subscriber =
+                    telemetry_layer // publish to tracing
+                        .and_then(tracing_subscriber::fmt::Layer::builder().finish()) // log to stdout
+                        .and_then(LevelFilter::INFO) // omit low-level debug tracing (eg tokio executor)
+                        .with_subscriber(registry::Registry::default()); // provide underlying span data store
+
+                tracing::subscriber::set_global_default(subscriber)
+                    .expect("setting global default failed");
+            }
         };
-
-        let layer = telemetry_layer
-            .and_then(tracing_subscriber::fmt::Layer::builder().finish())
-            .and_then(LevelFilter::INFO);
-
-        let subscriber = layer.with_subscriber(registry::Registry::default());
-        tracing::subscriber::set_global_default(subscriber).expect("setting global default failed");
 
         let cache = Arc::new(Cache::new(self.max_cache_entries));
 
