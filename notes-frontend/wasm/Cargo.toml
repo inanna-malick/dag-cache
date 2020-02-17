@@ -6,11 +6,11 @@ edition = "2018"
 [dependencies]
 serde = "1"
 serde_derive = "1"
-yew = "0.10"
+yew = "0.12"
 rand = { version = "0.7", features = ["stdweb"] }
 dag-store-types = { path = "../../dag-store-types", features = ["minimal"] }
 notes-types = { path = "../../notes-types" }
-failure = "0.1.6"
+anyhow = "1.0"
 stdweb = "0.4"
 
 # empty workspace

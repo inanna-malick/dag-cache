@@ -8,7 +8,9 @@ use rand;
 use std::collections::HashMap;
 use stdweb::js;
 use yew::events::IKeyboardEvent;
+use yew::events::KeyPressEvent;
 use yew::format::{Json, Nothing};
+use yew::html::InputData;
 use yew::services::{
     dialog::DialogService,
     fetch::{FetchService, FetchTask, Request, Response},
@@ -111,7 +113,7 @@ pub enum BackendMsg {
     SaveComplete(api_types::bulk_put::Resp),
 }
 
-#[derive(serde::Deserialize, Debug, PartialEq, Properties)]
+#[derive(serde::Deserialize, Clone, Debug, PartialEq, Properties)]
 pub struct Arg {
     #[props(required)]
     pub hash: Option<TypedHash<CannonicalNode>>,
@@ -121,7 +123,7 @@ impl Component for State {
     type Message = Msg;
     type Properties = Arg;
 
-    fn create(opt_hash: Self::Properties, mut link: ComponentLink<Self>) -> Self {
+    fn create(opt_hash: Self::Properties, link: ComponentLink<Self>) -> Self {
         let mut nodes = HashMap::new();
 
         let (root_node, last_known_hash) = match opt_hash {
@@ -142,7 +144,7 @@ impl Component for State {
 
         // repeatedly wake up save process - checks root node, save (recursively) if modifed
         let mut interval_service = IntervalService::new();
-        let callback = link.send_back(move |_: ()| Msg::Backend(BackendMsg::StartSave));
+        let callback = link.callback(move |_: ()| Msg::Backend(BackendMsg::StartSave));
 
         let save_interval = std::time::Duration::new(60, 0);
         let interval_task = interval_service.spawn(save_interval, callback);
@@ -154,7 +156,7 @@ impl Component for State {
             last_known_hash,
             edit_state: None,
             // TODO: split out display-relevant state and capabilities
-            link: link,
+            link,
             fetch_service: FetchService::new(),
             fetch_tasks: HashMap::new(),
             save_task: None, // no active save op
@@ -174,13 +176,13 @@ impl Component for State {
         true
     }
 
-    fn view(&self) -> Html<Self> {
+    fn view(&self) -> Html {
         html! {
             <div class="wrapper">
-                <button class="smallButton trigger-save" onclick=|_| Msg::Backend(BackendMsg::StartSave) >
+                <button class="smallButton trigger-save" onclick=self.link.callback( |_| Msg::Backend(BackendMsg::StartSave) ) >
                 {"[S]"}
                 </button>
-                <button class="smallButton" onclick=|_| Msg::Navigation(NavigationMsg::FocusOnRoot)>
+                <button class="smallButton" onclick= self.link.callback( |_| Msg::Navigation(NavigationMsg::FocusOnRoot) )>
                 {"[^]"}
                 </button>
                 <div> { render_is_modified_widget(self.root_node) } </div>
@@ -434,9 +436,9 @@ impl State {
                 .body(Nothing)
                 .expect("fetch req builder failed");
 
-                let callback = self.link.send_back(
+                let callback = self.link.callback(
                     move |response: Response<
-                        Json<Result<notes_types::api::GetResp, failure::Error>>,
+                        Json<Result<notes_types::api::GetResp, anyhow::Error>>,
                     >| {
                         if let (meta, Json(Ok(body))) = response.into_parts() {
                             if meta.status.is_success() {
@@ -493,7 +495,7 @@ impl State {
         }
     }
 
-    fn render_node(&self, node_ref: NodeRef) -> Html<Self> {
+    fn render_node(&self, node_ref: NodeRef) -> Html {
         let is_saving = self.save_task.is_some();
 
         if self.is_expanded(&node_ref.node_id()) {
@@ -509,13 +511,13 @@ impl State {
                                         self.render_node(*node_ref)
                                     })
                                 }
-                            <button class="smallButton add-sub-node" onclick=|_|
+                    <button class="smallButton add-sub-node" onclick= self.link.callback( move |_|
                                 if is_saving {
                                     Msg::NoOp
                                 } else { Msg::Edit(
                                     EditMsg::CreateOn{ at_idx: node_child_count,
                                                        parent: node_ref.node_id(),
-                                })}>
+                                    })})>
                                 {"[+]"}
                             </button>
                         </ul>
@@ -525,7 +527,7 @@ impl State {
                 if let NodeRef::Unmodified(remote_node_ref) = node_ref {
                     html! {
                         <li class = "node-lazy">
-                        <button class="load-node" onclick=|_| Msg::Backend(BackendMsg::Fetch(remote_node_ref))>
+                            <button class="load-node" onclick=self.link.callback(move |_| Msg::Backend(BackendMsg::Fetch(remote_node_ref)))>
                         {"load node"}
                         </button>
                         </li>
@@ -537,14 +539,14 @@ impl State {
         } else {
             let node_id = node_ref.node_id();
             html! {
-                <button class="smallButton" onclick=|_| Msg::Navigation(NavigationMsg::Maximize(node_id))>
+                <button class="smallButton" onclick= self.link.callback( move |_| Msg::Navigation(NavigationMsg::Maximize(node_id)))>
                 {"[+]"}
                 </button>
             }
         }
     }
 
-    fn render_node_header<T>(&self, node_ref: NodeRef, node: &Node<T>) -> Html<Self> {
+    fn render_node_header<T>(&self, node_ref: NodeRef, node: &Node<T>) -> Html {
         let node_id = node_ref.node_id();
 
         if let Some(focus_str) = &self
@@ -569,11 +571,11 @@ impl State {
                     type="text"
                     value=&focus_str
                     id = "edit-focus"
-                    oninput=|e| Msg::Edit(EditMsg::UpdateEdit(e.value))
-                    onblur = |_| onblur_send.clone()
-                    onkeypress=|e| {
+                    oninput= self.link.callback( move |e: InputData| Msg::Edit(EditMsg::UpdateEdit(e.value)) )
+                    onblur = self.link.callback( move |_| onblur_send.clone() )
+                    onkeypress=self.link.callback( move |e: KeyPressEvent| {
                         if e.key() == "Enter" { onkeypress_send.clone() } else { Msg::NoOp }
-                    }
+                    })
                 />
                     <script>
                         { // focus immediately after loading
@@ -585,16 +587,16 @@ impl State {
         } else {
             html! {
                 <div>
-                    <button class="smallButton" onclick=|_| Msg::Edit(EditMsg::Delete(node_id))>
+                    <button class="smallButton" onclick=self.link.callback(move |_| Msg::Edit(EditMsg::Delete(node_id)))>
                         {"X"}
                     </button>
-                    <button class="smallButton" onclick=|_| Msg::Navigation(NavigationMsg::Minimize(node_id))>
+                    <button class="smallButton" onclick=self.link.callback(move |_| Msg::Navigation(NavigationMsg::Minimize(node_id)))>
                     {"[-]"}
                     </button>
-                    <button class="smallButton" onclick=|_| Msg::Navigation(NavigationMsg::FocusOn(node_ref))>
+                    <button class="smallButton" onclick=self.link.callback(move |_| Msg::Navigation(NavigationMsg::FocusOn(node_ref)))>
                     {"[z]"}
                     </button>
-                    <div class="node-header" onclick=|_| Msg::Edit(EditMsg::EnterHeaderEdit{target: node_id})>
+                    <div class="node-header" onclick= self.link.callback( move |_| Msg::Edit(EditMsg::EnterHeaderEdit{target: node_id}) )>
                     { &node.header }
                     </div>
                 </div>
@@ -602,7 +604,7 @@ impl State {
         }
     }
 
-    fn render_node_body<T>(&self, node_id: NodeId, node: &Node<T>) -> Html<Self> {
+    fn render_node_body<T>(&self, node_id: NodeId, node: &Node<T>) -> Html {
         if let Some(focus_str) = &self
             .edit_state
             .iter()
@@ -625,11 +627,11 @@ impl State {
                     <textarea class="edit node-body"
                     value=&focus_str
                     id = "edit-focus"
-                    oninput=|e| Msg::Edit(EditMsg::UpdateEdit(e.value))
-                    onblur = |_| onblur_send.clone()
-                    onkeypress=|e| {
+                    oninput = self.link.callback( move |e: InputData| Msg::Edit(EditMsg::UpdateEdit(e.value)) )
+                    onblur = self.link.callback( move |_| onblur_send.clone() )
+                    onkeypress=self.link.callback ( move |e: KeyPressEvent| {
                         if e.key() == "Enter" { onkeypress_send.clone() } else { Msg::NoOp }
-                    }
+                    })
                 />
                     <script>
                     { // focus immediately after loading
@@ -640,7 +642,7 @@ impl State {
             }
         } else {
             html! {
-                <div class = "node-body" onclick=|_| Msg::Edit(EditMsg::EnterBodyEdit{ target: node_id })>
+                <div class = "node-body" onclick=self.link.callback( move |_| Msg::Edit(EditMsg::EnterBodyEdit{ target: node_id }))>
                 { &node.body }
                 </div>
             }
@@ -695,8 +697,8 @@ impl State {
             .body(Json(&req))
             .expect("push node request");
 
-        let callback = self.link.send_back(
-            move |response: Response<Json<Result<api_types::bulk_put::Resp, failure::Error>>>| {
+        let callback = self.link.callback(
+            move |response: Response<Json<Result<api_types::bulk_put::Resp, anyhow::Error>>>| {
                 let (meta, Json(res)) = response.into_parts();
                 if let Ok(body) = res {
                     if meta.status.is_success() {
@@ -733,7 +735,7 @@ fn gen_node_id() -> NodeId {
 }
 
 // TODO: unicode, css, etc (currently just a debug indicator)
-fn render_is_modified_widget<X: yew::html::Component>(x: NodeRef) -> Html<X> {
+fn render_is_modified_widget(x: NodeRef) -> Html {
     match x {
         NodeRef::Modified(_) => {
             html! { <span class="state-is-modified"> {"[[modified!]]"} </span> }
