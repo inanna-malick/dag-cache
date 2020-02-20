@@ -9,8 +9,7 @@ use dag_store_types::types::{
         GetResp, Hash, Node,
     },
 };
-use honeycomb_tracing::TraceCtx;
-use honeycomb_tracing::{SpanId, TraceId};
+use tracing_honeycomb::{TraceCtx, SpanId, TraceId};
 use std::{str::FromStr, sync::Arc};
 use tonic::{Code, Request, Response, Status};
 use tracing::{event, info, instrument, Level};

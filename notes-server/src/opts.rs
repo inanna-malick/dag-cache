@@ -1,12 +1,15 @@
 use handlebars::Handlebars;
-use honeycomb_tracing::mk_honeycomb_tracing_layer;
-use std::error::Error;
-use std::fs::File;
-use std::io::prelude::*;
+use tracing_honeycomb::mk_honeycomb_tracing_layer;
+use std::{
+    error::Error,
+    fs::File,
+    io::prelude::*,
+};
 use structopt::StructOpt;
-use tracing_subscriber::filter::LevelFilter;
-use tracing_subscriber::layer::Layer;
-use tracing_subscriber::registry;
+use tracing_subscriber::{
+    filter::LevelFilter,
+    layer::Layer, registry
+};
 
 #[derive(Debug, StructOpt)]
 #[structopt(

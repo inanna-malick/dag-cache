@@ -4,7 +4,6 @@ use chashmap::CHashMap;
 use dag_store_types::types::domain::{Hash, Node};
 use dag_store_types::types::errors::DagCacheError;
 use tokio::sync::mpsc;
-// use tokio::sink::SinkExt;
 use std::sync::Arc;
 use tokio;
 use tracing::{error, info};

@@ -5,7 +5,7 @@ authors = ["pk <pkinsky@gmail.com>"]
 edition = "2018"
 
 [features]
-grpc = ["prost", "prost-derive", "tonic", "tracing", "honeycomb-tracing"]
+grpc = ["prost", "prost-derive", "tonic"]
 
 minimal = []
 
@@ -17,8 +17,6 @@ prost = {version = "0.6.1", optional = true }
 prost-derive = {version = "0.6.1", optional = true }
 tonic = { version = "0.1.1", features = [], optional = true }
 serde = { version = "1.0.91", features = ["derive"] }
-honeycomb-tracing = { path = "../../honeycomb-tracing/honeycomb-tracing", optional = true}
-tracing = { version = "0.1.9", optional = true }
 blake3 = "0.1"
 slice_as_array = "1.1.0"
 

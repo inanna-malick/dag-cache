@@ -1,7 +1,7 @@
 use crate::capabilities::cache::Cache;
 use crate::capabilities::store::FileSystemStore;
 use crate::server::app::Runtime;
-use honeycomb_tracing::{mk_honeycomb_blackhole_tracing_layer, mk_honeycomb_tracing_layer};
+use tracing_honeycomb::{mk_honeycomb_blackhole_tracing_layer, mk_honeycomb_tracing_layer};
 use std::fs::File;
 use std::io::prelude::*;
 use std::sync::Arc;
@@ -88,3 +88,4 @@ impl Opt {
         }
     }
 }
+

@@ -7,7 +7,7 @@ use dag_store_types::types::{
     grpc::{self, dag_store_client::DagStoreClient},
 };
 use headers::HeaderMapExt;
-use honeycomb_tracing::{current_dist_trace_ctx, SpanId, TraceCtx, TraceId};
+use tracing_honeycomb::{current_dist_trace_ctx, SpanId, TraceCtx, TraceId};
 use opts::{Opt, Runtime};
 use serde::Serialize;
 use serde_json::json;
@@ -297,7 +297,7 @@ mod tests {
 
     use dag_store::capabilities::cache::Cache;
     use dag_store::capabilities::store::FileSystemStore;
-    use honeycomb_tracing::mk_honeycomb_blackhole_tracing_layer;
+    use tracing_honeycomb::mk_honeycomb_blackhole_tracing_layer;
     use std::sync::Arc;
     use tracing_subscriber::filter::LevelFilter;
     use tracing_subscriber::layer::Layer;
