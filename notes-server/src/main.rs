@@ -7,7 +7,6 @@ use dag_store_types::types::{
     grpc::{self, dag_store_client::DagStoreClient},
 };
 use headers::HeaderMapExt;
-use tracing_honeycomb::{current_dist_trace_ctx, SpanId, TraceCtx, TraceId};
 use opts::{Opt, Runtime};
 use serde::Serialize;
 use serde_json::json;
@@ -18,6 +17,7 @@ use std::{
 use structopt::StructOpt;
 use tonic::metadata::MetadataValue;
 use tracing::{error, info, instrument};
+use tracing_honeycomb::{current_dist_trace_ctx, register_dist_tracing_root, SpanId, TraceId};
 use warp::{reject, Filter};
 
 // TODO: struct w/ domain types & etc
@@ -48,12 +48,7 @@ fn get_ctx() -> Arc<Runtime> {
 fn register_trace_root() {
     println!("register trace root");
     let trace_id = TraceId::generate();
-    TraceCtx {
-        trace_id,
-        parent_span: None,
-    }
-    .register_dist_tracing_root()
-    .unwrap();
+    register_dist_tracing_root(trace_id, None).unwrap();
     println!("register trace root done");
 }
 
@@ -89,9 +84,7 @@ async fn get_nodes(
     add_tracing_to_meta(&mut request);
 
     let response = client.get_node(request).await.map_err(|e| Box::new(e))?;
-
     let response = get::Resp::from_proto(response.into_inner()).map_err(|e| Box::new(e))?;
-
     let response = notes_types::api::GetResp::from_generic(response)?;
     Ok(response)
 }
@@ -297,8 +290,8 @@ mod tests {
 
     use dag_store::capabilities::cache::Cache;
     use dag_store::capabilities::store::FileSystemStore;
-    use tracing_honeycomb::mk_honeycomb_blackhole_tracing_layer;
     use std::sync::Arc;
+    use tracing_honeycomb::mk_honeycomb_blackhole_tracing_layer;
     use tracing_subscriber::filter::LevelFilter;
     use tracing_subscriber::layer::Layer;
     use tracing_subscriber::registry;

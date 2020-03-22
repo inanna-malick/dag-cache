@@ -1,15 +1,8 @@
 use handlebars::Handlebars;
-use tracing_honeycomb::mk_honeycomb_tracing_layer;
-use std::{
-    error::Error,
-    fs::File,
-    io::prelude::*,
-};
+use std::{error::Error, fs::File, io::prelude::*};
 use structopt::StructOpt;
-use tracing_subscriber::{
-    filter::LevelFilter,
-    layer::Layer, registry
-};
+use tracing_honeycomb::new_honeycomb_telemetry_layer;
+use tracing_subscriber::{filter::LevelFilter, layer::Layer, registry};
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -72,7 +65,7 @@ impl Opt {
             },
         };
 
-        let telemetry_layer = mk_honeycomb_tracing_layer("notes-server", honeycomb_config);
+        let telemetry_layer = new_honeycomb_telemetry_layer("notes-server", honeycomb_config);
 
         let subscriber = telemetry_layer // publish to tracing
             .and_then(tracing_subscriber::fmt::Layer::builder().finish()) // log to stdout

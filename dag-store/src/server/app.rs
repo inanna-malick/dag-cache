@@ -9,10 +9,10 @@ use dag_store_types::types::{
         GetResp, Hash, Node,
     },
 };
-use tracing_honeycomb::{TraceCtx, SpanId, TraceId};
 use std::{str::FromStr, sync::Arc};
 use tonic::{Code, Request, Response, Status};
 use tracing::{event, info, instrument, Level};
+use tracing_honeycomb::{register_dist_tracing_root, SpanId, TraceId};
 
 // TODO (maybe): parameterize over E where E is the underlying error type (different for txn vs. main scope)
 pub struct Runtime {
@@ -173,12 +173,7 @@ fn extract_tracing_id_and_record(meta: &tonic::metadata::MetadataMap) -> Result<
                 )
             })?;
 
-            let trace_ctx = TraceCtx {
-                trace_id,
-                parent_span: Some(parent_span_id),
-            };
-
-            trace_ctx.register_dist_tracing_root().unwrap();
+            register_dist_tracing_root(trace_id, Some(parent_span_id)).unwrap();
 
             Ok(())
         }
@@ -194,15 +189,11 @@ fn extract_tracing_id_and_record(meta: &tonic::metadata::MetadataMap) -> Result<
             Err(err)
         }
         (None, None) => {
+            // register as top-level trace root
             let trace_id = TraceId::generate();
-            TraceCtx {
-                trace_id,
-                parent_span: None,
-            }
-            .register_dist_tracing_root()
-            .unwrap();
+            register_dist_tracing_root(trace_id, None).unwrap();
 
-            Ok(()) // just generate, if header not present
+            Ok(())
         }
     }
 }

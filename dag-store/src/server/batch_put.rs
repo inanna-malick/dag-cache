@@ -6,17 +6,12 @@ use dag_store_types::types::{
     errors::DagCacheError,
     validated_tree::ValidatedTree,
 };
-use futures::Future;
-use futures::FutureExt;
 use std::sync::Arc;
 use tokio;
-use tokio::sync::oneshot;
-use tracing::error;
 use tracing::info;
 
 // TODO: how to make this transactional while maintaining caps approach? ans: have an impl of the ipfsCap (TODO: rename to hash store)
-// that is the _transaction-scoped_ tree - pretty sure this is supported. will likely need to move to dyn
-// (fat pointers) to avoid excessive code gen but idk
+// that is the _transaction-scoped_ tree - pretty sure this is supported.
 
 pub async fn batch_put_cata_with_cas(
     mhs: Arc<dyn MutableHashStore>,
@@ -27,17 +22,25 @@ pub async fn batch_put_cata_with_cas(
 ) -> Result<bulk_put::Resp, DagCacheError> {
     match cas {
         Some(cas) => {
-            info!("some cas, writing to store via cata");
-            let res = batch_put_cata(store, cache, tree).await?;
-            info!("some cas, got res: {:?}", &res);
-            mhs.cas(
-                &cas.cas_key,
-                cas.required_previous_hash,
-                res.root_hash.clone(),
-            )
-            .await?;
-            info!("some cas, wrote res hash to mhs");
-            Ok(res)
+            let cas_current_hash = mhs.get(&cas.cas_key).await?;
+            if cas_current_hash == cas.required_previous_hash {
+                info!("some cas, writing to store via cata");
+                let res = batch_put_cata(store, cache, tree).await?;
+                info!("some cas, got res: {:?}", &res);
+                mhs.cas(
+                    &cas.cas_key,
+                    cas.required_previous_hash,
+                    res.root_hash.clone(),
+                )
+                .await?;
+                info!("some cas, wrote res hash to mhs");
+                Ok(res)
+            } else {
+                info!("skipping cas op, provided prev hash was stale");
+                Err(DagCacheError::CASViolationError {
+                    actual_hash: cas_current_hash,
+                })
+            }
         }
         None => {
             let res = batch_put_cata(store, cache, tree).await?;
@@ -56,89 +59,42 @@ pub async fn batch_put_cata(
     let focus = tree.root_node.clone();
     let tree = Arc::new(tree);
     let (_size, root_hash, additional_uploaded) =
-        batch_put_cata_unsafe(store, cache, tree, focus).await?;
+        batch_put_worker(store, cache, tree, focus).await?; // TODO: don't panic on join error
     Ok(bulk_put::Resp {
         root_hash,
         additional_uploaded,
     })
 }
 
-// unsafe b/c it can take any 'focus' Id and not just the root node of tree
-async fn batch_put_cata_unsafe(
-    store: Arc<dyn HashedBlobStore>,
-    cache: Arc<Cache>,
-    tree: Arc<ValidatedTree>, // todo use async/await I guess, mb can avoid needing Arc? ugh
-    node: bulk_put::Node,
-) -> Result<(u64, Hash, Vec<(Id, Hash)>), DagCacheError> {
-    let (send, receive) = oneshot::channel();
-
-    let f = batch_put_worker(store, cache, tree, send, node);
-    tokio::spawn(f);
-
-    let recvd = receive.await;
-
-    match recvd {
-        Ok(x) => x,
-        Err(e) => {
-            let e = DagCacheError::UnexpectedError(
-                // todo capture recv error
-                format!("one shot channel cancelled, {:?}", e),
-            ); // one-shot channel cancelled
-            Err(e)
-        }
-    }
-}
-
-async fn upload_link(
+fn upload_link(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
     x: bulk_put::NodeLink,
     tree: Arc<ValidatedTree>,
-) -> Result<(Header, Vec<(Id, Hash)>), DagCacheError> {
-    match x {
-        bulk_put::NodeLink::Local(id) => {
-            // NOTE: could be more efficient by removing node from tree but would break
-            // guarantees provided by ValidatedTree (by removing nodes)
-            // NOTE: not possible, really - would need Mut access to the hashmap to do that
+) -> tokio::task::JoinHandle<Result<(Header, Vec<(Id, Hash)>), DagCacheError>> {
+    tokio::spawn(async move {
+        match x {
+            bulk_put::NodeLink::Local(id) => {
+                // NOTE: could be more efficient by removing node from tree but would break
+                // guarantees provided by ValidatedTree (by removing nodes)
+                // NOTE: not possible, really - would need Mut access to the hashmap to do that
 
-            // unhandled deref failure, known to be safe b/c of validated tree wrapper
-            let node = tree.nodes[&id].clone();
+                // unhandled deref failure, known to be safe b/c of validated tree wrapper
+                let node = tree.nodes[&id].clone();
 
-            let (size, hash, mut additional_uploaded) =
-                batch_put_cata_unsafe(store, cache.clone(), tree.clone(), node.clone()).await?;
-            let hdr = Header { id, size, hash };
-            additional_uploaded.push((id, hdr.hash.clone()));
-            Ok((hdr, additional_uploaded))
+                let (size, hash, mut additional_uploaded) =
+                    batch_put_worker(store, cache.clone(), tree.clone(), node.clone()).await?;
+                let hdr = Header { id, size, hash };
+                additional_uploaded.push((id, hdr.hash.clone()));
+                Ok((hdr, additional_uploaded))
+            }
+            bulk_put::NodeLink::Remote(hdr) => Ok((hdr.clone(), Vec::new())),
         }
-        bulk_put::NodeLink::Remote(hdr) => Ok((hdr.clone(), Vec::new())),
-    }
-}
-
-// needed to not have async cycle? idk lmao FIXME refactor
-fn batch_put_worker(
-    store: Arc<dyn HashedBlobStore>,
-    cache: Arc<Cache>,
-    tree: Arc<ValidatedTree>,
-    chan: oneshot::Sender<Result<(u64, Hash, Vec<(Id, Hash)>), DagCacheError>>,
-    // TODO: pass around pointers to node in stack frame (hm keys) instead of nodes
-    // OR NOT: struct is quite small, even if the owned-by-it vec of u8/vec of links is big
-    // TODO: ask rain
-    node: bulk_put::Node,
-) -> Box<dyn Future<Output = ()> + Unpin + Send> {
-    let f = batch_put_worker_async(store, cache, tree, node)
-        .map(move |res| {
-            let chan_send_res = chan.send(res);
-            if let Err(err) = chan_send_res {
-                error!("failed oneshot channel send {:?}", err);
-            };
-        })
-        .boxed();
-
-    Box::new(f)
+    })
 }
 
 // worker thread - uses one-shot channel to return result to avoid unbounded stack growth
-async fn batch_put_worker_async(
+async fn batch_put_worker(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
     tree: Arc<ValidatedTree>,
@@ -151,15 +107,19 @@ async fn batch_put_worker_async(
 
     let size = data.0.len() as u64;
 
-    let link_uploads: Vec<_> = links
+    // let link_uploads: Vec<tokio::task::JoinHandle<>> = links
+    let link_uploads: Vec<
+        tokio::task::JoinHandle<Result<(Header, Vec<(Id, Hash)>), DagCacheError>>,
+    > = links
         .into_iter()
         .map(|ln| upload_link(store.clone(), cache.clone(), ln, tree.clone()))
         .collect();
 
-    let joined_link_uploads: Vec<Result<_, DagCacheError>> =
+    let joined_link_uploads: Vec<Result<Result<_, DagCacheError>, tokio::task::JoinError>> =
         futures::future::join_all(link_uploads).await;
     let links: Vec<_> = joined_link_uploads
         .into_iter()
+        .map(|x| x.unwrap()) // TODO: figure out how to handle join errors
         .collect::<Result<Vec<_>, DagCacheError>>()?;
 
     let additional_uploaded: Vec<(Id, Hash)> =

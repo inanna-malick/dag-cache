@@ -1,11 +1,11 @@
 use crate::capabilities::cache::Cache;
 use crate::capabilities::store::FileSystemStore;
 use crate::server::app::Runtime;
-use tracing_honeycomb::{mk_honeycomb_blackhole_tracing_layer, mk_honeycomb_tracing_layer};
 use std::fs::File;
 use std::io::prelude::*;
 use std::sync::Arc;
 use structopt::StructOpt;
+use tracing_honeycomb::{new_blackhole_telemetry_layer, new_honeycomb_telemetry_layer};
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::Layer;
 use tracing_subscriber::registry;
@@ -54,7 +54,7 @@ impl Opt {
                     },
                 };
 
-                let telemetry_layer = mk_honeycomb_tracing_layer("dag-store", honeycomb_config);
+                let telemetry_layer = new_honeycomb_telemetry_layer("dag-store", honeycomb_config);
 
                 let subscriber =
                     telemetry_layer // publish to tracing
@@ -66,7 +66,7 @@ impl Opt {
                     .expect("setting global default failed");
             }
             None => {
-                let telemetry_layer = mk_honeycomb_blackhole_tracing_layer();
+                let telemetry_layer = new_blackhole_telemetry_layer();
 
                 let subscriber =
                     telemetry_layer // publish to tracing
@@ -88,4 +88,3 @@ impl Opt {
         }
     }
 }
-
