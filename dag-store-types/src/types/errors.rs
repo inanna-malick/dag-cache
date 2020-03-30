@@ -22,7 +22,7 @@ impl From<DagCacheError> for Status {
         match error {
             DagCacheError::ProtoDecodingError(de) => Status::new(
                 Code::InvalidArgument,
-                format!("error decoding proto, {:?}", de.description()),
+                format!("error decoding proto, {:?}", de),
             ),
             DagCacheError::UnexpectedError(s) => {
                 Status::new(Code::Internal, format!("unexpected error: {:?}", s))

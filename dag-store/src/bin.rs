@@ -1,4 +1,4 @@
-// #![deny(warnings)]
+#![deny(warnings)]
 use dag_store::{opts, run};
 use opts::Opt;
 use structopt::StructOpt;

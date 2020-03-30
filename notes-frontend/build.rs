@@ -70,18 +70,6 @@ fn main() {
             , "let mut m = std::collections::HashMap::new();".to_string()
             ];
 
-
-    // lazy_static! {
-    // static ref WASM: phf::Map<&'static str, &'static [u8]> = {
-    //    let mut m = HashMap::new();
-    //    m.insert(0, "foo");
-    //    m.insert(1, "bar");
-    //    m.insert(2, "baz");
-    //    m
-    // };
-    // }
-
-
     let mut hashmap_vals: Vec<String> = blobs
         .iter()
         .map(|(src_path, identifier, _)| format!(r#"m.insert("{}", {});"#, src_path, identifier))

@@ -1,5 +1,5 @@
 use handlebars::Handlebars;
-use std::{error::Error, fs::File, io::prelude::*};
+use std::{fs::File, io::prelude::*};
 use structopt::StructOpt;
 use tracing_honeycomb::new_honeycomb_telemetry_layer;
 use tracing_subscriber::{filter::LevelFilter, layer::Layer, registry};
@@ -34,7 +34,7 @@ impl Runtime {
         let body = self
             .hb
             .render(template.name, &template.value)
-            .unwrap_or_else(|err| err.description().to_owned());
+            .unwrap_or_else(|err| err.to_string());
 
         warp::reply::html(body)
     }
