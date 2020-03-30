@@ -1,4 +1,5 @@
-use phf::phf_map;
+#[macro_use]
+extern crate lazy_static;
 
 include!(concat!(env!("OUT_DIR"), "/wasm_blobs.rs"));
 

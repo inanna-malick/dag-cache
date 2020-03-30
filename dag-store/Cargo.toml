@@ -1,7 +1,7 @@
 [package]
 name = "dag-store"
 version = "0.1.0"
-authors = ["pk <pkinsky@gmail.com>"]
+authors = ["inanna malick <inanna@recursion.wtf>"]
 edition = "2018"
 
 

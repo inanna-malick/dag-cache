@@ -65,13 +65,31 @@ fn main() {
         .collect::<Vec<String>>();
 
     let mut hashmap: Vec<String> =
-        vec!["pub static WASM: phf::Map<&'static str, &'static [u8]> = phf_map! {".to_string()];
+        vec![ "lazy_static! {".to_string()
+            , "static ref WASM: std::collections::HashMap<&'static str, &'static [u8]> = {".to_string()
+            , "let mut m = std::collections::HashMap::new();".to_string()
+            ];
+
+
+    // lazy_static! {
+    // static ref WASM: phf::Map<&'static str, &'static [u8]> = {
+    //    let mut m = HashMap::new();
+    //    m.insert(0, "foo");
+    //    m.insert(1, "bar");
+    //    m.insert(2, "baz");
+    //    m
+    // };
+    // }
+
+
     let mut hashmap_vals: Vec<String> = blobs
         .iter()
-        .map(|(src_path, identifier, _)| format!(r#""{}" => {},"#, src_path, identifier))
+        .map(|(src_path, identifier, _)| format!(r#"m.insert("{}", {});"#, src_path, identifier))
         .collect();
     hashmap.append(&mut hashmap_vals);
+    hashmap.append(&mut vec!["m".to_string()]);
     hashmap.append(&mut vec!["};".to_string()]);
+    hashmap.append(&mut vec!["}".to_string()]);
 
     f_contents.append(&mut hashmap);
 

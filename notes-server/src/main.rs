@@ -220,8 +220,6 @@ async fn main() {
             }
         });
 
-    // lmao, hardcoded - would be part of deployable, ideally
-    // let static_route = warp::fs::dir("/home/pk/devd/target/deploy");
     let static_route = warp::get()
         .and(warp::path::param::<String>())
         .map(

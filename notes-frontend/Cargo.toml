@@ -1,8 +1,8 @@
 [package]
 name = "notes-frontend"
 version = "0.1.0"
-authors = ["pk <pkinsky@gmail.com>"]
+authors = ["inanna malick <inanna@recursion.wtf>"]
 edition = "2018"
 
 [dependencies]
-phf = { version = "0.8", features = ["macros"] }
+lazy_static = "1.4.0"
