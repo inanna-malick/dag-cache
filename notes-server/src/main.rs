@@ -6,6 +6,7 @@ use dag_store_types::types::{
     domain::{self, Hash},
     grpc::{self, dag_store_client::DagStoreClient},
 };
+#[cfg(feature = "embed-wasm")]
 use headers::HeaderMapExt;
 use opts::{Opt, Runtime};
 use serde::Serialize;
@@ -220,6 +221,12 @@ async fn main() {
             }
         });
 
+    #[cfg(not(feature = "embed-wasm"))]
+    let static_route = warp::get()
+        .and(warp::fs::dir("/home/inanna/dev/dag-store/notes-frontend/wasm/target/deploy"));
+
+    // TODO: this might not work with nested paths - test that later
+    #[cfg(feature = "embed-wasm")]
     let static_route = warp::get()
         .and(warp::path::param::<String>())
         .map(
@@ -260,8 +267,10 @@ async fn main() {
 }
 
 // FIXME: should be omitable
+#[cfg(feature = "embed-wasm")]
 struct Trivial(hyper::Response<hyper::Body>);
 
+#[cfg(feature = "embed-wasm")]
 impl Trivial {
     fn not_found() -> Self {
         let r = hyper::Response::builder()
@@ -273,6 +282,7 @@ impl Trivial {
     }
 }
 
+#[cfg(feature = "embed-wasm")]
 impl warp::Reply for Trivial {
     fn into_response(self) -> warp::reply::Response {
         self.0

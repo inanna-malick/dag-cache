@@ -4,9 +4,15 @@ version = "0.1.0"
 authors = ["inanna malick <inanna@recursion.wtf>"]
 edition = "2018"
 
+
+[features]
+embed-wasm = ["notes-frontend"]
+
+minimal = []
+
 [dependencies]
 dag-store = { path = "../dag-store" }
-notes-frontend = { path = "../notes-frontend" }
+notes-frontend = { path = "../notes-frontend", optional = true }
 
 warp = "0.2.1"
 tokio = { version = "0.2", features = ["macros"] }
