@@ -289,13 +289,13 @@ mod tests {
     use dag_store::capabilities::cache::Cache;
     use dag_store::capabilities::store::FileSystemStore;
     use std::sync::Arc;
-    use tracing_honeycomb::mk_honeycomb_blackhole_tracing_layer;
+    use tracing_honeycomb::new_blackhole_telemetry_layer;
     use tracing_subscriber::filter::LevelFilter;
     use tracing_subscriber::layer::Layer;
     use tracing_subscriber::registry;
 
     pub fn init_test_env() {
-        let layer = mk_honeycomb_blackhole_tracing_layer()
+        let layer = new_blackhole_telemetry_layer()
             .and_then(tracing_subscriber::fmt::Layer::builder().finish())
             .and_then(LevelFilter::INFO);
 
@@ -349,14 +349,12 @@ mod tests {
             parent: None,
             children: vec![NodeRef::Modified(NodeId(1))],
             header: "hdr".to_string(),
-            body: "body".to_string(),
         };
 
         let node2 = notes_types::notes::Node {
             parent: Some(NodeId::root()),
             children: Vec::new(),
             header: "hdr 2".to_string(),
-            body: "body 2".to_string(),
         };
 
         let mut extra_nodes = HashMap::new();

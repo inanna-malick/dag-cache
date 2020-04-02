@@ -18,17 +18,15 @@ use yew::services::{
 };
 use yew::{html, Component, ComponentLink, Html, Properties, ShouldRender};
 
+// new design ideas:
+// as in workflowy, collapse controls down to single button on 
+
+
 macro_rules! println {
     ($($tt:tt)*) => {{
         let msg = format!($($tt)*);
         js! { @(no_return) console.log(@{ msg }) }
     }}
-}
-
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub enum EditFocus {
-    NodeHeader,
-    NodeBody,
 }
 
 // NOTE: optional hash indicates if node is modified or not
@@ -54,7 +52,6 @@ impl core::ops::DerefMut for InMemNode {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct EditState {
-    component_focus: EditFocus,
     node_focus: NodeId, // node id & not ref because _must_ be local node
     edited_contents: String,
 }
@@ -97,7 +94,6 @@ pub enum NavigationMsg {
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum EditMsg {
     EnterHeaderEdit { target: NodeId },
-    EnterBodyEdit { target: NodeId },
     UpdateEdit(String),
     CommitEdit,
     CreateOn { at_idx: usize, parent: NodeId },
@@ -246,22 +242,8 @@ impl State {
 
                 let node = self.get_node(&target);
                 self.edit_state = Some(EditState {
-                    component_focus: EditFocus::NodeHeader,
                     node_focus: target,
                     edited_contents: node.header.clone(),
-                });
-            }
-            EditMsg::EnterBodyEdit { target } => {
-                // commit pre-existing edit if exists
-                if let Some(_) = &self.edit_state {
-                    self.commit_edit();
-                };
-
-                let node = self.get_node(&target);
-                self.edit_state = Some(EditState {
-                    component_focus: EditFocus::NodeBody,
-                    node_focus: target,
-                    edited_contents: node.body.clone(),
                 });
             }
             EditMsg::UpdateEdit(new_s) => {
@@ -335,7 +317,6 @@ impl State {
 
                 // enter edit mode with empty header
                 self.edit_state = Some(EditState {
-                    component_focus: EditFocus::NodeHeader,
                     node_focus: new_node_id,
                     edited_contents: "".to_string(),
                 });
@@ -473,23 +454,14 @@ impl State {
         }
     }
 
-    fn commit_edit(&mut self) -> Option<(EditFocus, NodeId)> {
+    fn commit_edit(&mut self) -> Option<NodeId> {
         // use take to remove edit focus, if any
         if let Some(es) = self.edit_state.take() {
             let node = self.get_node_mut(&es.node_focus);
 
-            let res = match es.component_focus {
-                EditFocus::NodeHeader => {
-                    node.header = es.edited_contents;
-                    Some((EditFocus::NodeHeader, es.node_focus))
-                }
-                EditFocus::NodeBody => {
-                    node.body = es.edited_contents;
-                    Some((EditFocus::NodeBody, es.node_focus))
-                }
-            };
+            node.header = es.edited_contents;
             self.set_parent_nodes_to_modified(es.node_focus); // set as modified from this node to root
-            res
+            Some(es.node_focus)
         } else {
             None
         }
@@ -505,7 +477,6 @@ impl State {
                 html! {
                     <li class = "node">
                         { self.render_node_header(node_ref, &node) }
-                        { self.render_node_body(node_ref.node_id(), &node) }
                             <ul class = "nested-list">
                                 { for children.iter().map(|node_ref| {
                                         self.render_node(*node_ref)
@@ -552,7 +523,7 @@ impl State {
         if let Some(focus_str) = &self
             .edit_state
             .iter()
-            .filter(|e| e.node_focus == node_id && e.component_focus == EditFocus::NodeHeader)
+            .filter(|e| e.node_focus == node_id)
             .map(|e| &e.edited_contents)
             .next()
         {
@@ -599,51 +570,6 @@ impl State {
                     <div class="node-header" onclick= self.link.callback( move |_| Msg::Edit(EditMsg::EnterHeaderEdit{target: node_id}) )>
                     { &node.header }
                     </div>
-                </div>
-            }
-        }
-    }
-
-    fn render_node_body<T>(&self, node_id: NodeId, node: &Node<T>) -> Html {
-        if let Some(focus_str) = &self
-            .edit_state
-            .iter()
-            .filter(|e| e.node_focus == node_id && e.component_focus == EditFocus::NodeBody)
-            .map(|e| &e.edited_contents)
-            .next()
-        {
-            let is_saving = self.save_task.is_some();
-            // FIXME: lazy hack, disallow commiting edits during save task lifetime (TODO: refactor, dedup)
-            let commit_msg = if is_saving {
-                Msg::NoOp
-            } else {
-                Msg::Edit(EditMsg::CommitEdit)
-            };
-            let onkeypress_send = commit_msg.clone();
-            let onblur_send = commit_msg.clone();
-
-            html! {
-                <div>
-                    <textarea class="edit node-body"
-                    value=&focus_str
-                    id = "edit-focus"
-                    oninput = self.link.callback( move |e: InputData| Msg::Edit(EditMsg::UpdateEdit(e.value)) )
-                    onblur = self.link.callback( move |_| onblur_send.clone() )
-                    onkeypress=self.link.callback ( move |e: KeyPressEvent| {
-                        if e.key() == "Enter" { onkeypress_send.clone() } else { Msg::NoOp }
-                    })
-                />
-                    <script>
-                    { // focus immediately after loading
-                        "document.getElementById(\"edit-focus\").focus();"
-                    }
-                    </script>
-                </div>
-            }
-        } else {
-            html! {
-                <div class = "node-body" onclick=self.link.callback( move |_| Msg::Edit(EditMsg::EnterBodyEdit{ target: node_id }))>
-                { &node.body }
                 </div>
             }
         }

@@ -79,12 +79,12 @@ impl NodeRef {
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Serialize, Deserialize, Debug)]
 pub struct RemoteNodeRef(pub NodeId, pub TypedHash<CannonicalNode>);
 
+// TODO: add field w/ misc structured data or something
 #[derive(PartialEq, Eq, Clone, Serialize, Deserialize, Debug)]
 pub struct Node<T> {
     pub parent: Option<NodeId>, // _not_ T, constant type. NOTE: enforces that this is a TREE and not a DAG
     pub children: Vec<T>,
     pub header: String,
-    pub body: String,
 }
 
 impl<T> Node<T> {
@@ -99,7 +99,6 @@ impl<T> Node<T> {
             parent: self.parent,
             children: self.children.into_iter().map(f).collect(),
             header: self.header,
-            body: self.body,
         }
     }
 }
@@ -150,7 +149,6 @@ impl Node<RemoteNodeRef> {
             parent: node.parent,
             children: node_children,
             header: node.header,
-            body: node.body,
         };
 
         Ok(node)
@@ -167,7 +165,6 @@ impl Node<NodeRef> {
                 .map(|node_ref| node_ref.node_id())
                 .collect(),
             header: self.header,
-            body: self.body,
         };
         let data = Node::encode(&data)?;
         let data = encodings::Base64(data);
@@ -201,7 +198,6 @@ impl<T> Node<T> {
             parent,
             children: Vec::new(),
             header: "".to_string(),
-            body: "".to_string(),
         }
     }
 }

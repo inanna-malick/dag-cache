@@ -6,3 +6,4 @@ web/*
 tmpdir/*
 honeycomb.key
 notes-app-stage-*.png
+dag-store.iml
