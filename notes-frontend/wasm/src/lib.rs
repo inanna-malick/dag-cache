@@ -19,8 +19,10 @@ use yew::services::{
 use yew::{html, Component, ComponentLink, Html, Properties, ShouldRender};
 
 // new design ideas:
-// as in workflowy, collapse controls down to single button on 
-
+// as in workflowy, collapse controls down to single button on
+// - enter finishes current, adds child on parent (except if root node)
+// - tab makes current node child of previous node
+// - shift-tab places current node after parent
 
 macro_rules! println {
     ($($tt:tt)*) => {{
@@ -468,56 +470,75 @@ impl State {
     }
 
     fn render_node(&self, node_ref: NodeRef) -> Html {
-        let is_saving = self.save_task.is_some();
-
-        if self.is_expanded(&node_ref.node_id()) {
-            if let Some(node) = self.nodes.get(&node_ref.node_id()) {
-                let node_child_count = node.children.len();
-                let children: &Vec<NodeRef> = &node.children;
-                html! {
-                    <li class = "node">
-                        { self.render_node_header(node_ref, &node) }
-                            <ul class = "nested-list">
-                                { for children.iter().map(|node_ref| {
-                                        self.render_node(*node_ref)
-                                    })
-                                }
-                    <button class="smallButton add-sub-node" onclick= self.link.callback( move |_|
-                                if is_saving {
-                                    Msg::NoOp
-                                } else { Msg::Edit(
-                                    EditMsg::CreateOn{ at_idx: node_child_count,
-                                                       parent: node_ref.node_id(),
-                                    })})>
-                                {"[+]"}
-                            </button>
-                        </ul>
-                    </li>
-                }
-            } else {
-                if let NodeRef::Unmodified(remote_node_ref) = node_ref {
-                    html! {
-                        <li class = "node-lazy">
-                            <button class="load-node" onclick=self.link.callback(move |_| Msg::Backend(BackendMsg::Fetch(remote_node_ref)))>
-                        {"load node"}
-                        </button>
-                        </li>
+        if let Some(node) = self.nodes.get(&node_ref.node_id()) {
+            html! {
+                <div class = "note">
+                    { self.render_note_menu_widget(node_ref) }
+                    { self.render_note_body(node_ref, &node) }
+                    { if self.is_expanded(&node_ref.node_id()) {
+                        html!{
+                            <div class = "note-children">
+                            { for node.children.iter().map(|node_ref| {
+                                self.render_node(*node_ref)
+                            })
+                            }
+                            </div>
+                        }
+                    } else {
+                        html!{ <div> {"..."} </div> }
                     }
-                } else {
-                    panic!("can't lazily load modified node ref")
                 }
+                </div>
             }
         } else {
-            let node_id = node_ref.node_id();
-            html! {
-                <button class="smallButton" onclick= self.link.callback( move |_| Msg::Navigation(NavigationMsg::Maximize(node_id)))>
-                {"[+]"}
-                </button>
+            if let NodeRef::Unmodified(remote_node_ref) = node_ref {
+                // TODO: move triggering of more loads to state update fn - traverse note tree, find visible nodes that are not loaded, send fetch
+                html! {
+                    <div class = "note-lazy">
+                        <button class="load-note" onclick=self.link.callback(move |_| Msg::Backend(BackendMsg::Fetch(remote_node_ref)))>
+                    {"load note"}
+                    </button>
+                    </div>
+                }
+            } else {
+                panic!("can't lazily load modified node ref, indicative of bug")
             }
         }
     }
 
-    fn render_node_header<T>(&self, node_ref: NodeRef, node: &Node<T>) -> Html {
+    fn render_note_menu_widget(&self, node_ref: NodeRef) -> Html {
+        let node_id = node_ref.node_id();
+
+        html! {
+            <span class="menu">
+            <span class="submenu">
+                <a class="smallButton" onclick=self.link.callback(move |_| Msg::Edit(EditMsg::Delete(node_id)))>
+                {"[X]"}
+                </a>
+                {
+                    if self.is_expanded(&node_ref.node_id()) {
+                        html! {
+                            <a onclick=self.link.callback(move |_| Msg::Navigation(NavigationMsg::Minimize(node_id)))>
+                            {"[-]"}
+                            </a>
+                        }
+                    } else {
+                        html! {
+                            <a onclick=self.link.callback(move |_| Msg::Navigation(NavigationMsg::Maximize(node_id)))>
+                            {"[+]"}
+                            </a>
+                        }
+                    }
+                }
+            </span>
+                <a class="smallButton" onclick=self.link.callback(move |_| Msg::Navigation(NavigationMsg::FocusOn(node_ref)))>
+                {"[@]"}
+                </a>
+            </span>
+        }
+    }
+
+    fn render_note_body<T>(&self, node_ref: NodeRef, node: &Node<T>) -> Html {
         let node_id = node_ref.node_id();
 
         if let Some(focus_str) = &self
@@ -537,17 +558,18 @@ impl State {
             let onkeypress_send = commit_msg.clone();
             let onblur_send = commit_msg.clone();
             html! {
-                <div>
-                    <input class="edit node-header"
-                    type="text"
-                    value=&focus_str
-                    id = "edit-focus"
-                    oninput= self.link.callback( move |e: InputData| Msg::Edit(EditMsg::UpdateEdit(e.value)) )
-                    onblur = self.link.callback( move |_| onblur_send.clone() )
-                    onkeypress=self.link.callback( move |e: KeyPressEvent| {
-                        if e.key() == "Enter" { onkeypress_send.clone() } else { Msg::NoOp }
-                    })
-                />
+                <div class="note-contents">
+                    <input
+                        class="edit node-header"
+                        type="text"
+                        value=&focus_str
+                        id = "edit-focus"
+                        oninput= self.link.callback( move |e: InputData| Msg::Edit(EditMsg::UpdateEdit(e.value)) )
+                        onblur = self.link.callback( move |_| onblur_send.clone() )
+                        onkeypress=self.link.callback( move |e: KeyPressEvent| {
+                            if e.key() == "Enter" { onkeypress_send.clone() } else { Msg::NoOp }
+                        })
+                    />
                     <script>
                         { // focus immediately after loading
                             "document.getElementById(\"edit-focus\").focus();"
@@ -557,19 +579,8 @@ impl State {
             }
         } else {
             html! {
-                <div>
-                    <button class="smallButton" onclick=self.link.callback(move |_| Msg::Edit(EditMsg::Delete(node_id)))>
-                        {"X"}
-                    </button>
-                    <button class="smallButton" onclick=self.link.callback(move |_| Msg::Navigation(NavigationMsg::Minimize(node_id)))>
-                    {"[-]"}
-                    </button>
-                    <button class="smallButton" onclick=self.link.callback(move |_| Msg::Navigation(NavigationMsg::FocusOn(node_ref)))>
-                    {"[z]"}
-                    </button>
-                    <div class="node-header" onclick= self.link.callback( move |_| Msg::Edit(EditMsg::EnterHeaderEdit{target: node_id}) )>
-                    { &node.header }
-                    </div>
+                <div class="note-contents" onclick= self.link.callback( move |_| Msg::Edit(EditMsg::EnterHeaderEdit{target: node_id}) )>
+                { &node.header }
                 </div>
             }
         }

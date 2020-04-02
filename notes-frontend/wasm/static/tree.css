@@ -1,82 +1,54 @@
-
-html,
-body {
-	  margin: 0;
-	  padding: 0;
-}
-
-button {
-	  margin: 0;
-	  padding: 0;
-	  border: 0;
-	  background: #073642;
-	  font-size: 100%;
-	  vertical-align: baseline;
-	  font-family: inherit;
-	  font-weight: inherit;
-	  color: inherit;
-	  -webkit-appearance: none;
-	  appearance: none;
-	  -webkit-font-smoothing: antialiased;
-	  -moz-osx-font-smoothing: grayscale;
-}
-
-.smallButton {
-	  border-radius:5px;
-	  display:inline-block;
-	  cursor:pointer;
-	  color: #fdf6e3;
-    width: 30px;
-    background-color: #6c71c4;
-	  padding: 1px 1px;
-	  text-decoration:none;
-}
-.smallButton:hover {
-	  background-color: #268bd2;
-}
-
-div.node {
-	  background-color: #073642;
-    border-style: solid ;
-    border-color: #d33682 ;
-    padding: 5px 20px;
-}
-
-.node-header {
-	  background-color: #073642;
-    border-style: solid ;
-    border-color: #d33682 ;
-    padding: 5px 20px;
-    color: #839496;
-}
-
-.node-body {
-	  background-color: #073642;
-    border-style: solid ;
-    border-color: #d33682 ;
-    padding: 5px 20px;
-    color: #839496;
-}
-
 body {
 	  font: 14px 'Helvetica Neue', Helvetica, Arial, sans-serif;
     color: #839496;
-	  line-height: 1.4em;
 	  background: #002b36;
-	  min-width: 230px;
-	  max-width: 550px;
-	  margin: 0 auto;
-	  -webkit-font-smoothing: antialiased;
-	  -moz-osx-font-smoothing: grayscale;
-	  font-weight: 300;
 }
 
-ul.nested-list {
-    border-left: 5px solid #d33682;
-	  background-color: #073642;
-    list-style-type: none;
-    padding: 10px 20px;
+
+span.menu {
+    display: inline-block;
+    position: relative;
+}
+span.menu span.submenu{
+    width: 40px;
+    display: none;
+    background: #e0e0e0;
+    color: #747474;
+}
+span.menu {
+    padding-left: 40px
+}
+span.menu:hover {
+    padding-left: 0px
+}
+span.menu:hover span.submenu{
+    display: inline-block;
+    width: 40px;
+}
+span.menu a{
+    border: 1px solid #ffffff;
+    width: 20px;
+}
+span.menu a:hover{
+    background: #f0f0f0;
+}
+.submenu:after{
+    content: "";
+    clear: both;
+    display: block;
 }
 
-.header {
+
+div.note {
+    padding-top: 5px;
+    padding-bottom: 5px;
+}
+
+div.note-contents {
+    padding-left: 5px;
+    display: inline-block;
+}
+
+div.note-children {
+    padding-left: 10px;
 }
