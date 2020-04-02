@@ -3,30 +3,37 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
+use ignore::Walk;
 
 // NOTE: currently only tested with flat deploy dir
 fn main() {
-    // TODO: use to thread through RELEASE flag if needed
-    // for (key, value) in std::env::vars() {
-    //     println!("{}: {}", key, value);
-    // }
-    // panic!("dead");
+    let profile = std::env::var("PROFILE").expect("expected env var PROFILE for build.rs");
 
     let out_dir = env::var("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("wasm_blobs_output_dir");
     let _ = fs::remove_dir_all(&dest_path); // may already exist, nuke if that is the case
     fs::create_dir(&dest_path).unwrap();
 
+    println!("dest path: {:?}", &dest_path);
+
     let current_dir = std::env::current_dir().unwrap();
 
-    // TODO: figure out how to pass in --release flag conditionally (probably exists in env for build.rs)
-    let output = Command::new("cargo")
+    let mut cmd = Command::new("cargo");
+
+    cmd
         .arg("web")
         .arg("deploy")
         .arg("--output")
-        .arg(dest_path.to_str().unwrap())
-        .current_dir(current_dir.join("wasm"))
-        .output()
+        .arg(dest_path.to_str().unwrap());
+
+    if profile == "release" {
+        cmd.arg("--release");
+    }
+
+    cmd.current_dir(current_dir.join("wasm"));
+
+    let output =
+        cmd.output()
         .expect("failed to execute cargo web deploy");
 
     if !output.status.success() {
@@ -53,7 +60,7 @@ fn main() {
         })
         .collect();
 
-    let mut f_contents = blobs
+    let mut output_lines = blobs
         .iter()
         .map(|(_, identifier, dest_path)| {
             format!(
@@ -64,28 +71,34 @@ fn main() {
         })
         .collect::<Vec<String>>();
 
-    let mut hashmap: Vec<String> =
-        vec![ "lazy_static! {".to_string()
+    output_lines.append(&mut vec![ "lazy_static! {".to_string()
             , "static ref WASM: std::collections::HashMap<&'static str, &'static [u8]> = {".to_string()
             , "let mut m = std::collections::HashMap::new();".to_string()
-            ];
+            ]);
 
-    let mut hashmap_vals: Vec<String> = blobs
+    let mut hashmap_entries: Vec<String> = blobs
         .iter()
         .map(|(src_path, identifier, _)| format!(r#"m.insert("{}", {});"#, src_path, identifier))
         .collect();
-    hashmap.append(&mut hashmap_vals);
-    hashmap.append(&mut vec!["m".to_string()]);
-    hashmap.append(&mut vec!["};".to_string()]);
-    hashmap.append(&mut vec!["}".to_string()]);
+    output_lines.append(&mut hashmap_entries);
+    output_lines.append(&mut vec!["m".to_string(), "};".to_string(), "}".to_string()]);
 
-    f_contents.append(&mut hashmap);
 
-    f.write_all(&f_contents.join("\n").into_bytes()).unwrap();
+    f.write_all(&output_lines.join("\n").into_bytes()).unwrap();
 
-    // TODO: figure out how to just register everything in wasm subdir
-    println!("cargo:rerun-if-changed=wasm/src/main.rs");
-    println!("cargo:rerun-if-changed=wasm/src/lib.rs");
-    println!("cargo:rerun-if-changed=wasm/static/tree.css");
-    // unimplemented!("afaik only way to get println output from build.rs is to fail here");
+    //register rerun-if-changed hooks for all wasm directory entries not in gitignore
+    for result in Walk::new("wasm") {
+        // Each item yielded by the iterator is either a directory entry or an
+        // error, so either print the path or the error.
+        match result {
+            Ok(entry) => {
+                if entry.metadata().unwrap().is_file() {
+                    println!("cargo:rerun-if-changed={}", entry.path().display());
+                }
+            }
+            Err(err) => panic!("error traversing wasm directory: {}", err),
+        }
+    }
+
+    // panic!("afaik only way to get println output from build.rs is to fail here");
 }
