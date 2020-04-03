@@ -5,31 +5,33 @@ body {
 }
 
 
-span.menu {
+div.menu {
+    vertical-align: top;
     display: inline-block;
+    padding-left: 40px;
     position: relative;
+    top: 0px;
+    left: 0px;
 }
-span.menu span.submenu{
+div.menu:hover {
+    padding-left: 0px
+}
+div.menu span.submenu{
     width: 40px;
     display: none;
     background: #e0e0e0;
     color: #747474;
 }
-span.menu {
-    padding-left: 40px
-}
-span.menu:hover {
-    padding-left: 0px
-}
-span.menu:hover span.submenu{
+div.menu:hover span.submenu{
     display: inline-block;
     width: 40px;
 }
-span.menu a{
+div.menu a{
+    padding: 2px;
     border: 1px solid #ffffff;
     width: 20px;
 }
-span.menu a:hover{
+div.menu a:hover{
     background: #f0f0f0;
 }
 .submenu:after{
@@ -40,6 +42,8 @@ span.menu a:hover{
 
 
 div.note {
+    vertical-align: top;
+    position: relative;
     padding-top: 5px;
     padding-bottom: 5px;
 }
@@ -47,8 +51,20 @@ div.note {
 div.note-contents {
     padding-left: 5px;
     display: inline-block;
+    padding: 5px;
+    width: 400px;
 }
 
 div.note-children {
     padding-left: 10px;
+}
+
+.note-contents textarea {
+	  font: 14px 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    color: #839496;
+	  background: #002b36;
+    border: 1px solid #ffffff;
+    width: 100%;
+
+    resize: none;
 }

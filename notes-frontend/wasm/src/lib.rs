@@ -144,7 +144,7 @@ impl Component for State {
         let mut interval_service = IntervalService::new();
         let callback = link.callback(move |_: ()| Msg::Backend(BackendMsg::StartSave));
 
-        let save_interval = std::time::Duration::new(60, 0);
+        let save_interval = std::time::Duration::new(20, 0);
         let interval_task = interval_service.spawn(save_interval, callback);
 
         State {
@@ -169,9 +169,8 @@ impl Component for State {
             Msg::Navigation(n) => self.update_navigation(n),
             Msg::Edit(e) => self.update_edit(e),
             Msg::Backend(b) => self.update_backend(b),
-            Msg::NoOp => {}
+            Msg::NoOp => {false}
         }
-        true
     }
 
     fn view(&self) -> Html {
@@ -205,11 +204,12 @@ impl State {
             .expect(&format!("broken pointer (mut): {:?}", id))
     }
 
-    fn update_navigation(&mut self, msg: NavigationMsg) {
+    fn update_navigation(&mut self, msg: NavigationMsg) -> ShouldRender {
         println!("handle navigation msg: {:?}", &msg);
         match msg {
             NavigationMsg::Maximize(node_id) => {
                 self.set_expanded(node_id, true);
+                true
             }
             NavigationMsg::Minimize(node_id) => {
                 // doing this here makes my life significantly simpler,
@@ -217,9 +217,11 @@ impl State {
                 // (for case where minimized node is parent of edit focus)
                 self.commit_edit();
                 self.set_expanded(node_id, false);
+                true
             }
             NavigationMsg::FocusOnRoot => {
                 self.focus_node = self.root_node;
+                true
             }
             NavigationMsg::FocusOn(node_ref) => {
                 println!("focus on: {:?}", &node_ref);
@@ -229,11 +231,12 @@ impl State {
                 self.commit_edit();
 
                 self.focus_node = node_ref;
+                true
             }
         }
     }
 
-    fn update_edit(&mut self, msg: EditMsg) {
+    fn update_edit(&mut self, msg: EditMsg) -> ShouldRender {
         println!("handle edit msg: {:?}", &msg);
         match msg {
             EditMsg::EnterHeaderEdit { target } => {
@@ -247,6 +250,7 @@ impl State {
                     node_focus: target,
                     edited_contents: node.header.clone(),
                 });
+                true
             }
             EditMsg::UpdateEdit(new_s) => {
                 let es: &mut EditState = self
@@ -254,9 +258,11 @@ impl State {
                     .as_mut()
                     .expect("no edit state, attempting to update");
                 es.edited_contents = new_s;
+                false
             }
             EditMsg::CommitEdit => {
                 self.commit_edit();
+                true
             }
             EditMsg::Delete(node_id) => {
                 // doing this here makes my life significantly simpler,
@@ -299,6 +305,7 @@ impl State {
                         }
                     }
                 };
+                true
             }
             EditMsg::CreateOn { parent, at_idx } => {
                 // we're modifying this node, so walk back to root and make sure all parent nodes reflect modification
@@ -322,11 +329,12 @@ impl State {
                     node_focus: new_node_id,
                     edited_contents: "".to_string(),
                 });
+                true
             }
         }
     }
 
-    fn update_backend(&mut self, msg: BackendMsg) {
+    fn update_backend(&mut self, msg: BackendMsg) -> ShouldRender {
         println!("handle backend msg: {:?}", &msg);
         match msg {
             BackendMsg::StartSave => {
@@ -368,8 +376,10 @@ impl State {
                     };
 
                     self.push_nodes(req);
+                    true
                 } else {
                     println!("no modified nodes found, not saving");
+                    false
                     // no-op if root node not modified
                 }
             }
@@ -410,6 +420,7 @@ impl State {
                         })
                     }
                 }
+                true
             }
             BackendMsg::Fetch(remote_node_ref) => {
                 let request = Request::get(format!(
@@ -437,6 +448,7 @@ impl State {
 
                 let task = self.fetch_service.fetch(request, callback);
                 self.fetch_tasks.insert(remote_node_ref, task); // stash task handle
+                false
             }
             BackendMsg::FetchComplete(node_ref, get_resp) => {
                 self.fetch_tasks.remove(&node_ref); // drop fetch task (cancels, presumably)
@@ -452,6 +464,7 @@ impl State {
                     };
                     self.nodes.insert(node_ref.0, fetched_node);
                 }
+                true
             }
         }
     }
@@ -485,7 +498,7 @@ impl State {
                             </div>
                         }
                     } else {
-                        html!{ <div> {"..."} </div> }
+                        html!{ <div class = "note-children" > {"..."} </div> }
                     }
                 }
                 </div>
@@ -510,7 +523,7 @@ impl State {
         let node_id = node_ref.node_id();
 
         html! {
-            <span class="menu">
+            <div class="menu">
             <span class="submenu">
                 <a class="smallButton" onclick=self.link.callback(move |_| Msg::Edit(EditMsg::Delete(node_id)))>
                 {"[X]"}
@@ -534,7 +547,7 @@ impl State {
                 <a class="smallButton" onclick=self.link.callback(move |_| Msg::Navigation(NavigationMsg::FocusOn(node_ref)))>
                 {"[@]"}
                 </a>
-            </span>
+            </div>
         }
     }
 
@@ -555,13 +568,17 @@ impl State {
             } else {
                 Msg::Edit(EditMsg::CommitEdit)
             };
+
+            // NOTE: running through full loop on every input event, shouldn't be neccessary - mb just grab contents by id on enter?
+            // NOTE: somewhat irritatingly, it might not be - need contents to set initial value with if rebuild triggered during edit
+            // update: addressed somewhat by reducing # of re-renders
+
             let onkeypress_send = commit_msg.clone();
             let onblur_send = commit_msg.clone();
             html! {
                 <div class="note-contents">
-                    <input
+                    <textarea
                         class="edit node-header"
-                        type="text"
                         value=&focus_str
                         id = "edit-focus"
                         oninput= self.link.callback( move |e: InputData| Msg::Edit(EditMsg::UpdateEdit(e.value)) )
