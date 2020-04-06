@@ -7,6 +7,10 @@ use notes_types::notes::{CannonicalNode, Node, NodeId, NodeRef, RemoteNodeRef};
 use rand;
 use std::collections::HashMap;
 use stdweb::js;
+use stdweb::unstable::TryInto;
+use stdweb::web::html_element::TextAreaElement;
+use stdweb::web::{document, INonElementParentNode};
+use stdweb::Value;
 use yew::events::IKeyboardEvent;
 use yew::events::KeyPressEvent;
 use yew::format::{Json, Nothing};
@@ -97,8 +101,8 @@ pub enum NavigationMsg {
 pub enum EditMsg {
     EnterHeaderEdit { target: NodeId },
     UpdateEdit(String),
-    CommitEdit,
-    CreateOn { at_idx: usize, parent: NodeId },
+    OnBlur,
+    OnEnter,
     // TODO: msg type for moving node up/down in list (eg swapping node position in child tree)
     Delete(NodeId),
 }
@@ -147,7 +151,7 @@ impl Component for State {
         let save_interval = std::time::Duration::new(20, 0);
         let interval_task = interval_service.spawn(save_interval, callback);
 
-        State {
+        let mut s = State {
             nodes: nodes,
             focus_node: root_node,
             root_node,
@@ -161,7 +165,13 @@ impl Component for State {
             interval_service,
             interval_task,
             expanded_nodes: HashMap::new(),
+        };
+
+        if let NodeRef::Unmodified(root_node) = s.root_node {
+            s.start_fetch(root_node);
         }
+
+        s
     }
 
     fn update(&mut self, msg: Self::Message) -> ShouldRender {
@@ -169,7 +179,7 @@ impl Component for State {
             Msg::Navigation(n) => self.update_navigation(n),
             Msg::Edit(e) => self.update_edit(e),
             Msg::Backend(b) => self.update_backend(b),
-            Msg::NoOp => {false}
+            Msg::NoOp => false,
         }
     }
 
@@ -260,8 +270,91 @@ impl State {
                 es.edited_contents = new_s;
                 false
             }
-            EditMsg::CommitEdit => {
+            EditMsg::OnBlur => {
                 self.commit_edit();
+                true
+            }
+            EditMsg::OnEnter => {
+                if let Some(es) = self.edit_state.take() {
+                    let edited = es.edited_contents;
+                    let focused_node = es.node_focus;
+
+                    let textarea: stdweb::web::Element =
+                        document().get_element_by_id("edit-focus").unwrap();
+
+                    //assumption: these will always be present on the textarea
+                    let selection_start: usize = js! (
+                        return @{&textarea}.selectionStart;
+                    )
+                    .try_into()
+                    .ok()
+                    .unwrap();
+                    let selection_end: usize = js! (
+                        return @{&textarea}.selectionEnd;
+                    )
+                    .try_into()
+                    .ok()
+                    .unwrap();
+
+                    println!(
+                        "selection end: {}, start: {}, contents: {}, len {}",
+                        selection_end,
+                        selection_start,
+                        &edited,
+                        edited.len()
+                    );
+
+                    if selection_end == edited.len() {
+                        // cursor at end of input text, no need to create new node
+                        let node = self.get_node_mut(&focused_node);
+
+                        node.header = edited;
+                        self.set_parent_nodes_to_modified(focused_node); // set as modified from this node to root
+                    } else {
+                        // cursor inside text (presumably, outside is fatal error)
+                        if let Some(parent) = self.get_node(&focused_node).parent {
+                            // can now split this node to create a new node based on cursor position as a preceding sibling on the parent node
+
+                            let parent_node = self.get_node(&parent);
+                            let current_node_idx = parent_node
+                                .children
+                                .iter()
+                                .position(|x| &x.node_id() == &focused_node)
+                                .expect("current node id not found in parent children, bug");
+
+                            let node = self.get_node_mut(&focused_node);
+                            node.header = edited[selection_start..].to_string();
+
+                            // created as immediate predecessor of current node;
+                            let new_node_id = gen_node_id();
+                            let parent_node = self.get_node_mut(&parent);
+                            parent_node.children.insert(current_node_idx, NodeRef::Modified(new_node_id)); // insert reference to new node
+
+                            let mut new_node = InMemNode {
+                                hash: None,
+                                inner: Node::new(Some(parent)),
+                            };
+                            new_node.header = edited[..selection_start].to_string();
+                            self.nodes.insert(new_node_id, new_node); // insert new node
+
+                            self.set_parent_nodes_to_modified(focused_node); // set as modified from this node to root
+                        } else {
+                            // this is the root node, just commit edit to that unitary node instead of trying to create a sibling for it
+                            let node = self.get_node_mut(&focused_node);
+                            node.header = edited;
+                            self.set_parent_nodes_to_modified(focused_node); // set as modified from this node to root
+                        }
+                    }
+
+                    // if select
+
+                    // // this node
+                    // [..selection_start];
+
+                    // let new_node = edited[selection_end..];
+                    // if new_node
+                };
+
                 true
             }
             EditMsg::Delete(node_id) => {
@@ -305,30 +398,6 @@ impl State {
                         }
                     }
                 };
-                true
-            }
-            EditMsg::CreateOn { parent, at_idx } => {
-                // we're modifying this node, so walk back to root and make sure all parent nodes reflect modification
-                //TODO: still needed, figure out new sig
-                self.set_parent_nodes_to_modified(parent);
-
-                // close out any pre-existing edit ops
-                self.commit_edit(); // may call set_parent_nodes_to_modified & overlap w/ above walk_path_to_root nodes
-
-                let node = self.get_node_mut(&parent);
-                let new_node_id = gen_node_id();
-                node.children.insert(at_idx, NodeRef::Modified(new_node_id)); // insert reference to new node
-                let new_node = InMemNode {
-                    hash: None,
-                    inner: Node::new(Some(parent)),
-                };
-                self.nodes.insert(new_node_id, new_node); // insert new node
-
-                // enter edit mode with empty header
-                self.edit_state = Some(EditState {
-                    node_focus: new_node_id,
-                    edited_contents: "".to_string(),
-                });
                 true
             }
         }
@@ -423,31 +492,7 @@ impl State {
                 true
             }
             BackendMsg::Fetch(remote_node_ref) => {
-                let request = Request::get(format!(
-                    "/node/{}",
-                    (remote_node_ref.1.to_base58()).to_string()
-                ))
-                .body(Nothing)
-                .expect("fetch req builder failed");
-
-                let callback = self.link.callback(
-                    move |response: Response<
-                        Json<Result<notes_types::api::GetResp, anyhow::Error>>,
-                    >| {
-                        if let (meta, Json(Ok(body))) = response.into_parts() {
-                            if meta.status.is_success() {
-                                Msg::Backend(BackendMsg::FetchComplete(remote_node_ref, body))
-                            } else {
-                                panic!("lmao, todo (panic during resp handler)")
-                            }
-                        } else {
-                            panic!("lmao, todo (panic in outer get resp callback (???))")
-                        }
-                    },
-                );
-
-                let task = self.fetch_service.fetch(request, callback);
-                self.fetch_tasks.insert(remote_node_ref, task); // stash task handle
+                self.start_fetch(remote_node_ref);
                 false
             }
             BackendMsg::FetchComplete(node_ref, get_resp) => {
@@ -467,6 +512,32 @@ impl State {
                 true
             }
         }
+    }
+
+    fn start_fetch(&mut self, remote_node_ref: RemoteNodeRef) {
+        let request = Request::get(format!(
+            "/node/{}",
+            (remote_node_ref.1.to_base58()).to_string()
+        ))
+        .body(Nothing)
+        .expect("fetch req builder failed");
+
+        let callback = self.link.callback(
+            move |response: Response<Json<Result<notes_types::api::GetResp, anyhow::Error>>>| {
+                if let (meta, Json(Ok(body))) = response.into_parts() {
+                    if meta.status.is_success() {
+                        Msg::Backend(BackendMsg::FetchComplete(remote_node_ref, body))
+                    } else {
+                        panic!("lmao, todo (panic during resp handler)")
+                    }
+                } else {
+                    panic!("lmao, todo (panic in outer get resp callback (???))")
+                }
+            },
+        );
+
+        let task = self.fetch_service.fetch(request, callback);
+        self.fetch_tasks.insert(remote_node_ref, task); // stash task handle
     }
 
     fn commit_edit(&mut self) -> Option<NodeId> {
@@ -563,18 +634,22 @@ impl State {
         {
             let is_saving = self.save_task.is_some();
             // FIXME: lazy hack, disallow commiting edits during save task lifetime (TODO: refactor, dedup)
-            let commit_msg = if is_saving {
+            let onblur_msg = if is_saving {
                 Msg::NoOp
             } else {
-                Msg::Edit(EditMsg::CommitEdit)
+                Msg::Edit(EditMsg::OnBlur)
+            };
+
+            let on_enter_msg = if is_saving {
+                Msg::NoOp
+            } else {
+                Msg::Edit(EditMsg::OnEnter)
             };
 
             // NOTE: running through full loop on every input event, shouldn't be neccessary - mb just grab contents by id on enter?
             // NOTE: somewhat irritatingly, it might not be - need contents to set initial value with if rebuild triggered during edit
             // update: addressed somewhat by reducing # of re-renders
 
-            let onkeypress_send = commit_msg.clone();
-            let onblur_send = commit_msg.clone();
             html! {
                 <div class="note-contents">
                     <textarea
@@ -582,9 +657,9 @@ impl State {
                         value=&focus_str
                         id = "edit-focus"
                         oninput= self.link.callback( move |e: InputData| Msg::Edit(EditMsg::UpdateEdit(e.value)) )
-                        onblur = self.link.callback( move |_| onblur_send.clone() )
+                        onblur = self.link.callback( move |_| onblur_msg.clone() )
                         onkeypress=self.link.callback( move |e: KeyPressEvent| {
-                            if e.key() == "Enter" { onkeypress_send.clone() } else { Msg::NoOp }
+                            if e.key() == "Enter" { on_enter_msg.clone() } else { Msg::NoOp }
                         })
                     />
                     <script>
