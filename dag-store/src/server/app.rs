@@ -33,7 +33,7 @@ impl Runtime {
         })?;
 
         let resp =
-            opportunistic_get::get(self.hashed_blob_store.clone(), self.cache.clone(), request)
+            opportunistic_get::get(&self.hashed_blob_store, &self.cache, request)
                 .await?;
 
         let resp = resp.into_proto();
@@ -54,8 +54,8 @@ impl Runtime {
         info!("dag cache put handler"); //TODO,, better log msgs
 
         let hash = put_and_cache(
-            self.hashed_blob_store.clone(),
-            self.cache.clone(),
+            &self.hashed_blob_store,
+            &self.cache,
             domain_node,
         )
         .await?;
@@ -79,9 +79,9 @@ impl Runtime {
 
         info!("dag cache put handler request, cas: {:?}", &request.cas);
         let resp = batch_put::batch_put_cata_with_cas(
-            self.mutable_hash_store.clone(),
-            self.hashed_blob_store.clone(),
-            self.cache.clone(),
+            &self.mutable_hash_store,
+            &self.hashed_blob_store,
+            &self.cache,
             request.validated_tree,
             request.cas,
         )

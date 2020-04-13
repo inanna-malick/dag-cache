@@ -9,9 +9,9 @@ use tokio::sync::mpsc;
 use tracing::{error, info};
 
 // NOTE: currently not exposed via GRPC, can re-enable if it becomes useful
-pub fn batch_get(
-    store: Arc<dyn HashedBlobStore>,
-    cache: Arc<Cache>,
+pub fn batch_get<'a>(
+    store: &'a Arc<dyn HashedBlobStore>,
+    cache: &'a Arc<Cache>,
     hash: Hash,
 ) -> mpsc::Receiver<Result<Node, DagCacheError>> {
     info!("starting recursive fetch for root hash {:?}", &hash);
@@ -24,13 +24,15 @@ pub fn batch_get(
 }
 
 // anamorphism - an unfolding change
-fn batch_get_ana_internal(
-    store: Arc<dyn HashedBlobStore>,
-    cache: Arc<Cache>,
+fn batch_get_ana_internal<'a>(
+    store: &'a Arc<dyn HashedBlobStore>,
+    cache: &'a Arc<Cache>,
     hash: Hash,
     resp_chan: mpsc::Sender<Result<Node, DagCacheError>>, // used to send completed nodes (eagerly)
     to_populate: Arc<CHashMap<Hash, ()>>,                 // used to memoize async fetches
 ) {
+    let store = store.clone();
+    let cache = cache.clone();
     to_populate.clone().upsert(
         hash,
         || {
@@ -50,7 +52,7 @@ async fn batch_get_worker(
     mut resp_chan: mpsc::Sender<Result<Node, DagCacheError>>,
     to_populate: Arc<CHashMap<Hash, ()>>, // used to memoize async fetches
 ) {
-    let res = get_and_cache(store.clone(), cache.clone(), hash).await;
+    let res = get_and_cache(&store, &cache, hash).await;
     match res {
         Ok(node) => {
             let links = node.links.clone();
@@ -65,8 +67,8 @@ async fn batch_get_worker(
                 Ok(()) => {
                     for link in links.into_iter() {
                         batch_get_ana_internal(
-                            store.clone(),
-                            cache.clone(),
+                            &store,
+                            &cache,
                             link.hash,
                             resp_chan.clone(),
                             to_populate.clone(),

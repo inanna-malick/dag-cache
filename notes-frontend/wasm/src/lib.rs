@@ -4,15 +4,14 @@ use dag_store_types::types::api as api_types;
 use dag_store_types::types::domain::TypedHash;
 use dag_store_types::types::validated_tree::ValidatedTree_;
 use notes_types::notes::{CannonicalNode, Node, NodeId, NodeRef, RemoteNodeRef};
-use rand;
 use std::collections::HashMap;
 use stdweb::js;
 use stdweb::unstable::TryInto;
-use stdweb::web::html_element::TextAreaElement;
-use stdweb::web::{document, INonElementParentNode};
+use stdweb::web::event::IEvent;
+use stdweb::web::*; // FIXME
 use stdweb::Value;
 use yew::events::IKeyboardEvent;
-use yew::events::KeyPressEvent;
+use yew::events::{KeyDownEvent, KeyPressEvent};
 use yew::format::{Json, Nothing};
 use yew::html::InputData;
 use yew::services::{
@@ -103,6 +102,8 @@ pub enum EditMsg {
     UpdateEdit(String),
     OnBlur,
     OnEnter,
+    OnTab,
+    OnShiftTab,
     // TODO: msg type for moving node up/down in list (eg swapping node position in child tree)
     Delete(NodeId),
 }
@@ -270,6 +271,97 @@ impl State {
                 es.edited_contents = new_s;
                 false
             }
+            EditMsg::OnShiftTab => {
+                // move edit focus up one, as sibling of parent
+                // NOTE: does not commit edit - should be able to get away with this?
+                if let Some(es) = &self.edit_state {
+                    let focused_node = es.node_focus;
+
+                    // no-op if on root node
+                    if let Some(parent) = self.get_node(&focused_node).parent {
+                        if let Some(grandparent) = self.get_node(&parent).parent {
+                            // remove current node from parent node
+                            let parent_node = self.get_node_mut(&parent);
+                            let current_node_idx = parent_node
+                                .children
+                                .iter()
+                                .position(|x| &x.node_id() == &focused_node)
+                                .expect("current node id not found in parent children, bug");
+                            parent_node.children.remove(current_node_idx);
+                            drop(parent_node);
+
+                            // add current node to grandparent node after parent node
+                            let grandparent_node = self.get_node_mut(&grandparent);
+
+                            println!("parent node {:?}, grandparent children {:?}", &parent, &grandparent_node.children);
+
+                            let parent_node_idx = grandparent_node
+                                .children
+                                .iter()
+                                .position(|x| &x.node_id() == &parent)
+                                .expect("parent node id not found in grandparent children, bug");
+                            grandparent_node.children.insert(parent_node_idx + 1, NodeRef::Modified(focused_node));
+                            drop(grandparent_node);
+
+                            let node = self.get_node_mut(&focused_node);
+                            node.parent = Some(grandparent);
+
+                            self.set_parent_nodes_to_modified(focused_node);
+                            self.set_parent_nodes_to_modified(parent);
+
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            EditMsg::OnTab => {
+                // move edit focus down one, as child of predecessor (iff one exists)
+                // NOTE: does not commit edit - should be able to get away with this?
+                if let Some(es) = &self.edit_state {
+                    let focused_node = es.node_focus;
+
+                    // no-op if on root node
+                    if let Some(parent) = self.get_node(&focused_node).parent {
+                        let parent_node = self.get_node_mut(&parent);
+                        let current_node_idx = parent_node
+                            .children
+                            .iter()
+                            .position(|x| &x.node_id() == &focused_node)
+                            .expect("current node id not found in parent children, bug");
+
+                        // no-op if already first child of parent - not yet supporting multiple-deep nesting in that fashion
+                        if current_node_idx > 0 {
+                            parent_node.children.remove(current_node_idx);
+                            let new_parent_node_id = parent_node.children[current_node_idx - 1];
+                            drop(parent_node);
+
+                            let new_parent_node = self.get_node_mut(&new_parent_node_id.node_id());
+                            new_parent_node
+                                .children
+                                .push(NodeRef::Modified(focused_node));
+                            drop(new_parent_node);
+
+                            let node = self.get_node_mut(&focused_node);
+                            node.parent = Some(new_parent_node_id.node_id());
+
+                            self.set_parent_nodes_to_modified(focused_node); // set as modified from this node to root, will hit old parent + new
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
             EditMsg::OnBlur => {
                 self.commit_edit();
                 true
@@ -279,22 +371,11 @@ impl State {
                     let edited = es.edited_contents;
                     let focused_node = es.node_focus;
 
-                    let textarea: stdweb::web::Element =
-                        document().get_element_by_id("edit-focus").unwrap();
+                    let sel: stdweb::web::Selection = window().get_selection().unwrap(); // FIXME: fails if no selection
 
-                    //assumption: these will always be present on the textarea
-                    let selection_start: usize = js! (
-                        return @{&textarea}.selectionStart;
-                    )
-                    .try_into()
-                    .ok()
-                    .unwrap();
-                    let selection_end: usize = js! (
-                        return @{&textarea}.selectionEnd;
-                    )
-                    .try_into()
-                    .ok()
-                    .unwrap();
+                    // NOTE: sel start/end can be in different orders if caret at beginning or end of selection
+                    let selection_start = sel.anchor_offset().min(sel.focus_offset()) as usize;
+                    let selection_end = sel.focus_offset().max(sel.anchor_offset()) as usize;
 
                     println!(
                         "selection end: {}, start: {}, contents: {}, len {}",
@@ -305,6 +386,7 @@ impl State {
                     );
 
                     if selection_end == edited.len() {
+                        println!("cursor in last position, commit edit to single node and create new node w/ focus after this one");
                         // cursor at end of input text, no need to create new node
                         let node = self.get_node_mut(&focused_node);
 
@@ -313,6 +395,8 @@ impl State {
                     } else {
                         // cursor inside text (presumably, outside is fatal error)
                         if let Some(parent) = self.get_node(&focused_node).parent {
+                            println!("cursor not in last position, not on root node, split nodes");
+                            // TODO: focus on next node at beginnning instead of on current one
                             // can now split this node to create a new node based on cursor position as a preceding sibling on the parent node
 
                             let parent_node = self.get_node(&parent);
@@ -328,7 +412,9 @@ impl State {
                             // created as immediate predecessor of current node;
                             let new_node_id = gen_node_id();
                             let parent_node = self.get_node_mut(&parent);
-                            parent_node.children.insert(current_node_idx, NodeRef::Modified(new_node_id)); // insert reference to new node
+                            parent_node
+                                .children
+                                .insert(current_node_idx, NodeRef::Modified(new_node_id)); // insert reference to new node
 
                             let mut new_node = InMemNode {
                                 hash: None,
@@ -339,20 +425,16 @@ impl State {
 
                             self.set_parent_nodes_to_modified(focused_node); // set as modified from this node to root
                         } else {
-                            // this is the root node, just commit edit to that unitary node instead of trying to create a sibling for it
+                            println!("cursor not in last position, but on root node, just commit edit to single node");
+                            // this is the root node, ignore enter and just commit edit
+                            // FIXME/TODO: split out everything after selection as first child instead of sibling
                             let node = self.get_node_mut(&focused_node);
                             node.header = edited;
                             self.set_parent_nodes_to_modified(focused_node); // set as modified from this node to root
                         }
                     }
-
-                    // if select
-
-                    // // this node
-                    // [..selection_start];
-
-                    // let new_node = edited[selection_end..];
-                    // if new_node
+                } else {
+                    println!("on enter w/ no edit state");
                 };
 
                 true
@@ -640,38 +722,74 @@ impl State {
                 Msg::Edit(EditMsg::OnBlur)
             };
 
-            let on_enter_msg = if is_saving {
-                Msg::NoOp
-            } else {
-                Msg::Edit(EditMsg::OnEnter)
-            };
-
             // NOTE: running through full loop on every input event, shouldn't be neccessary - mb just grab contents by id on enter?
             // NOTE: somewhat irritatingly, it might not be - need contents to set initial value with if rebuild triggered during edit
             // update: addressed somewhat by reducing # of re-renders
 
             html! {
-                <div class="note-contents">
-                    <textarea
-                        class="edit node-header"
-                        value=&focus_str
-                        id = "edit-focus"
-                        oninput= self.link.callback( move |e: InputData| Msg::Edit(EditMsg::UpdateEdit(e.value)) )
-                        onblur = self.link.callback( move |_| onblur_msg.clone() )
-                        onkeypress=self.link.callback( move |e: KeyPressEvent| {
-                            if e.key() == "Enter" { on_enter_msg.clone() } else { Msg::NoOp }
-                        })
-                    />
-                    <script>
-                        { // focus immediately after loading
-                            "document.getElementById(\"edit-focus\").focus();"
-                        }
-                    </script>
-                </div>
+            <div class="note-contents"
+                 contentEditable="true"
+                 id = "edit-focus"
+                 oninput= self.link.callback( move |e: InputData| Msg::Edit(EditMsg::UpdateEdit(e.value)) )
+                 onblur = self.link.callback( move |_| onblur_msg.clone() )
+                 onkeypress=self.link.callback( move |e: KeyPressEvent| {
+                     if e.key() == "Enter" {
+                         println!("suppress enter keypress");
+                         e.prevent_default();
+                         e.stop_propagation();
+                     };
+                     // if is_saving {
+                     //     Msg::NoOp
+                     // } else {
+                     //     match e.key().as_str() {
+                     //         "Enter" => {
+                     //             e.stop_propagation();
+                     //            Msg::Edit(EditMsg::OnEnter)
+                     //         }
+                     //         _ => {
+                     //             Msg::NoOp
+                     //         }
+                     //     }
+                     // }
+                     Msg::NoOp
+                 })
+                 onkeydown=self.link.callback( move |e: KeyDownEvent| {
+                     println!("keydown: {:?}", e.key());
+                     if is_saving {
+                         Msg::NoOp
+                     } else {
+                         match e.key().as_str() {
+                             "Enter" => {
+                                 println!("match on enter");
+                                 e.prevent_default();
+                                 e.stop_propagation();
+                                 Msg::Edit(EditMsg::OnEnter)
+                             }
+                             "Tab" => {
+                                 println!("match on tab");
+                                 e.prevent_default();
+                                 e.stop_propagation();
+                                 if e.shift_key() {
+                                     Msg::Edit(EditMsg::OnShiftTab)
+                                 } else {
+                                     Msg::Edit(EditMsg::OnTab)
+                                 }
+                             }
+                             _ => {
+                                 Msg::NoOp
+                             }
+                         }
+                     }
+                 })
+             >
+                { &focus_str }
+            </div>
             }
         } else {
             html! {
-                <div class="note-contents" onclick= self.link.callback( move |_| Msg::Edit(EditMsg::EnterHeaderEdit{target: node_id}) )>
+                <div class="note-contents"
+                    contentEditable="true"
+                    onclick= self.link.callback( move |_| Msg::Edit(EditMsg::EnterHeaderEdit{target: node_id}) )>
                 { &node.header }
                 </div>
             }

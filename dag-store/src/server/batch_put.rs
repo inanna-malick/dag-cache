@@ -13,10 +13,10 @@ use tracing::info;
 // TODO: how to make this transactional while maintaining caps approach? ans: have an impl of the ipfsCap (TODO: rename to hash store)
 // that is the _transaction-scoped_ tree - pretty sure this is supported.
 
-pub async fn batch_put_cata_with_cas(
-    mhs: Arc<dyn MutableHashStore>,
-    store: Arc<dyn HashedBlobStore>,
-    cache: Arc<Cache>,
+pub async fn batch_put_cata_with_cas<'a>(
+    mhs: &'a Arc<dyn MutableHashStore>,
+    store: &'a Arc<dyn HashedBlobStore>,
+    cache: &'a Arc<Cache>,
     tree: ValidatedTree,
     cas: Option<bulk_put::CAS>,
 ) -> Result<bulk_put::Resp, DagCacheError> {
@@ -51,27 +51,30 @@ pub async fn batch_put_cata_with_cas(
 
 // catamorphism - a consuming change
 // recursively publish DAG node tree to IPFS, starting with leaf nodes
-pub async fn batch_put_cata(
-    store: Arc<dyn HashedBlobStore>,
-    cache: Arc<Cache>,
+pub async fn batch_put_cata<'a>(
+    store: &'a Arc<dyn HashedBlobStore>,
+    cache: &'a Arc<Cache>,
     tree: ValidatedTree,
 ) -> Result<bulk_put::Resp, DagCacheError> {
     let focus = tree.root_node.clone();
     let tree = Arc::new(tree);
+    // NOTE: should not need to clone here
     let (_size, root_hash, additional_uploaded) =
-        batch_put_worker(store, cache, tree, focus).await?; // TODO: don't panic on join error
+        batch_put_worker(store.clone(), cache.clone(), tree, focus).await?; // TODO: don't panic on join error
     Ok(bulk_put::Resp {
         root_hash,
         additional_uploaded,
     })
 }
 
-fn upload_link(
-    store: Arc<dyn HashedBlobStore>,
-    cache: Arc<Cache>,
+fn upload_link<'a>(
+    store: &'a Arc<dyn HashedBlobStore>,
+    cache: &'a Arc<Cache>,
     x: bulk_put::NodeLink,
     tree: Arc<ValidatedTree>,
 ) -> tokio::task::JoinHandle<Result<(Header, Vec<(Id, Hash)>), DagCacheError>> {
+    let store = store.clone();
+    let cache = cache.clone();
     tokio::spawn(async move {
         match x {
             bulk_put::NodeLink::Local(id) => {
@@ -83,7 +86,7 @@ fn upload_link(
                 let node = tree.nodes[&id].clone();
 
                 let (size, hash, mut additional_uploaded) =
-                    batch_put_worker(store, cache.clone(), tree.clone(), node.clone()).await?;
+                    batch_put_worker(store.clone(), cache.clone(), tree.clone(), node.clone()).await?;
                 let hdr = Header { id, size, hash };
                 additional_uploaded.push((id, hdr.hash.clone()));
                 Ok((hdr, additional_uploaded))
@@ -112,7 +115,7 @@ async fn batch_put_worker(
         tokio::task::JoinHandle<Result<(Header, Vec<(Id, Hash)>), DagCacheError>>,
     > = links
         .into_iter()
-        .map(|ln| upload_link(store.clone(), cache.clone(), ln, tree.clone()))
+        .map(|ln| upload_link(&store, &cache, ln, tree.clone()))
         .collect();
 
     let joined_link_uploads: Vec<Result<Result<_, DagCacheError>, tokio::task::JoinError>> =
@@ -131,7 +134,7 @@ async fn batch_put_worker(
     // might be a bit of an approximation, but w/e
     let size = size + dag_node.links.iter().map(|x| x.size).sum::<u64>();
 
-    let hash = put_and_cache(store, cache, dag_node).await?;
+    let hash = put_and_cache(&store, &cache, dag_node).await?;
     Ok((size, hash, additional_uploaded))
 }
 
@@ -208,10 +211,16 @@ mod tests {
 
         let cache = Arc::new(Cache::new(16));
 
-        let _published = batch_put_cata(store.clone(), cache, validated_tree)
+        fn shim(x: Arc<MockStore>) -> Arc<dyn HashedBlobStore> {
+            x
+        }
+
+        // this needs an Arc<dyn HashedBlobStore>
+        let _published = batch_put_cata(&shim(store.clone()), &cache, validated_tree)
             .await
             .expect("publish cata error");
 
+        // this pins it, to, specifically, mockstore
         let map = store.0.lock().unwrap();
 
         let uploaded_values: Vec<(Vec<Id>, Base64)> = map

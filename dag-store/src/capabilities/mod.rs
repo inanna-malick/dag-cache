@@ -34,9 +34,9 @@ where
 }
 
 #[instrument(skip(store, cache))]
-pub async fn get_and_cache(
-    store: Arc<dyn HashedBlobStore>,
-    cache: Arc<Cache>,
+pub async fn get_and_cache<'a>(
+    store: &'a Arc<dyn HashedBlobStore>,
+    cache: &'a Arc<Cache>,
     hash: Hash,
 ) -> Result<Node, DagCacheError> {
     match cache.get(hash.clone()) {
@@ -58,9 +58,9 @@ pub async fn get_and_cache(
 }
 
 #[instrument(skip(store, cache, node))]
-pub async fn put_and_cache(
-    store: Arc<dyn HashedBlobStore>,
-    cache: Arc<Cache>,
+pub async fn put_and_cache<'a>(
+    store: &'a Arc<dyn HashedBlobStore>,
+    cache: &'a Arc<Cache>,
     node: Node,
 ) -> Result<Hash, DagCacheError> {
     let hash = store.put(node.clone()).await?;

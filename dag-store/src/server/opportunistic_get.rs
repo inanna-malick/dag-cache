@@ -9,21 +9,21 @@ use tracing::info;
 use tracing::instrument;
 
 #[instrument(skip(store, cache, k))]
-pub async fn get(
-    store: Arc<dyn HashedBlobStore>,
-    cache: Arc<Cache>,
+pub async fn get<'a>(
+    store: &'a Arc<dyn HashedBlobStore>,
+    cache: &'a Arc<Cache>,
     k: Hash,
 ) -> Result<api::get::Resp, DagCacheError> {
-    let dag_node = get_and_cache(store.clone(), cache.clone(), k).await?;
+    let dag_node = get_and_cache(store, cache, k).await?;
 
     // use cache to extend DAG node by following links as long as they exist in-memory
-    let extended = extend(cache.clone(), dag_node);
+    let extended = extend(cache, dag_node);
 
     Ok(extended)
 }
 
 // TODO: figure out traversal termination strategy - don't want to return whole cache in one resp
-fn extend(cache: Arc<Cache>, node: Node) -> api::get::Resp {
+fn extend<'a>(cache: &'a Arc<Cache>, node: Node) -> api::get::Resp {
     let mut frontier = VecDeque::new();
     let mut res = Vec::new();
 
