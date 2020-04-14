@@ -58,6 +58,7 @@ impl core::ops::DerefMut for InMemNode {
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct EditState {
     node_focus: NodeId, // node id & not ref because _must_ be local node
+    // CONCEPT: remove this entirely, track inline as value of focused node (fetch via id), maintain by just grabbing current value (via id) on re-renders
     edited_contents: String,
 }
 
@@ -70,6 +71,7 @@ pub struct State {
     // node (header or body) being edited, as property of state & note node tree
     // focus includes path to root from that node
     last_known_hash: Option<TypedHash<CannonicalNode>>, // for CAS
+    // concept: have this be EditState | KeyboardNavFocusState
     edit_state: Option<EditState>,
     fetch_service: FetchService,
     link: ComponentLink<State>, // used to send callbacks
@@ -100,7 +102,7 @@ pub enum NavigationMsg {
 pub enum EditMsg {
     EnterHeaderEdit { target: NodeId },
     UpdateEdit(String),
-    OnBlur,
+    OnBlur(NodeId),
     OnEnter,
     OnTab,
     OnShiftTab,
@@ -129,7 +131,7 @@ impl Component for State {
     fn create(opt_hash: Self::Properties, link: ComponentLink<Self>) -> Self {
         let mut nodes = HashMap::new();
 
-        let (root_node, last_known_hash) = match opt_hash {
+        let (root_node, last_known_hash, edit_state) = match opt_hash {
             Arg { hash: None } => {
                 let fresh_root = InMemNode {
                     hash: None,             // not persisted
@@ -137,11 +139,17 @@ impl Component for State {
                 };
                 let id = NodeId::root();
                 nodes.insert(id, fresh_root);
-                (NodeRef::Modified(id), None)
+                let es = EditState {
+                    node_focus: id,
+                    edited_contents: "".to_string(),
+                };
+
+                (NodeRef::Modified(id), None, Some(es))
             }
             Arg { hash: Some(h) } => (
                 NodeRef::Unmodified(RemoteNodeRef(NodeId::root(), h)),
                 Some(h),
+                None,
             ),
         };
 
@@ -157,7 +165,7 @@ impl Component for State {
             focus_node: root_node,
             root_node,
             last_known_hash,
-            edit_state: None,
+            edit_state,
             // TODO: split out display-relevant state and capabilities
             link,
             fetch_service: FetchService::new(),
@@ -184,6 +192,7 @@ impl Component for State {
         }
     }
 
+    // NOTE: setting selection here is a neat hack but may fuck w/ preexisting selection on rerender - should only do so if no selection exists
     fn view(&self) -> Html {
         html! {
             <div class="wrapper">
@@ -271,6 +280,7 @@ impl State {
                 es.edited_contents = new_s;
                 false
             }
+            // NOTE/FIXME: shifttab and tab are merging nodes or something similarly weird and idgi
             EditMsg::OnShiftTab => {
                 // move edit focus up one, as sibling of parent
                 // NOTE: does not commit edit - should be able to get away with this?
@@ -293,14 +303,19 @@ impl State {
                             // add current node to grandparent node after parent node
                             let grandparent_node = self.get_node_mut(&grandparent);
 
-                            println!("parent node {:?}, grandparent children {:?}", &parent, &grandparent_node.children);
+                            println!(
+                                "parent node {:?}, grandparent children {:?}",
+                                &parent, &grandparent_node.children
+                            );
 
                             let parent_node_idx = grandparent_node
                                 .children
                                 .iter()
                                 .position(|x| &x.node_id() == &parent)
                                 .expect("parent node id not found in grandparent children, bug");
-                            grandparent_node.children.insert(parent_node_idx + 1, NodeRef::Modified(focused_node));
+                            grandparent_node
+                                .children
+                                .insert(parent_node_idx + 1, NodeRef::Modified(focused_node));
                             drop(grandparent_node);
 
                             let node = self.get_node_mut(&focused_node);
@@ -308,6 +323,35 @@ impl State {
 
                             self.set_parent_nodes_to_modified(focused_node);
                             self.set_parent_nodes_to_modified(parent);
+
+
+                            // FIXME: huge hack, sets focus w/ delay of 50ms so as to get in after re-render
+                            // removeallranges might only work on firefox
+                            js! {
+                                // hax hax hax, but should preserve selection
+                                var sel = window.getSelection();
+                                var start = sel.focusOffset;
+                                console.log("selection start was: ");
+                                console.log(start);
+                                console.log(sel);
+
+                                window.getSelection().removeAllRanges();
+                                document.activeElement.blur();
+
+
+                                setTimeout(function() {
+                                    var tag = document.getElementById("edit-focus");
+                                    var r=new Range();
+                                    var sel=getSelection();
+                                    console.log("attempting to sel edit-focus");
+                                    if (sel.rangeCount == 0) {
+                                        console.log("sel edit-focus");
+                                        r.setStart(tag.childNodes[0], start);
+                                        sel.removeAllRanges();
+                                        sel.addRange(r);
+                                    };
+                                }, 50);
+                            }
 
                             true
                         } else {
@@ -351,6 +395,35 @@ impl State {
                             node.parent = Some(new_parent_node_id.node_id());
 
                             self.set_parent_nodes_to_modified(focused_node); // set as modified from this node to root, will hit old parent + new
+
+                            // FIXME: huge hack, sets focus w/ delay of 50ms so as to get in after re-render
+                            // removeallranges might only work on firefox
+                            js! {
+                                // hax hax hax, but should preserve selection
+                                var sel = window.getSelection();
+                                var start = sel.focusOffset;
+                                console.log("selection start was: ");
+                                console.log(start);
+                                console.log(sel);
+
+                                window.getSelection().removeAllRanges();
+                                document.activeElement.blur();
+
+                                setTimeout(function() {
+                                    var tag = document.getElementById("edit-focus");
+                                    var r=new Range();
+                                    var sel=getSelection();
+                                    console.log("attempting to sel edit-focus");
+                                    if (sel.rangeCount == 0) {
+                                        console.log("sel edit-focus");
+                                        r.setStart(tag.childNodes[0], start);
+                                        sel.removeAllRanges();
+                                        sel.addRange(r);
+                                    };
+                                }, 50);
+                            }
+
+
                             true
                         } else {
                             false
@@ -362,9 +435,20 @@ impl State {
                     false
                 }
             }
-            EditMsg::OnBlur => {
-                self.commit_edit();
-                true
+            EditMsg::OnBlur(id) => {
+                // // only commit if the current edit state is the blurred node,
+                // // to avoid commiting after blurs triggered by code & not user
+                // if self.edit_state.iter().filter(|e| e.node_focus == id).next().is_some() {
+                //     println!("onblur");
+                //     self.commit_edit();
+                //     true
+                // } else {
+                //     println!("onblur noop");
+                //     false
+                // }
+
+                // FIXME: disabling onblur, it caused problems when blur was generated by programatic modification of DOM (moving nodes)
+                false
             }
             EditMsg::OnEnter => {
                 if let Some(es) = self.edit_state.take() {
@@ -385,57 +469,85 @@ impl State {
                         edited.len()
                     );
 
-                    if selection_end == edited.len() {
-                        println!("cursor in last position, commit edit to single node and create new node w/ focus after this one");
-                        // cursor at end of input text, no need to create new node
-                        let node = self.get_node_mut(&focused_node);
+                    println!("split nodes");
+                    // TODO: focus on next node at beginnning instead of on current one
+                    // can now split this node to create a new node based on cursor position as a preceding sibling on the parent node
 
-                        node.header = edited;
-                        self.set_parent_nodes_to_modified(focused_node); // set as modified from this node to root
+                    let node = self.get_node_mut(&focused_node);
+                    node.header = if edited.len() < selection_start {
+                        "".to_string()
                     } else {
-                        // cursor inside text (presumably, outside is fatal error)
-                        if let Some(parent) = self.get_node(&focused_node).parent {
-                            println!("cursor not in last position, not on root node, split nodes");
-                            // TODO: focus on next node at beginnning instead of on current one
-                            // can now split this node to create a new node based on cursor position as a preceding sibling on the parent node
+                        edited[..selection_start].to_string()
+                    };
 
-                            let parent_node = self.get_node(&parent);
-                            let current_node_idx = parent_node
-                                .children
-                                .iter()
-                                .position(|x| &x.node_id() == &focused_node)
-                                .expect("current node id not found in parent children, bug");
 
-                            let node = self.get_node_mut(&focused_node);
-                            node.header = edited[selection_start..].to_string();
+                    // created as immediate predecessor of current node;
+                    let new_node_id = gen_node_id();
 
-                            // created as immediate predecessor of current node;
-                            let new_node_id = gen_node_id();
-                            let parent_node = self.get_node_mut(&parent);
-                            parent_node
-                                .children
-                                .insert(current_node_idx, NodeRef::Modified(new_node_id)); // insert reference to new node
-
-                            let mut new_node = InMemNode {
-                                hash: None,
-                                inner: Node::new(Some(parent)),
-                            };
-                            new_node.header = edited[..selection_start].to_string();
-                            self.nodes.insert(new_node_id, new_node); // insert new node
-
-                            self.set_parent_nodes_to_modified(focused_node); // set as modified from this node to root
-                        } else {
-                            println!("cursor not in last position, but on root node, just commit edit to single node");
-                            // this is the root node, ignore enter and just commit edit
-                            // FIXME/TODO: split out everything after selection as first child instead of sibling
-                            let node = self.get_node_mut(&focused_node);
-                            node.header = edited;
-                            self.set_parent_nodes_to_modified(focused_node); // set as modified from this node to root
+                    let mut new_node = if let Some(parent) = self.get_node(&focused_node).parent {
+                        let parent_node = self.get_node_mut(&parent);
+                        let current_node_idx = parent_node
+                            .children
+                            .iter()
+                            .position(|x| &x.node_id() == &focused_node)
+                            .expect("current node id not found in parent children, bug");
+                        parent_node
+                            .children
+                            .insert(current_node_idx + 1, NodeRef::Modified(new_node_id)); // insert reference to new node
+                        InMemNode {
+                            hash: None,
+                            inner: Node::new(Some(parent)),
                         }
+                    } else {
+                        // on root node, create new child node at position 0
+                        let root_node = self.get_node_mut(&focused_node);
+                        root_node.children.insert(0, NodeRef::Modified(new_node_id)); // insert reference to new node
+                        InMemNode {
+                            hash: None,
+                            inner: Node::new(Some(focused_node)),
+                        }
+                    };
+
+                    let new_node_header = if edited.len() < selection_end {
+                        "".to_string()
+                    } else {
+                        edited[selection_end..].to_string()
+                    };
+
+                    new_node.header = new_node_header.clone();
+
+                    self.nodes.insert(new_node_id, new_node); // insert new node
+
+                    self.set_parent_nodes_to_modified(focused_node); // set as modified from this node to root
+
+                    // FIXME: huge hack, sets focus w/ delay of 100ms so as to get in after re-render
+                    // removeallranges might only work on firefox
+                    js! {
+                        window.getSelection().removeAllRanges();
+                        document.activeElement.blur();
+
+                        setTimeout(function() {
+                            var tag = document.getElementById("edit-focus");
+                            var r=new Range();
+                            var sel=getSelection();
+                            console.log("attempting to sel edit-focus");
+                            if (sel.rangeCount == 0) {
+                                console.log("sel edit-focus");
+                                r.setStart(tag.childNodes[0], 0);
+                                sel.removeAllRanges();
+                                sel.addRange(r);
+                            };
+                        }, 100);
                     }
+
+                    self.edit_state = Some(EditState {
+                        node_focus: new_node_id,
+                        edited_contents: new_node_header,
+                    });
                 } else {
                     println!("on enter w/ no edit state");
                 };
+
 
                 true
             }
@@ -719,7 +831,7 @@ impl State {
             let onblur_msg = if is_saving {
                 Msg::NoOp
             } else {
-                Msg::Edit(EditMsg::OnBlur)
+                Msg::Edit(EditMsg::OnBlur(node_id))
             };
 
             // NOTE: running through full loop on every input event, shouldn't be neccessary - mb just grab contents by id on enter?
@@ -733,24 +845,12 @@ impl State {
                  oninput= self.link.callback( move |e: InputData| Msg::Edit(EditMsg::UpdateEdit(e.value)) )
                  onblur = self.link.callback( move |_| onblur_msg.clone() )
                  onkeypress=self.link.callback( move |e: KeyPressEvent| {
+                        // FIXME: I bet I can delete this
                      if e.key() == "Enter" {
                          println!("suppress enter keypress");
                          e.prevent_default();
                          e.stop_propagation();
                      };
-                     // if is_saving {
-                     //     Msg::NoOp
-                     // } else {
-                     //     match e.key().as_str() {
-                     //         "Enter" => {
-                     //             e.stop_propagation();
-                     //            Msg::Edit(EditMsg::OnEnter)
-                     //         }
-                     //         _ => {
-                     //             Msg::NoOp
-                     //         }
-                     //     }
-                     // }
                      Msg::NoOp
                  })
                  onkeydown=self.link.callback( move |e: KeyDownEvent| {
