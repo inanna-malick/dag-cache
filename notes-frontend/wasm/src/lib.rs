@@ -6,10 +6,8 @@ use dag_store_types::types::validated_tree::ValidatedTree_;
 use notes_types::notes::{CannonicalNode, Node, NodeId, NodeRef, RemoteNodeRef};
 use std::collections::HashMap;
 use stdweb::js;
-use stdweb::unstable::TryInto;
 use stdweb::web::event::IEvent;
 use stdweb::web::*; // FIXME
-use stdweb::Value;
 use yew::events::IKeyboardEvent;
 use yew::events::{KeyDownEvent, KeyPressEvent};
 use yew::format::{Json, Nothing};
@@ -121,7 +119,6 @@ pub enum BackendMsg {
 
 #[derive(serde::Deserialize, Clone, Debug, PartialEq, Properties)]
 pub struct Arg {
-    #[props(required)]
     pub hash: Option<TypedHash<CannonicalNode>>,
 }
 
@@ -765,7 +762,7 @@ impl State {
             },
         );
 
-        let task = self.fetch_service.fetch(request, callback);
+        let task = self.fetch_service.fetch(request, callback).expect("creating task failed");
         self.fetch_tasks.insert(remote_node_ref, task); // stash task handle
     }
 
@@ -999,7 +996,7 @@ impl State {
             },
         );
 
-        let task = self.fetch_service.fetch(request, callback);
+        let task = self.fetch_service.fetch(request, callback).expect("creating task failed");
         self.save_task = Some(task);
     }
 

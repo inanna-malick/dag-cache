@@ -6,7 +6,7 @@ edition = "2018"
 [dependencies]
 serde = "1"
 serde_derive = "1"
-yew = "0.12"
+yew = { version = "0.14", features = ["std_web"] }
 rand = { version = "0.7", features = ["stdweb"] }
 dag-store-types = { path = "../../dag-store-types", features = ["minimal"] }
 notes-types = { path = "../../notes-types" }
