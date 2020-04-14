@@ -100,7 +100,7 @@ pub enum NavigationMsg {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum EditMsg {
-    EnterHeaderEdit { target: NodeId },
+    EnterEdit { target: NodeId },
     UpdateEdit(String),
     OnBlur(NodeId),
     OnEnter,
@@ -260,7 +260,7 @@ impl State {
     fn update_edit(&mut self, msg: EditMsg) -> ShouldRender {
         println!("handle edit msg: {:?}", &msg);
         match msg {
-            EditMsg::EnterHeaderEdit { target } => {
+            EditMsg::EnterEdit { target } => {
                 // commit pre-existing edit if exists
                 if let Some(_) = &self.edit_state {
                     self.commit_edit();
@@ -927,7 +927,9 @@ impl State {
             html! {
                 <div class="note-contents"
                     contentEditable="true"
-                    onclick= self.link.callback( move |_| Msg::Edit(EditMsg::EnterHeaderEdit{target: node_id}) )>
+                    onclick= self.link.callback( move |_| Msg::Edit(EditMsg::EnterEdit{target: node_id}))
+                    onfocus= self.link.callback( move |_| Msg::Edit(EditMsg::EnterEdit{target: node_id}))
+                >
                 { &node.header }
                 </div>
             }

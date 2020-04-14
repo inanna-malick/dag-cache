@@ -87,7 +87,7 @@ pub fn mk_template() -> Handlebars {
             <html>
                 <head>
                     <meta charset=\"utf-8\" />
-                    <title>Yew • Merkle • Notes</title>
+                    <title>Merkle Tree Note App</title>
                     <link rel=\"stylesheet\" href=\"/tree.css\"/ >
                 </head>
                 <body>
