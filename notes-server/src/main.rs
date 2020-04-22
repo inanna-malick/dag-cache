@@ -231,20 +231,15 @@ async fn main() {
         .and(warp::path::param::<String>())
         .map(
             |path: String| match notes_frontend::get_static_asset(&path) {
-                None => Trivial::not_found(),
+                None => {
+                    hyper::Response::builder()
+                        .status(hyper::StatusCode::NOT_FOUND)
+                        .body(hyper::Body::empty())
+                        .unwrap()
+                }
                 Some(blob) => {
                     let len = blob.len() as u64;
-                    // TODO: arbitrary chunk size (1024), revisit later maybe (FIXME)
-                    let stream = futures::stream::iter(blob.chunks(1024).map(|x| {
-                        let res: Result<
-                            &'static [u8],
-                            Box<dyn std::error::Error + Send + Sync + 'static>,
-                        > = Ok(x);
-                        res
-                    }));
-                    let body = hyper::Body::wrap_stream(stream);
-
-                    let mut resp = hyper::Response::new(body);
+                    let mut resp = hyper::Response::new(hyper::Body::from(blob));
 
                     let mime = mime_guess::from_path(path).first_or_octet_stream();
 
@@ -254,8 +249,7 @@ async fn main() {
                     resp.headers_mut()
                         .typed_insert(headers::AcceptRanges::bytes());
 
-                    Trivial(resp)
-                    // Ok(resp)
+                    resp
                 }
             },
         );
@@ -266,28 +260,6 @@ async fn main() {
     warp::serve(routes).run(socket).await;
 }
 
-// FIXME: should be omitable
-#[cfg(feature = "embed-wasm")]
-struct Trivial(hyper::Response<hyper::Body>);
-
-#[cfg(feature = "embed-wasm")]
-impl Trivial {
-    fn not_found() -> Self {
-        let r = hyper::Response::builder()
-            .status(hyper::StatusCode::NOT_FOUND)
-            .body(hyper::Body::empty())
-            .unwrap(); // ASSERTION: builder will never fail
-
-        Trivial(r)
-    }
-}
-
-#[cfg(feature = "embed-wasm")]
-impl warp::Reply for Trivial {
-    fn into_response(self) -> warp::reply::Response {
-        self.0
-    }
-}
 
 #[cfg(test)]
 mod tests {
