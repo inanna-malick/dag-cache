@@ -77,7 +77,7 @@ impl NodeRef {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Serialize, Deserialize, Debug)]
-pub struct RemoteNodeRef(pub NodeId, pub TypedHash<CannonicalNode>);
+pub struct RemoteNodeRef(pub NodeId, pub NoteHash);
 
 // TODO: add field w/ misc structured data or something
 #[derive(PartialEq, Eq, Clone, Serialize, Deserialize, Debug)]
@@ -106,6 +106,9 @@ impl<T> Node<T> {
 // cannonical format (this is what is written to the dag store)
 // TODO: consider exporting _this_ as 'Node', audit usage patterns for this type..
 pub type CannonicalNode = Node<NodeId>;
+
+pub type NoteHash = TypedHash<CannonicalNode>;
+
 impl CannonicalNode {
     pub fn encode(&self) -> Result<Vec<u8>> {
         let res = serde_json::to_vec(self)?;

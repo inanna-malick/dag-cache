@@ -6,6 +6,7 @@ use crate::types::grpc;
 use serde::{Deserialize, Serialize};
 use serde::{Deserializer, Serializer};
 use slice_as_array::slice_to_array_clone;
+use std::str::FromStr;
 
 #[derive(PartialEq, Hash, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Id(pub u128);
@@ -74,7 +75,11 @@ impl Header {
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
 pub struct Hash(pub blake3::Hash);
 
-// TODO: Base58 to/from string fn for URI use
+/// TODO: skip writes, etc for null hash - or mb corresponding null node?
+// NOTE: neither of the below work, but should be viable - PR to blake3?
+/// Magic null hash for empty values (eg null commit)
+pub const NULL_HASH: Hash = Hash(blake3::construct_magic_hash([0; 32]));
+
 impl Hash {
     pub fn to_string_canonical(&self) -> String {
         format!("{}.blake3", self)
@@ -114,6 +119,20 @@ impl Hash {
     }
 }
 
+impl FromStr for Hash {
+    type Err = Base58HashDecodeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::from_base58(s)
+    }
+}
+
+impl std::fmt::Display for Hash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.to_base58().fmt(f)
+    }
+}
+
 impl<'de> Deserialize<'de> for Hash {
     fn deserialize<D>(deserializer: D) -> Result<Hash, D::Error>
     where
@@ -134,15 +153,24 @@ impl Serialize for Hash {
     }
 }
 
-impl std::fmt::Display for Hash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.to_base58().fmt(f)
-    }
-}
-
 // phantom type param used to distinguish between hashes of different types
 #[derive(PartialEq, Eq, Debug)]
 pub struct TypedHash<T>(Hash, std::marker::PhantomData<T>);
+
+impl<T> FromStr for TypedHash<T> {
+    type Err = Base58HashDecodeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let h = Hash::from_base58(s)?;
+        Ok(h.promote())
+    }
+}
+
+impl<T> std::fmt::Display for TypedHash<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.demote().fmt(f)
+    }
+}
 
 // if derived will place unneccessary Clone bound on T
 impl<T> Clone for TypedHash<T> {
@@ -163,6 +191,17 @@ impl<T> std::hash::Hash for TypedHash<T> {
 impl<T> TypedHash<T> {
     pub fn demote(self) -> Hash {
         self.0
+    }
+
+    #[cfg(feature = "grpc")]
+    pub fn into_proto(self) -> grpc::Hash {
+        self.demote().into_proto()
+    }
+
+    #[cfg(feature = "grpc")]
+    pub fn from_proto(p: grpc::Hash) -> Result<Self, ProtoDecodingError> {
+        let h = Hash::from_proto(p)?;
+        Ok(h.promote())
     }
 }
 

@@ -3,6 +3,7 @@ use std::{fs::File, io::prelude::*};
 use structopt::StructOpt;
 use tracing_honeycomb::new_honeycomb_telemetry_layer;
 use tracing_subscriber::{filter::LevelFilter, layer::Layer, registry};
+use std::collections::BTreeMap;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -18,31 +19,6 @@ pub struct Opt {
 
     #[structopt(short = "u", long = "dag_store_url")]
     dag_store_url: String,
-}
-
-pub struct Runtime {
-    pub port: u16,
-    pub dag_store_url: String,
-    pub hb: Handlebars,
-}
-
-impl Runtime {
-    pub fn render<T>(&self, template: WithTemplate<T>) -> impl warp::Reply
-    where
-        T: serde::Serialize,
-    {
-        let body = self
-            .hb
-            .render(template.name, &template.value)
-            .unwrap_or_else(|err| err.to_string());
-
-        warp::reply::html(body)
-    }
-}
-
-pub struct WithTemplate<T: serde::Serialize> {
-    pub name: &'static str,
-    pub value: T,
 }
 
 impl Opt {
@@ -82,6 +58,28 @@ impl Opt {
     }
 }
 
+pub struct Runtime {
+    pub port: u16,
+    pub dag_store_url: String,
+    pub hb: Handlebars,
+}
+
+impl Runtime {
+    pub fn render<T>(&self, t: T) -> impl warp::Reply
+        where
+            T: serde::Serialize,
+    {
+        let mut data = BTreeMap::new();
+        data.insert("initial_state", t);
+        let body = self
+            .hb
+            .render("index.html", &data)
+            .unwrap_or_else(|err| err.to_string());
+
+        warp::reply::html(body)
+    }
+}
+
 pub fn mk_template() -> Handlebars {
     let template = "<!doctype html>
             <html>
@@ -92,7 +90,7 @@ pub fn mk_template() -> Handlebars {
                 </head>
                 <body>
                     <script>
-                        window.starting_hash=\"{{initial_hash}}\";
+                        window.starting_hash={{initial_state}};
                     </script>
                     <script src=\"/notes.js\"></script>
                 </body>
@@ -100,5 +98,6 @@ pub fn mk_template() -> Handlebars {
 
     let mut hb = Handlebars::new();
     hb.register_template_string("index.html", template).unwrap();
+    hb.register_escape_fn(|s| s.to_string());
     hb
 }

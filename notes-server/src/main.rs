@@ -3,14 +3,13 @@
 mod opts;
 use dag_store_types::types::{
     api::{bulk_put, get},
-    domain::{self, Hash},
     grpc::{self, dag_store_client::DagStoreClient},
 };
 #[cfg(feature = "embed-wasm")]
 use headers::HeaderMapExt;
+use notes_types::{api::InitialState, commits::CommitHash};
 use opts::{Opt, Runtime};
 use serde::Serialize;
-use serde_json::json;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
@@ -20,6 +19,7 @@ use tonic::metadata::MetadataValue;
 use tracing::{error, info, instrument};
 use tracing_honeycomb::{current_dist_trace_ctx, register_dist_tracing_root, SpanId, TraceId};
 use warp::{reject, Filter};
+use notes_types::notes::NoteHash;
 
 // TODO: struct w/ domain types & etc
 #[derive(Debug)]
@@ -71,15 +71,13 @@ fn add_tracing_to_meta<T>(request: &mut tonic::Request<T>) {
 #[instrument]
 async fn get_nodes(
     url: String,
-    raw_hash: String,
+    hash: NoteHash,
 ) -> Result<notes_types::api::GetResp, Box<dyn std::error::Error + Send + Sync + 'static>> {
     register_trace_root();
 
     let mut client = DagStoreClient::connect(url)
         .await
         .map_err(|e| Box::new(e))?;
-
-    let hash = Hash::from_base58(&raw_hash).map_err(|e| Box::new(e))?;
 
     let mut request = tonic::Request::new(hash.into_proto());
     add_tracing_to_meta(&mut request);
@@ -90,40 +88,53 @@ async fn get_nodes(
     Ok(response)
 }
 
+// TODO: look at this more later
 #[instrument]
 async fn get_initial_state(
     url: String,
-) -> Result<Option<domain::Hash>, Box<dyn std::error::Error + Send + Sync + 'static>> {
-    println!("get initial state first line");
+) -> Result<InitialState, Box<dyn std::error::Error + Send + Sync + 'static>> {
     register_trace_root();
+
+    info!("getting initial state");
 
     let mut client = DagStoreClient::connect(url)
         .await
         .map_err(|e| Box::new(e))?;
 
-    // TODO: validate base58 here
-    // TODO: dedup cas hash
     let mut request = tonic::Request::new(grpc::GetHashForKeyReq {
         key: notes_types::api::CAS_KEY.to_string(),
     });
     add_tracing_to_meta(&mut request);
 
     let response = client.get_hash_for_key(request).await?;
-    let response = response
+    let opt_commit_hash: Option<CommitHash> = response
         .into_inner()
         .hash
-        .map(|p| domain::Hash::from_proto(p))
+        .map(|p| CommitHash::from_proto(p))
         .transpose()
         .map_err(|e| Box::new(e))?;
 
-    Ok(response)
+    match opt_commit_hash {
+        None => {
+            info!("no known commit hash, starting with fresh initial state");
+            Ok(InitialState::Fresh)
+        },
+        Some(commit_hash) => {
+            info!("got commit hash, fetching commit");
+            let mut request = tonic::Request::new(commit_hash.into_proto());
+            add_tracing_to_meta(&mut request);
+            let response = client.get_node(request).await.map_err(|e| Box::new(e))?;
+            let response = get::Resp::from_proto(response.into_inner()).map_err(|e| Box::new(e))?;
+            InitialState::from_generic(commit_hash, response)
+        }
+    }
 }
 
 #[instrument]
 async fn put_nodes(
     url: String,
     put_req: notes_types::api::PutReq,
-) -> Result<bulk_put::Resp, Box<dyn std::error::Error + Send + Sync + 'static>> {
+) -> Result<notes_types::api::PutResp, Box<dyn std::error::Error + Send + Sync + 'static>> {
     register_trace_root();
 
     let put_req = put_req.into_generic()?;
@@ -133,7 +144,6 @@ async fn put_nodes(
         .await
         .map_err(|e| Box::new(e))?;
 
-    // TODO: validate base58 here
     let mut request = tonic::Request::new(put_req.into_proto());
     add_tracing_to_meta(&mut request);
 
@@ -141,6 +151,7 @@ async fn put_nodes(
 
     // NOTE: no need to use specific repr, hash and client id are generic enough
     let response = bulk_put::Resp::from_proto(response.into_inner()).map_err(|e| Box::new(e))?;
+    let response = notes_types::api::PutResp::from_generic(response)?;
 
     Ok(response)
 }
@@ -154,49 +165,36 @@ async fn main() {
     }
 
     let get_route = warp::path("node")
-        .and(warp::path::param::<String>())
+        .and(warp::path::param::<NoteHash>())
         // .end()
         .and_then({
-            |raw_hash: String| {
-                async move {
-                    let url = get_ctx().dag_store_url.to_string();
-                    let res = get_nodes(url, raw_hash).await;
+            |h: NoteHash| async move {
+                let url = get_ctx().dag_store_url.to_string();
+                let res = get_nodes(url, h).await;
 
-                    match res {
-                        Ok(resp) => Ok(warp::reply::json(&resp)),
-                        Err(e) => {
-                            error!("err on getting nodes: {:?}", e);
-                            Err(reject::custom::<Error>(Error(e)))
-                        }
+                match res {
+                    Ok(resp) => Ok(warp::reply::json(&resp)),
+                    Err(e) => {
+                        error!("err on getting nodes: {:?}", e);
+                        Err(reject::custom::<Error>(Error(e)))
                     }
                 }
             }
         });
 
-    let index_route = warp::get().and(warp::path::end()).and_then(|| {
-        async {
-            let url = get_ctx().dag_store_url.to_string();
-            let res = get_initial_state(url).await;
+    let index_route = warp::get().and(warp::path::end()).and_then(|| async {
+        let url = get_ctx().dag_store_url.to_string();
+        let res = get_initial_state(url).await;
 
-            match res {
-                Ok(resp) => {
-                    info!("initial state resp: {:?}", &resp);
-                    let t = match resp {
-                        Some(h) => crate::opts::WithTemplate {
-                            name: "index.html",
-                            value: json!({ "initial_hash": format!("{}", h) }),
-                        },
-                        None => crate::opts::WithTemplate {
-                            name: "index.html",
-                            value: json!({"initial_hash" : ""}),
-                        },
-                    };
-                    Ok(get_ctx().render(t))
-                }
-                Err(e) => {
-                    error!("err on get initial state: {:?}", e);
-                    Err(reject::custom::<Error>(Error(e)))
-                }
+        match res {
+            Ok(is) => {
+                info!("initial state resp: {:?}", &is);
+                let is = serde_json::to_string(&is).expect("serializing initialstate failed");
+                Ok(get_ctx().render(is))
+            }
+            Err(e) => {
+                error!("err on get initial state: {:?}", e);
+                Err(reject::custom::<Error>(Error(e)))
             }
         }
     });
@@ -206,24 +204,23 @@ async fn main() {
         .and(warp::body::content_length_limit(1024 * 16)) // arbitrary?
         .and(warp::body::json())
         // .end()
-        .and_then(|put_req: notes_types::api::PutReq| {
-            async move {
-                let url = get_ctx().dag_store_url.to_string();
-                let res = put_nodes(url, put_req).await;
+        .and_then(|put_req: notes_types::api::PutReq| async move {
+            let url = get_ctx().dag_store_url.to_string();
+            let res = put_nodes(url, put_req).await;
 
-                match res {
-                    Ok(resp) => Ok(warp::reply::json(&resp)),
-                    Err(e) => {
-                        error!("err on post: {:?}", e);
-                        Err(reject::custom::<Error>(Error(e)))
-                    }
+            match res {
+                Ok(resp) => Ok(warp::reply::json(&resp)),
+                Err(e) => {
+                    error!("err on post: {:?}", e);
+                    Err(reject::custom::<Error>(Error(e)))
                 }
             }
         });
 
     #[cfg(not(feature = "embed-wasm"))]
-    let static_route = warp::get()
-        .and(warp::fs::dir("/home/inanna/dev/dag-store/notes-frontend/wasm/target/deploy"));
+    let static_route = warp::get().and(warp::fs::dir(
+        "/home/inanna/dev/dag-store/notes-frontend/wasm/target/deploy",
+    ));
 
     // TODO: this might not work with nested paths - test that later
     #[cfg(feature = "embed-wasm")]
@@ -231,12 +228,10 @@ async fn main() {
         .and(warp::path::param::<String>())
         .map(
             |path: String| match notes_frontend::get_static_asset(&path) {
-                None => {
-                    hyper::Response::builder()
-                        .status(hyper::StatusCode::NOT_FOUND)
-                        .body(hyper::Body::empty())
-                        .unwrap()
-                }
+                None => hyper::Response::builder()
+                    .status(hyper::StatusCode::NOT_FOUND)
+                    .body(hyper::Body::empty())
+                    .unwrap(),
                 Some(blob) => {
                     let len = blob.len() as u64;
                     let mut resp = hyper::Response::new(hyper::Body::from(blob));
@@ -259,7 +254,6 @@ async fn main() {
     let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), get_ctx().port);
     warp::serve(routes).run(socket).await;
 }
-
 
 #[cfg(test)]
 mod tests {

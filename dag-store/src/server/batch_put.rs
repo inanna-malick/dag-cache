@@ -86,7 +86,8 @@ fn upload_link<'a>(
                 let node = tree.nodes[&id].clone();
 
                 let (size, hash, mut additional_uploaded) =
-                    batch_put_worker(store.clone(), cache.clone(), tree.clone(), node.clone()).await?;
+                    batch_put_worker(store.clone(), cache.clone(), tree.clone(), node.clone())
+                        .await?;
                 let hdr = Header { id, size, hash };
                 additional_uploaded.push((id, hdr.hash.clone()));
                 Ok((hdr, additional_uploaded))

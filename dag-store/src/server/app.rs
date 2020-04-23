@@ -32,9 +32,7 @@ impl Runtime {
             e
         })?;
 
-        let resp =
-            opportunistic_get::get(&self.hashed_blob_store, &self.cache, request)
-                .await?;
+        let resp = opportunistic_get::get(&self.hashed_blob_store, &self.cache, request).await?;
 
         let resp = resp.into_proto();
         let resp = Response::new(resp);
@@ -53,12 +51,7 @@ impl Runtime {
 
         info!("dag cache put handler"); //TODO,, better log msgs
 
-        let hash = put_and_cache(
-            &self.hashed_blob_store,
-            &self.cache,
-            domain_node,
-        )
-        .await?;
+        let hash = put_and_cache(&self.hashed_blob_store, &self.cache, domain_node).await?;
         let proto_hash = hash.into_proto();
         let resp = Response::new(proto_hash);
         Ok(resp)

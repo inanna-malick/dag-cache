@@ -1,9 +1,9 @@
 #![recursion_limit = "512"]
 
-use dag_store_types::types::api as api_types;
-use dag_store_types::types::domain::TypedHash;
 use dag_store_types::types::validated_tree::ValidatedTree_;
-use notes_types::notes::{CannonicalNode, Node, NodeId, NodeRef, RemoteNodeRef};
+use notes_types::api::InitialState;
+use notes_types::commits::CommitHash;
+use notes_types::notes::{CannonicalNode, NoteHash, Node, NodeId, NodeRef, RemoteNodeRef};
 use std::collections::HashMap;
 use stdweb::js;
 use stdweb::web::event::IEvent;
@@ -35,7 +35,7 @@ macro_rules! println {
 // NOTE: optional hash indicates if node is modified or not
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct InMemNode {
-    hash: Option<TypedHash<CannonicalNode>>,
+    hash: Option<NoteHash>,
     inner: Node<NodeRef>,
 }
 
@@ -64,11 +64,8 @@ pub struct EditState {
 pub struct State {
     nodes: HashMap<NodeId, InMemNode>, // note: node ref's can contain stale hashes.. is ok?
     root_node: NodeRef, // NOTE: can contain stale hashes.. is this the wrong way to store root? mb just node id?
-    // TODO: maintain in-memory navigation stack to enable navigating back (navigating to parent isn't safe w/o hash b/c remote nodes
     focus_node: NodeRef, // to allow zooming in on subnodes
-    // node (header or body) being edited, as property of state & note node tree
-    // focus includes path to root from that node
-    last_known_hash: Option<TypedHash<CannonicalNode>>, // for CAS
+    last_known_hash: Option<CommitHash>, // for CAS, always present, may sometimes be null hash for fresh
     // concept: have this be EditState | KeyboardNavFocusState
     edit_state: Option<EditState>,
     fetch_service: FetchService,
@@ -114,23 +111,31 @@ pub enum BackendMsg {
     Fetch(RemoteNodeRef),                                    // HTTP fetch from store
     FetchComplete(RemoteNodeRef, notes_types::api::GetResp), // HTTP fetch from store (domain type)
     StartSave, // init backup of everything in store - blocking operation, probably
-    SaveComplete(api_types::bulk_put::Resp),
+    SaveComplete(notes_types::api::PutResp),
 }
 
-#[derive(serde::Deserialize, Clone, Debug, PartialEq, Properties)]
-pub struct Arg {
-    pub hash: Option<TypedHash<CannonicalNode>>,
+#[derive(Clone)]
+pub struct IgnoringProperties<T>(pub T);
+
+// I don't want to implement a builder for my properties struct
+impl<T: Clone> Properties for IgnoringProperties<T> {
+    type Builder = ();
+
+    fn builder() -> Self::Builder {
+        ()
+    }
 }
 
 impl Component for State {
     type Message = Msg;
-    type Properties = Arg;
+    type Properties = IgnoringProperties<InitialState>;
 
-    fn create(opt_hash: Self::Properties, link: ComponentLink<Self>) -> Self {
+    fn create(initial_state: Self::Properties, link: ComponentLink<Self>) -> Self {
+        println!("init state");
         let mut nodes = HashMap::new();
 
-        let (root_node, last_known_hash, edit_state) = match opt_hash {
-            Arg { hash: None } => {
+        let (root_node, last_known_hash, edit_state) = match initial_state.0 {
+            InitialState::Fresh => {
                 let fresh_root = InMemNode {
                     hash: None,             // not persisted
                     inner: Node::new(None), // None b/c node is root (no parent)
@@ -144,11 +149,24 @@ impl Component for State {
 
                 (NodeRef::Modified(id), None, Some(es))
             }
-            Arg { hash: Some(h) } => (
-                NodeRef::Unmodified(RemoteNodeRef(NodeId::root(), h)),
-                Some(h),
-                None,
-            ),
+            InitialState::Persisted {
+                commit,
+                commit_hash,
+                extra_nodes,
+            } => {
+                for (node_ref, node) in extra_nodes.into_iter() {
+                    let node = InMemNode {
+                        hash: Some(node_ref.1),
+                        inner: node.map(NodeRef::Unmodified),
+                    };
+                    nodes.insert(node_ref.0, node);
+                }
+                (
+                    NodeRef::Unmodified(RemoteNodeRef(NodeId::root(), commit.root_note)),
+                    Some(commit_hash),
+                    None,
+                )
+            }
         };
 
         // repeatedly wake up save process - checks root node, save (recursively) if modifed
@@ -158,7 +176,7 @@ impl Component for State {
         let save_interval = std::time::Duration::new(20, 0);
         let interval_task = interval_service.spawn(save_interval, callback);
 
-        let mut s = State {
+        State {
             nodes: nodes,
             focus_node: root_node,
             root_node,
@@ -172,13 +190,7 @@ impl Component for State {
             interval_service,
             interval_task,
             expanded_nodes: HashMap::new(),
-        };
-
-        if let NodeRef::Unmodified(root_node) = s.root_node {
-            s.start_fetch(root_node);
         }
-
-        s
     }
 
     fn update(&mut self, msg: Self::Message) -> ShouldRender {
@@ -322,7 +334,6 @@ impl State {
                             self.set_parent_nodes_to_modified(focused_node);
                             self.set_parent_nodes_to_modified(parent);
 
-
                             // FIXME: huge hack, sets focus w/ delay of 50ms so as to get in after re-render
                             // removeallranges might only work on firefox
                             js! {
@@ -421,7 +432,6 @@ impl State {
                                 }, 50);
                             }
 
-
                             true
                         } else {
                             false
@@ -433,7 +443,7 @@ impl State {
                     false
                 }
             }
-            EditMsg::OnBlur(id) => {
+            EditMsg::OnBlur(_id) => {
                 // // only commit if the current edit state is the blurred node,
                 // // to avoid commiting after blurs triggered by code & not user
                 // if self.edit_state.iter().filter(|e| e.node_focus == id).next().is_some() {
@@ -455,7 +465,7 @@ impl State {
                     if es.edited_contents.len() == 0 {
                         let node = self.get_node(&focused_node);
                         println!("and it has no subnodes, {:?}", node.children);
-                        if node.children.len() ==0 {
+                        if node.children.len() == 0 {
                             println!("and it's not the root node");
                             if let Some(parent) = node.parent {
                                 println!("then delete it from its parent's children vector");
@@ -468,14 +478,13 @@ impl State {
                                 self.nodes
                                     .remove(&focused_node)
                                     .expect("error - attempting to delete nonexisting node");
-
                             }
 
                             // drop the edit state
                             self.edit_state = None;
 
                             // and redraw
-                            return true
+                            return true;
                         }
                     }
                 }
@@ -511,7 +520,6 @@ impl State {
                     } else {
                         edited[..selection_start].to_string()
                     };
-
 
                     // created as immediate predecessor of current node;
                     let new_node_id = gen_node_id();
@@ -579,7 +587,6 @@ impl State {
                 } else {
                     println!("on enter w/ no edit state");
                 };
-
 
                 true
             }
@@ -667,7 +674,7 @@ impl State {
 
                     let req = notes_types::api::PutReq {
                         tree,
-                        cas_hash: self.last_known_hash,
+                        parent_hash: self.last_known_hash,
                     };
 
                     self.push_nodes(req);
@@ -679,30 +686,36 @@ impl State {
                 }
             }
             // TODO: handle CAS violation, currently will just explode, lmao
-            // kinda gnarly, basically just writes every saved node to the nodes store and in the process wipes out the modified nodes
-            BackendMsg::SaveComplete(resp) => {
+            // kinda gnarly, basically just writes every saved node to the nodes store and in the process wipes out the modified nodes (maybe, not really sure re this anymore)
+            BackendMsg::SaveComplete(notes_types::api::PutResp::MergeConflict(s)) => {
+                panic!("unhandled merge conflict: {}", s);
+            }
+            BackendMsg::SaveComplete(notes_types::api::PutResp::Success {
+                additional_uploaded,
+                new_commit_hash,
+                new_root_hash,
+            }) => {
                 let root_id = NodeId::root();
 
                 self.save_task = None; // re-enable updates
-                let root_hash = resp.root_hash.promote::<CannonicalNode>();
-                self.last_known_hash = Some(root_hash); // set last known hash for future CAS use
-                let root_node_ref = RemoteNodeRef(root_id, root_hash);
+
+                self.last_known_hash = Some(new_commit_hash); // set last known hash for future CAS use
+                let root_node_ref = RemoteNodeRef(root_id, new_root_hash);
                 // update entry point to newly-persisted root node
                 self.root_node = NodeRef::Unmodified(root_node_ref);
 
                 // build client id -> hash map for lookups
                 let mut node_id_to_hash = HashMap::new();
-                for (id, hash) in resp.additional_uploaded.clone().into_iter() {
-                    node_id_to_hash.insert(NodeId::from_generic(id).unwrap(), hash);
+                for (id, hash) in additional_uploaded.clone().into_iter() {
+                    node_id_to_hash.insert(id, hash);
                 }
 
                 // update root node with hash
                 let mut node = self.get_node_mut(&root_id);
-                node.hash = Some(root_hash);
+                node.hash = Some(new_root_hash);
 
-                for (id, hash) in resp.additional_uploaded.into_iter() {
+                for (id, hash) in additional_uploaded.into_iter() {
                     let hash = hash.promote::<CannonicalNode>();
-                    let id = NodeId::from_generic(id).unwrap(); // FIXME - type conversion gore
                     let mut node = self.get_node_mut(&id);
                     node.hash = Some(hash);
                     if let Some(parent_id) = node.parent {
@@ -743,7 +756,7 @@ impl State {
     fn start_fetch(&mut self, remote_node_ref: RemoteNodeRef) {
         let request = Request::get(format!(
             "/node/{}",
-            (remote_node_ref.1.to_base58()).to_string()
+            remote_node_ref.1
         ))
         .body(Nothing)
         .expect("fetch req builder failed");
@@ -762,7 +775,10 @@ impl State {
             },
         );
 
-        let task = self.fetch_service.fetch(request, callback).expect("creating task failed");
+        let task = self
+            .fetch_service
+            .fetch(request, callback)
+            .expect("creating task failed");
         self.fetch_tasks.insert(remote_node_ref, task); // stash task handle
     }
 
@@ -982,7 +998,7 @@ impl State {
             .expect("push node request");
 
         let callback = self.link.callback(
-            move |response: Response<Json<Result<api_types::bulk_put::Resp, anyhow::Error>>>| {
+            move |response: Response<Json<Result<notes_types::api::PutResp, anyhow::Error>>>| {
                 let (meta, Json(res)) = response.into_parts();
                 if let Ok(body) = res {
                     if meta.status.is_success() {
@@ -996,7 +1012,10 @@ impl State {
             },
         );
 
-        let task = self.fetch_service.fetch(request, callback).expect("creating task failed");
+        let task = self
+            .fetch_service
+            .fetch(request, callback)
+            .expect("creating task failed");
         self.save_task = Some(task);
     }
 

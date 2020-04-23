@@ -1,9 +1,9 @@
+use ignore::Walk;
 use std::env;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
-use ignore::Walk;
 
 // NOTE: currently only tested with flat deploy dir
 fn main() {
@@ -20,8 +20,7 @@ fn main() {
 
     let mut cmd = Command::new("cargo");
 
-    cmd
-        .arg("web")
+    cmd.arg("web")
         .arg("deploy")
         .arg("--output")
         .arg(dest_path.to_str().unwrap());
@@ -32,9 +31,7 @@ fn main() {
 
     cmd.current_dir(current_dir.join("wasm"));
 
-    let output =
-        cmd.output()
-        .expect("failed to execute cargo web deploy");
+    let output = cmd.output().expect("failed to execute cargo web deploy");
 
     if !output.status.success() {
         std::io::stdout().write_all(&output.stdout).unwrap();
@@ -71,18 +68,22 @@ fn main() {
         })
         .collect::<Vec<String>>();
 
-    output_lines.append(&mut vec![ "lazy_static! {".to_string()
-            , "static ref WASM: std::collections::HashMap<&'static str, &'static [u8]> = {".to_string()
-            , "let mut m = std::collections::HashMap::new();".to_string()
-            ]);
+    output_lines.append(&mut vec![
+        "lazy_static! {".to_string(),
+        "static ref WASM: std::collections::HashMap<&'static str, &'static [u8]> = {".to_string(),
+        "let mut m = std::collections::HashMap::new();".to_string(),
+    ]);
 
     let mut hashmap_entries: Vec<String> = blobs
         .iter()
         .map(|(src_path, identifier, _)| format!(r#"m.insert("{}", {});"#, src_path, identifier))
         .collect();
     output_lines.append(&mut hashmap_entries);
-    output_lines.append(&mut vec!["m".to_string(), "};".to_string(), "}".to_string()]);
-
+    output_lines.append(&mut vec![
+        "m".to_string(),
+        "};".to_string(),
+        "}".to_string(),
+    ]);
 
     f.write_all(&output_lines.join("\n").into_bytes()).unwrap();
 
