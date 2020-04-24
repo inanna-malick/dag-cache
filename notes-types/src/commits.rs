@@ -38,7 +38,8 @@ impl CannonicalCommit {
             .map(|(i, h)| {
                 let hdr = domain::Header {
                     size: 0, // TODO: FIXME impl or drop size field. idk.
-                    id: domain::Id(i as u128),
+                    // +1 here because 0 is reserved as magic root id for root note
+                    id: domain::Id(i as u128 + 1), //arbitrary id assignation for parent commits
                     hash: h.demote(),
                 };
                 api::bulk_put::NodeLink::Remote(hdr)

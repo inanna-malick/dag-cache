@@ -149,7 +149,6 @@ async fn put_nodes(
 
     let response = client.put_nodes(request).await.map_err(|e| Box::new(e))?;
 
-    // NOTE: no need to use specific repr, hash and client id are generic enough
     let response = bulk_put::Resp::from_proto(response.into_inner()).map_err(|e| Box::new(e))?;
     let response = notes_types::api::PutResp::from_generic(response)?;
 
