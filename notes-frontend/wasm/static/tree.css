@@ -9,6 +9,8 @@ div.menu {
     vertical-align: top;
     display: inline-block;
     padding-left: 40px;
+    padding-top: 2px;
+    padding-bottom: 2px;
     position: relative;
     top: 0px;
     left: 0px;
@@ -24,7 +26,10 @@ div.menu span.submenu{
 }
 div.menu:hover span.submenu{
     display: inline-block;
-    width: 40px;
+}
+div.menu:not(hover) {
+    border-top: 1px solid #ffffff;
+    border-left: 1px solid #ffffff;
 }
 div.menu a{
     padding: 2px;
@@ -56,7 +61,7 @@ div.note-contents {
 }
 
 div.note-children {
-    padding-left: 10px;
+    padding-left: 20px;
 }
 
 .note-contents textarea {
