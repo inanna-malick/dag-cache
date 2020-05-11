@@ -1,9 +1,0 @@
-#!/bin/bash
-set -euxo pipefail
-
-
-# build notes-server inside docker container
-docker run -v $PWD:/volume -v $PWD/../honeycomb-tracing:/honeycomb-tracing -v cargo-cache:/root/.cargo/registry --rm -t clux/muslrust cargo build --bin notes-server --target x86_64-unknown-linux-musl --release
-
-mkdir -p bin
-cp target/x86_64-unknown-linux-musl/release/notes-server bin/notes-server

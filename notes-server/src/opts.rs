@@ -1,9 +1,12 @@
 use handlebars::Handlebars;
-use std::{fs::File, io::prelude::*};
 use structopt::StructOpt;
-use tracing_honeycomb::new_honeycomb_telemetry_layer;
-use tracing_subscriber::{filter::LevelFilter, layer::Layer, registry};
 use std::collections::BTreeMap;
+use tracing_jaeger::{
+    new_opentelemetry_layer
+};
+use tracing_subscriber::registry;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::filter::LevelFilter;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -14,8 +17,8 @@ pub struct Opt {
     #[structopt(short = "p", long = "port")]
     port: u16,
 
-    #[structopt(short = "h", long = "honeycomb_key_file")]
-    honeycomb_key_file: String,
+    #[structopt(short = "j", long = "jaeger-agent")]
+    jaeger_agent: String,
 
     #[structopt(short = "u", long = "dag_store_url")]
     dag_store_url: String,
@@ -23,30 +26,26 @@ pub struct Opt {
 
 impl Opt {
     pub fn into_runtime(self) -> Runtime {
-        let mut file =
-            File::open(self.honeycomb_key_file).expect("failed opening honeycomb key file");
-        let mut honeycomb_key = String::new();
-        file.read_to_string(&mut honeycomb_key)
-            .expect("failed reading honeycomb key file");
 
-        let honeycomb_config = libhoney::Config {
-            options: libhoney::client::Options {
-                api_key: honeycomb_key,
-                dataset: "dag-cache".to_string(), // TODO: better name for this
-                ..libhoney::client::Options::default()
-            },
-            transmission_options: libhoney::transmission::Options {
-                max_batch_size: 1,
-                ..libhoney::transmission::Options::default()
-            },
-        };
+        let exporter = opentelemetry_jaeger::Exporter::builder()
+            .with_agent_endpoint(self.jaeger_agent.parse().unwrap())
+            .with_process(opentelemetry_jaeger::Process {
+                service_name: "notes-server".to_string(),
+                tags: vec![],
+            })
+            .init()
+            .unwrap();
 
-        let telemetry_layer = new_honeycomb_telemetry_layer("notes-server", honeycomb_config);
+        let telemetry_layer = new_opentelemetry_layer(
+            "notes-server", // TODO: duplication of service name here
+            Box::new(exporter),
+            Default::default(),
+        );
 
-        let subscriber = telemetry_layer // publish to tracing
-            .and_then(tracing_subscriber::fmt::Layer::builder().finish()) // log to stdout
-            .and_then(LevelFilter::INFO) // omit low-level debug tracing (eg tokio executor)
-            .with_subscriber(registry::Registry::default()); // provide underlying span data store
+        let subscriber = registry::Registry::default() // provide underlying span data store
+            .with(LevelFilter::INFO) // filter out low-level debug tracing (eg tokio executor)
+            .with(tracing_subscriber::fmt::Layer::default()) // log to stdout
+            .with(telemetry_layer); // publish to honeycomb backend
 
         tracing::subscriber::set_global_default(subscriber).expect("setting global default failed");
 

@@ -1,9 +1,10 @@
 #!/bin/bash
 set -euxo pipefail
 
-cargo run --bin dag-store -- --honeycomb_key_file honeycomb.key \
+
+target/release/dag-store --jaeger-agent localhost:6831 \
               --fs_path tmpdir &
-cargo run --bin notes-server -- --honeycomb_key_file honeycomb.key \
+target/release/notes-server --jaeger-agent localhost:6831 \
                  --dag_store_url http://localhost:8088 \
                  -p 3030 &
 

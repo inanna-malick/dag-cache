@@ -17,9 +17,10 @@ use std::{
 use structopt::StructOpt;
 use tonic::metadata::MetadataValue;
 use tracing::{error, info, instrument};
-use tracing_honeycomb::{current_dist_trace_ctx, register_dist_tracing_root, SpanId, TraceId};
+use tracing_jaeger::{current_dist_trace_ctx, register_dist_tracing_root, TraceId};
 use warp::{reject, Filter};
 use notes_types::notes::NoteHash;
+use uuid::Uuid;
 
 // TODO: struct w/ domain types & etc
 #[derive(Debug)]
@@ -48,7 +49,9 @@ fn get_ctx() -> Arc<Runtime> {
 
 fn register_trace_root() {
     println!("register trace root");
-    let trace_id = TraceId::generate();
+    let trace_id = Uuid::new_v4().to_u128_le();
+    let trace_id = TraceId::from_u128(trace_id);
+
     register_dist_tracing_root(trace_id, None).unwrap();
     println!("register trace root done");
 }
@@ -59,12 +62,12 @@ fn add_tracing_to_meta<T>(request: &mut tonic::Request<T>) {
     let (trace_id, span_id) = current_dist_trace_ctx().unwrap();
 
     meta.insert(
-        TraceId::meta_field_name(),
-        MetadataValue::from_str(&trace_id.to_string()).unwrap(),
+        "trace-id",
+        MetadataValue::from_str(&trace_id.to_u128().to_string()).unwrap(),
     );
     meta.insert(
-        SpanId::meta_field_name(),
-        MetadataValue::from_str(&span_id.to_string()).unwrap(),
+        "span-id",
+        MetadataValue::from_str(&span_id.to_u64().to_string()).unwrap(),
     );
 }
 

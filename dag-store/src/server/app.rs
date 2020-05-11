@@ -9,10 +9,12 @@ use dag_store_types::types::{
         GetResp, Hash, Node,
     },
 };
-use std::{str::FromStr, sync::Arc};
 use tonic::{Code, Request, Response, Status};
 use tracing::{event, info, instrument, Level};
-use tracing_honeycomb::{register_dist_tracing_root, SpanId, TraceId};
+use tracing_jaeger::{register_dist_tracing_root, SpanId, TraceId};
+use std::{str::FromStr, sync::Arc};
+use uuid::Uuid;
+
 
 // TODO (maybe): parameterize over E where E is the underlying error type (different for txn vs. main scope)
 pub struct Runtime {
@@ -132,10 +134,11 @@ impl DagStore for Runtime {
 /// Extract a tracing id from the provided metadata
 fn extract_tracing_id_and_record(meta: &tonic::metadata::MetadataMap) -> Result<(), Status> {
     match (
-        meta.get(TraceId::meta_field_name()),
-        meta.get(SpanId::meta_field_name()),
+        meta.get("trace-id"),
+        meta.get("span-id"),
     ) {
         (Some(trace_id), Some(parent_span_id)) => {
+
             let trace_id = trace_id.to_str().map_err(|e| {
                 event!(Level::ERROR, msg = "trace id metadata not valid ascii", error = ?e);
                 Status::new(
@@ -143,7 +146,7 @@ fn extract_tracing_id_and_record(meta: &tonic::metadata::MetadataMap) -> Result<
                     format!("trace id metadata not valid ascii, {:?}", e),
                 )
             })?;
-            let trace_id = TraceId::from_str(trace_id).map_err(|e| {
+            let trace_id = u128::from_str(trace_id).map(TraceId::from_u128).map_err(|e| {
                 event!(Level::ERROR, msg = "died parsing trace id from metadata", error = ?e);
                 Status::new(
                     Code::InvalidArgument,
@@ -158,7 +161,7 @@ fn extract_tracing_id_and_record(meta: &tonic::metadata::MetadataMap) -> Result<
                     format!("parent span id metadata not valid ascii, {:?}", e),
                 )
             })?;
-            let parent_span_id = SpanId::from_str(parent_span_id).map_err(|e| {
+            let parent_span_id = u64::from_str(parent_span_id).map(SpanId::from_u64).map_err(|e| {
                 event!(Level::ERROR, msg = "died parsing span id from metadata", error = ?e);
                 Status::new(
                     Code::InvalidArgument,
@@ -183,7 +186,9 @@ fn extract_tracing_id_and_record(meta: &tonic::metadata::MetadataMap) -> Result<
         }
         (None, None) => {
             // register as top-level trace root
-            let trace_id = TraceId::generate();
+            let trace_id = Uuid::new_v4().to_u128_le();
+            let trace_id = TraceId::from_u128(trace_id);
+
             register_dist_tracing_root(trace_id, None).unwrap();
 
             Ok(())

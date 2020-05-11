@@ -78,7 +78,7 @@ pub struct Hash(pub blake3::Hash);
 /// TODO: skip writes, etc for null hash - or mb corresponding null node?
 // NOTE: neither of the below work, but should be viable - PR to blake3?
 /// Magic null hash for empty values (eg null commit)
-pub const NULL_HASH: Hash = Hash(blake3::construct_magic_hash([0; 32]));
+// pub const NULL_HASH: Hash = Hash(blake3::construct_magic_hash([0; 32]));
 
 impl Hash {
     pub fn to_string_canonical(&self) -> String {
