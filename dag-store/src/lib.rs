@@ -14,7 +14,7 @@ pub async fn run(
     addr: SocketAddr,
 ) -> Result<(), Box<dyn std::error::Error + 'static>> {
     Server::builder()
-        .add_service(DagStoreServer::new(runtime))
+        .add_service(DagStoreServer::new(runtime).accept_gzip().send_gzip())
         .serve(addr)
         .await?;
 
