@@ -29,11 +29,11 @@ futures = "0.3.4"
 
 bytes = "0.4"
 
-prost = "0.6.1"
-prost-derive = "0.6.1"
+prost = "0.8"
+prost-derive = "0.8"
 
-tokio = { version = "0.2", features = ["macros"] }
-tonic = "0.1.1"
+tokio = { version = "1.11", features = ["macros", "rt-multi-thread"] }
+tonic = { version = "0.5.2", features = ["compression"]}
 
 tower-service = "0.2"
 tower-util = "0.1"

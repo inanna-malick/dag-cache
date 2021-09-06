@@ -49,7 +49,7 @@ async fn batch_get_worker(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
     hash: Hash,
-    mut resp_chan: mpsc::Sender<Result<Node, DagCacheError>>,
+    resp_chan: mpsc::Sender<Result<Node, DagCacheError>>,
     to_populate: Arc<CHashMap<Hash, ()>>, // used to memoize async fetches
 ) {
     let res = get_and_cache(&store, &cache, hash).await;

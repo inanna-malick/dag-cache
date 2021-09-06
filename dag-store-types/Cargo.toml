@@ -13,9 +13,9 @@ minimal = []
 base64 = "0.10.1"
 base58 = "0.1.0"
 bytes = "0.4"
-prost = {version = "0.6.1", optional = true }
-prost-derive = {version = "0.6.1", optional = true }
-tonic = { version = "0.1.1", features = [], optional = true }
+prost = {version = "0.8", optional = true }
+prost-derive = {version = "0.8", optional = true }
+tonic = { version = "0.5.1", features = ["compression"], optional = true}
 serde = { version = "1.0.91", features = ["derive"] }
 blake3 = { path = "../../BLAKE3" }
 slice_as_array = "1.1.0"
@@ -24,5 +24,6 @@ slice_as_array = "1.1.0"
 rand = "0.7"
 
 [build-dependencies]
-
-tonic-build = { version = "0.1.1", features = ["transport"], default-features = false }
+# TODO: not sure why this is causing it to not find compile_protos
+# tonic-build = { version = "0.1.1", features = ["transport"], default-features = false }
+tonic-build = { version = "0.5.2", features = ["compression"] }

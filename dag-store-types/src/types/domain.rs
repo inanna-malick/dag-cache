@@ -38,7 +38,6 @@ impl std::fmt::Display for Id {
 pub struct Header {
     pub id: Id,
     pub hash: Hash,
-    pub size: u64,
 }
 
 impl Header {
@@ -47,7 +46,6 @@ impl Header {
         grpc::Header {
             id: Some(self.id.into_proto()),
             hash: Some(self.hash.into_proto()),
-            size: self.size,
         }
     }
 
@@ -64,7 +62,6 @@ impl Header {
         let id = Id::from_proto(id)?;
 
         let hdr = Header {
-            size: p.size,
             hash,
             id,
         };
@@ -75,10 +72,12 @@ impl Header {
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
 pub struct Hash(pub blake3::Hash);
 
+
+// TODO: impl this
 /// TODO: skip writes, etc for null hash - or mb corresponding null node?
 // NOTE: neither of the below work, but should be viable - PR to blake3?
 /// Magic null hash for empty values (eg null commit)
-pub const NULL_HASH: Hash = Hash(blake3::construct_magic_hash([0; 32]));
+// pub const NULL_HASH: Hash = Hash(blake3::hash(&[]));
 
 impl Hash {
     pub fn to_string_canonical(&self) -> String {
@@ -245,7 +244,6 @@ impl Node {
         for link in self.links.iter() {
             hasher.update(&link.id.0.to_be_bytes());
             hasher.update(link.hash.0.as_bytes());
-            hasher.update(&link.size.to_be_bytes());
         }
         hasher.update(&self.data.0);
         let hash = hasher.finalize();

@@ -84,7 +84,8 @@ impl Runtime {
         Ok(resp)
     }
 
-    #[instrument(skip(self, request))] // skip potentially-large request (TODO record stats w/o full message body)
+    // TODO: corresponding put method
+    #[instrument(skip(self))]
     async fn get_hash_for_key_handler(
         &self,
         request: Request<GetHashForKeyReq>,

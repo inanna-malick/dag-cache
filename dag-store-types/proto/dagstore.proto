@@ -83,7 +83,6 @@ message Hash {
 message Header {
   Id id = 1;
   Hash hash = 2;
-  uint64 size = 3;
 }
 
 message Node {

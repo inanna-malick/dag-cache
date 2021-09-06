@@ -59,7 +59,7 @@ pub async fn batch_put_cata<'a>(
     let focus = tree.root_node.clone();
     let tree = Arc::new(tree);
     // NOTE: should not need to clone here
-    let (_size, root_hash, additional_uploaded) =
+    let (root_hash, additional_uploaded) =
         batch_put_worker(store.clone(), cache.clone(), tree, focus).await?; // TODO: don't panic on join error
     Ok(bulk_put::Resp {
         root_hash,
@@ -85,10 +85,10 @@ fn upload_link<'a>(
                 // unhandled deref failure, known to be safe b/c of validated tree wrapper
                 let node = tree.nodes[&id].clone();
 
-                let (size, hash, mut additional_uploaded) =
+                let (hash, mut additional_uploaded) =
                     batch_put_worker(store.clone(), cache.clone(), tree.clone(), node.clone())
                         .await?;
-                let hdr = Header { id, size, hash };
+                let hdr = Header { id, hash };
                 additional_uploaded.push((id, hdr.hash.clone()));
                 Ok((hdr, additional_uploaded))
             }
@@ -106,10 +106,8 @@ async fn batch_put_worker(
     // OR NOT: struct is quite small, even if the owned-by-it vec of u8/vec of links is big
     // TODO: ask rain
     node: bulk_put::Node,
-) -> Result<(u64, Hash, Vec<(Id, Hash)>), DagCacheError> {
+) -> Result<(Hash, Vec<(Id, Hash)>), DagCacheError> {
     let bulk_put::Node { data, links } = node;
-
-    let size = data.0.len() as u64;
 
     // let link_uploads: Vec<tokio::task::JoinHandle<>> = links
     let link_uploads: Vec<
@@ -132,11 +130,8 @@ async fn batch_put_worker(
     let links = links.into_iter().map(|x| x.0).collect();
     let dag_node = Node { data, links };
 
-    // might be a bit of an approximation, but w/e
-    let size = size + dag_node.links.iter().map(|x| x.size).sum::<u64>();
-
     let hash = put_and_cache(&store, &cache, dag_node).await?;
-    Ok((size, hash, additional_uploaded))
+    Ok((hash, additional_uploaded))
 }
 
 #[cfg(test)]
