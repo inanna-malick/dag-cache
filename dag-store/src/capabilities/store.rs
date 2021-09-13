@@ -82,7 +82,7 @@ fn decode(hash: sled::IVec) -> Hash {
 }
 
 fn encode(hash: Hash) -> Vec<u8> {
-    hash.0.as_bytes().to_vec()
+    hash.0.as_slice().to_vec()
 }
 
 #[tonic::async_trait]

@@ -1,3 +1,4 @@
+use generic_array::GenericArray;
 use crate::types::encodings::{Base58, Base64};
 #[cfg(feature = "grpc")]
 use crate::types::errors::ProtoDecodingError;
@@ -5,25 +6,22 @@ use crate::types::errors::ProtoDecodingError;
 use crate::types::grpc;
 use serde::{Deserialize, Serialize};
 use serde::{Deserializer, Serializer};
-use slice_as_array::slice_to_array_clone;
 use std::str::FromStr;
 
+
 #[derive(PartialEq, Hash, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
-pub struct Id(pub u128);
+pub struct Id(pub u32);
 
 impl Id {
     #[cfg(feature = "grpc")]
     pub fn from_proto(p: grpc::Id) -> Result<Self, ProtoDecodingError> {
-        slice_to_array_clone!(&p.id, [u8; 16])
-            .ok_or(ProtoDecodingError("bad hash length".to_string()))
-            .map(u128::from_be_bytes)
-            .map(Self)
+        Ok(Id(p.id_data))
     }
 
     #[cfg(feature = "grpc")]
     pub fn into_proto(self) -> grpc::Id {
         grpc::Id {
-            id: self.0.to_be_bytes().to_vec(),
+            id_data: self.0,
         }
     }
 }
@@ -44,19 +42,19 @@ impl Header {
     #[cfg(feature = "grpc")]
     pub fn into_proto(self) -> grpc::Header {
         grpc::Header {
-            id: Some(self.id.into_proto()),
-            hash: Some(self.hash.into_proto()),
+            header_id: Some(self.id.into_proto()),
+            header_hash: Some(self.hash.into_proto()),
         }
     }
 
     #[cfg(feature = "grpc")]
     pub fn from_proto(p: grpc::Header) -> Result<Self, ProtoDecodingError> {
-        let hash = p.hash.ok_or(ProtoDecodingError(
+        let hash = p.header_hash.ok_or(ProtoDecodingError(
             "hash field not present on Header proto".to_string(),
         ))?;
         let hash = Hash::from_proto(hash)?;
 
-        let id = p.id.ok_or(ProtoDecodingError(
+        let id = p.header_id.ok_or(ProtoDecodingError(
             "id field not present on Header proto".to_string(),
         ))?;
         let id = Id::from_proto(id)?;
@@ -70,18 +68,27 @@ impl Header {
 }
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
-pub struct Hash(pub blake3::Hash);
+pub struct Hash(pub GenericArray<u8, <blake2::Blake2s as blake2::Digest>::OutputSize>);
 
+
+#[test]
+fn assert_256_digest_size() {
+    let n = Node{
+        links: Vec::new(),
+        data: Base64(Vec::new()),
+    };
+    let h = n.canonical_hash();
+    assert_eq!(h.0.as_slice().len() * 8 /* u8's */, 256);
+}
 
 // TODO: impl this
 /// TODO: skip writes, etc for null hash - or mb corresponding null node?
-// NOTE: neither of the below work, but should be viable - PR to blake3?
 /// Magic null hash for empty values (eg null commit)
-// pub const NULL_HASH: Hash = Hash(blake3::hash(&[]));
+// pub const NULL_HASH: Hash = ...?
 
 impl Hash {
     pub fn to_string_canonical(&self) -> String {
-        format!("{}.blake3", self)
+        format!("{}.blake2", self)
     }
 
     pub fn from_base58(b58: &str) -> Result<Self, Base58HashDecodeError> {
@@ -91,26 +98,24 @@ impl Hash {
     }
 
     pub fn to_base58(&self) -> String {
-        let b58 = Base58::from_bytes(self.0.as_bytes().to_vec());
+        let b58 = Base58::from_bytes(self.0.as_slice().to_vec());
         format!("{}", b58)
     }
 
     pub fn from_bytes(x: &[u8]) -> Option<Self> {
-        slice_to_array_clone!(x, [u8; 32])
-            .map(blake3::Hash::from)
-            .map(Self)
+        GenericArray::from_exact_iter(x.into_iter().map(|x| *x)).map(Self)
     }
 
     #[cfg(feature = "grpc")]
     pub fn into_proto(self) -> grpc::Hash {
         grpc::Hash {
-            hash: self.0.as_bytes().to_vec(),
+            hash_data: self.0.as_slice().to_vec(),
         }
     }
 
     #[cfg(feature = "grpc")]
     pub fn from_proto(p: grpc::Hash) -> Result<Self, ProtoDecodingError> {
-        Self::from_bytes(&p.hash).ok_or(ProtoDecodingError("bad hash length".to_string()))
+        Self::from_bytes(&p.hash_data).ok_or(ProtoDecodingError("bad hash length".to_string()))
     }
 
     pub fn promote<T>(self) -> TypedHash<T> {
@@ -137,8 +142,8 @@ impl<'de> Deserialize<'de> for Hash {
     where
         D: Deserializer<'de>,
     {
-        let res: [u8; 32] = Deserialize::deserialize(deserializer)?;
-        Ok(Hash(blake3::Hash::from(res)))
+        let res = Deserialize::deserialize(deserializer)?;
+        Hash::from_bytes(res).ok_or(serde::de::Error::custom("foo"))
     }
 }
 
@@ -147,8 +152,7 @@ impl Serialize for Hash {
     where
         S: Serializer,
     {
-        let bytes: &[u8; 32] = self.0.as_bytes();
-        Serialize::serialize(bytes, serializer)
+        Serialize::serialize(self.0.as_slice(), serializer)
     }
 }
 
@@ -240,10 +244,11 @@ pub struct Node {
 impl Node {
     /// stable hashing function (not using proto because there's no canonical encoding)
     pub fn canonical_hash(&self) -> Hash {
-        let mut hasher = blake3::Hasher::new();
+        use blake2::Digest;
+        let mut hasher = blake2::Blake2s::new();
         for link in self.links.iter() {
             hasher.update(&link.id.0.to_be_bytes());
-            hasher.update(link.hash.0.as_bytes());
+            hasher.update(link.hash.0.as_slice());
         }
         hasher.update(&self.data.0);
         let hash = hasher.finalize();
@@ -253,18 +258,18 @@ impl Node {
     #[cfg(feature = "grpc")]
     pub fn into_proto(self) -> grpc::Node {
         grpc::Node {
-            links: self.links.into_iter().map(Header::into_proto).collect(),
-            data: self.data.0,
+            node_links: self.links.into_iter().map(Header::into_proto).collect(),
+            node_data: self.data.0,
         }
     }
 
     #[cfg(feature = "grpc")]
     pub fn from_proto(p: grpc::Node) -> Result<Self, ProtoDecodingError> {
         let links: Result<Vec<Header>, ProtoDecodingError> =
-            p.links.into_iter().map(Header::from_proto).collect();
+            p.node_links.into_iter().map(Header::from_proto).collect();
         let links = links?;
         let node = Node {
-            data: Base64(p.data),
+            data: Base64(p.node_data),
             links,
         };
         Ok(node)

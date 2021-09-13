@@ -254,7 +254,6 @@ pub mod get {
     #[derive(Serialize, Deserialize, Clone, Debug)]
     pub struct Resp {
         pub requested_node: Node,
-        pub extra_node_count: u64,
         pub extra_nodes: Vec<NodeWithHeader>,
     }
 
@@ -274,7 +273,6 @@ pub mod get {
             let requested_node = Node::from_proto(requested_node)?;
 
             let res = Self {
-                extra_node_count: p.extra_node_count,
                 requested_node,
                 extra_nodes,
             };
@@ -285,7 +283,6 @@ pub mod get {
         pub fn into_proto(self) -> grpc::GetResp {
             grpc::GetResp {
                 requested_node: Some(self.requested_node.into_proto()),
-                extra_node_count: self.extra_node_count,
                 extra_nodes: self
                     .extra_nodes
                     .into_iter()

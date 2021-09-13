@@ -54,7 +54,6 @@ fn extend<'a>(cache: &'a Arc<Cache>, node: Node) -> api::get::Resp {
 
     api::get::Resp {
         requested_node: node,
-        extra_node_count: res.len() as u64,
         extra_nodes: res,
     }
 }
