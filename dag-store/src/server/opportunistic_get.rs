@@ -17,43 +17,45 @@ pub async fn get<'a>(
     let dag_node = get_and_cache(store, cache, k).await?;
 
     // use cache to extend DAG node by following links as long as they exist in-memory
-    let extended = extend(cache, dag_node);
+    let extended = extend(cache, dag_node, 4);
 
     Ok(extended)
 }
 
-// TODO: figure out traversal termination strategy - don't want to return whole cache in one resp
-fn extend<'a>(cache: &'a Arc<Cache>, node: Node) -> api::get::Resp {
+// TODO: response size-based traversal termination strategy - eg pack to next X
+fn extend<'a>(cache: &'a Arc<Cache>, requested_node: Node, max_nodes: usize) -> api::get::Resp {
     let mut frontier = VecDeque::new();
-    let mut res = Vec::new();
+    let mut extra_nodes = Vec::new();
 
-    for hp in node.links.iter() {
-        // iter over ref
-        frontier.push_back(hp.clone());
+    for hp in requested_node.links.iter() {
+        if frontier.len() + extra_nodes.len() < max_nodes -1 {
+            frontier.push_back(hp.clone());
+        }
     }
 
     // explore the frontier of potentially cached hash pointers
-    while let Some(hp) = frontier.pop_front() {
+    while let Some(header) = frontier.pop_front() {
         // if a hash pointer is in the cache, grab the associated node and continue traversal
-        if let Some(dn) = cache.get(hp.hash.clone()) {
+        if let Some(node) = cache.get(&header.hash) {
             // clone :(
-            for hp in dn.links.iter() {
-                // iter over ref
-                frontier.push_back(hp.clone());
+            for hp in node.links.iter() {
+                if frontier.len() + extra_nodes.len() < max_nodes -1 {
+                    frontier.push_back(hp.clone());
+                }
             }
             info!(
                 "add node with hash {:?} to opportunistic get result",
-                hp.clone()
+                header
             );
-            res.push(NodeWithHeader {
-                header: hp,
-                node: dn,
+            extra_nodes.push(NodeWithHeader {
+                header,
+                node,
             });
         }
     }
 
     api::get::Resp {
-        requested_node: node,
-        extra_nodes: res,
+        requested_node,
+        extra_nodes,
     }
 }

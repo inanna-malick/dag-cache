@@ -12,10 +12,10 @@ impl Cache {
     }
 
     // TODO: rain says investigate stable deref (given that all refs here are immutable)
-    pub fn get(&self, k: Hash) -> Option<Node> {
+    pub fn get(&self, k: &Hash) -> Option<Node> {
         // succeed or die. failure is unrecoverable (mutex poisoned)
         let mut cache = self.0.lock().unwrap();
-        let mv = cache.get(&k);
+        let mv = cache.get(k);
         mv.cloned() // this feels weird? clone(d) is actually needed, right?
     }
 

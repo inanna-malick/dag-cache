@@ -39,7 +39,7 @@ pub async fn get_and_cache<'a>(
     cache: &'a Arc<Cache>,
     hash: Hash,
 ) -> Result<Node, DagCacheError> {
-    match cache.get(hash.clone()) {
+    match cache.get(&hash) {
         Some(dag_node) => {
             info!("cache hit");
             Ok(dag_node)
