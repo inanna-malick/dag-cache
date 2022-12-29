@@ -1,4 +1,3 @@
-#![deny(warnings)]
 pub mod capabilities;
 pub mod opts;
 pub mod server;

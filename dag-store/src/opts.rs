@@ -3,6 +3,7 @@ use crate::capabilities::store::FileSystemStore;
 use crate::server::app::Runtime;
 use std::fs::File;
 use std::io::prelude::*;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use structopt::StructOpt;
 use tracing_honeycomb::{new_blackhole_telemetry_layer, new_honeycomb_telemetry_layer};
@@ -23,7 +24,7 @@ pub struct Opt {
     pub fs_path: String,
 
     #[structopt(short = "n", long = "max_cache_entries", default_value = "1024")]
-    pub max_cache_entries: usize,
+    pub max_cache_entries: NonZeroUsize,
 
     #[structopt(short = "h", long = "honeycomb_key_file")]
     pub honeycomb_key_file: Option<String>,
@@ -83,7 +84,6 @@ impl Opt {
 
         Runtime {
             cache: cache,
-            mutable_hash_store: store.clone(),
             hashed_blob_store: store,
         }
     }

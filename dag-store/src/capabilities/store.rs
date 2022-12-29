@@ -1,4 +1,4 @@
-use crate::capabilities::{HashedBlobStore, MutableHashStore};
+use crate::capabilities::HashedBlobStore;
 use dag_store_types::types::domain::{Hash, Node};
 use dag_store_types::types::errors::DagCacheError;
 use prost::Message;
@@ -55,25 +55,6 @@ impl FileSystemStore {
         let res = res.map(decode);
         Ok(res)
     }
-
-    #[instrument(skip(self))]
-    fn cas_mhs(
-        &self,
-        k: &str,
-        previous_hash: Option<Hash>,
-        proposed_hash: Hash,
-    ) -> Result<(), DagCacheError> {
-        let cas_res =
-            self.0
-                .compare_and_swap(k, previous_hash.map(encode), Some(encode(proposed_hash)));
-        let cas_res = cas_res.unwrap();
-
-        cas_res.map_err(
-            |e: sled::CompareAndSwapError| DagCacheError::CASViolationError {
-                actual_hash: e.current.map(decode),
-            },
-        )
-    }
 }
 
 fn decode(hash: sled::IVec) -> Hash {
@@ -93,21 +74,5 @@ impl HashedBlobStore for FileSystemStore {
 
     async fn put(&self, v: Node) -> Result<Hash, DagCacheError> {
         self.put_blob(v)
-    }
-}
-
-#[tonic::async_trait]
-impl MutableHashStore for FileSystemStore {
-    async fn get(&self, k: &str) -> Result<Option<Hash>, DagCacheError> {
-        self.get_mhs(k)
-    }
-
-    async fn cas(
-        &self,
-        k: &str,
-        previous_hash: Option<Hash>,
-        proposed_hash: Hash,
-    ) -> Result<(), DagCacheError> {
-        self.cas_mhs(k, previous_hash, proposed_hash)
     }
 }

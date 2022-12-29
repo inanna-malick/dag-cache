@@ -3,12 +3,5 @@
 members = [
     "dag-store",
     "dag-store-types",
-    "notes-server",
-    "notes-types",
-    "notes-frontend",
-    "headless-chrome-test",
 ]
 
-exclude = [
-  "notes-frontend/wasm",
-]

@@ -1,9 +1,0 @@
-#!/bin/bash
-set -euxo pipefail
-
-mkdir -p web
-
-# build notes frontend wasm
-cd notes-frontend
-cargo web deploy --output ../web
-cd ..

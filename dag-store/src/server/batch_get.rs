@@ -8,19 +8,31 @@ use tokio;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
-// NOTE: currently not exposed via GRPC, can re-enable if it becomes useful
+use futures::Stream;
+use futures::StreamExt;
+use std::pin::Pin;
+
+type GetNodesStream =
+    Pin<Box<dyn Stream<Item = Result<Node, DagCacheError>> + Send +  'static>>;
+
 pub fn batch_get<'a>(
     store: &'a Arc<dyn HashedBlobStore>,
     cache: &'a Arc<Cache>,
     hash: Hash,
-) -> mpsc::Receiver<Result<Node, DagCacheError>> {
+) -> GetNodesStream {
     info!("starting recursive fetch for root hash {:?}", &hash);
-    let (send, receive) = mpsc::channel(128); // randomly chose this channel buffer size..
+    let (send, mut receive) = mpsc::channel(128); // randomly chose this channel buffer size..
     let memoizer = Arc::new(CHashMap::new());
 
     batch_get_ana_internal(store, cache, hash, send, memoizer);
 
-    receive
+    let stream = async_stream::stream! {
+        while let Some(item) = receive.recv().await {
+            yield item;
+        }
+    };
+
+    stream.boxed()
 }
 
 // anamorphism - an unfolding change
@@ -49,7 +61,7 @@ async fn batch_get_worker(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
     hash: Hash,
-    mut resp_chan: mpsc::Sender<Result<Node, DagCacheError>>,
+    resp_chan: mpsc::Sender<Result<Node, DagCacheError>>,
     to_populate: Arc<CHashMap<Hash, ()>>, // used to memoize async fetches
 ) {
     let res = get_and_cache(&store, &cache, hash).await;

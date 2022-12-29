@@ -1,11 +1,11 @@
 use dag_store_types::types::domain::{Hash, Node};
 use lru::LruCache;
-use std::sync::Mutex;
+use std::{num::NonZeroUsize, sync::Mutex};
 
 pub struct Cache(pub Mutex<LruCache<Hash, Node>>);
 
 impl Cache {
-    pub fn new(max_cache_entries: usize) -> Self {
+    pub fn new(max_cache_entries: NonZeroUsize) -> Self {
         let cache = LruCache::new(max_cache_entries);
         // TODO: use RW lock instead, probably
         Cache(Mutex::new(cache))

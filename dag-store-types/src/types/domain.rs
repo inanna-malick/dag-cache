@@ -37,8 +37,7 @@ impl std::fmt::Display for Id {
 pub struct Header {
     pub id: Id,
     pub hash: Hash,
-    pub size: u64,
-}
+} // TODO: remove size
 
 impl Header {
     #[cfg(feature = "grpc")]
@@ -46,7 +45,6 @@ impl Header {
         grpc::Header {
             id: Some(self.id.into_proto()),
             hash: Some(self.hash.into_proto()),
-            size: self.size,
         }
     }
 
@@ -63,7 +61,6 @@ impl Header {
         let id = Id::from_proto(id)?;
 
         let hdr = Header {
-            size: p.size,
             hash,
             id,
         };
@@ -206,7 +203,6 @@ impl Node {
         for link in self.links.iter() {
             hasher.update(&link.id.0.to_be_bytes());
             hasher.update(link.hash.0.as_bytes());
-            hasher.update(&link.size.to_be_bytes());
         }
         hasher.update(&self.data.0);
         let hash = hasher.finalize();

@@ -1,5 +1,5 @@
 use crate::capabilities::put_and_cache;
-use crate::capabilities::{Cache, HashedBlobStore, MutableHashStore};
+use crate::capabilities::{Cache, HashedBlobStore};
 use dag_store_types::types::{
     api::bulk_put,
     domain::{Hash, Header, Id, Node},
@@ -12,42 +12,8 @@ use tracing::info;
 
 // TODO: how to make this transactional while maintaining caps approach? ans: have an impl of the ipfsCap (TODO: rename to hash store)
 // that is the _transaction-scoped_ tree - pretty sure this is supported.
+// UPDATE: nah that's out of band hashtag YOLO
 
-pub async fn batch_put_cata_with_cas<'a>(
-    mhs: &'a Arc<dyn MutableHashStore>,
-    store: &'a Arc<dyn HashedBlobStore>,
-    cache: &'a Arc<Cache>,
-    tree: ValidatedTree,
-    cas: Option<bulk_put::CAS>,
-) -> Result<bulk_put::Resp, DagCacheError> {
-    match cas {
-        Some(cas) => {
-            let cas_current_hash = mhs.get(&cas.cas_key).await?;
-            if cas_current_hash == cas.required_previous_hash {
-                info!("some cas, writing to store via cata");
-                let res = batch_put_cata(store, cache, tree).await?;
-                info!("some cas, got res: {:?}", &res);
-                mhs.cas(
-                    &cas.cas_key,
-                    cas.required_previous_hash,
-                    res.root_hash.clone(),
-                )
-                .await?;
-                info!("some cas, wrote res hash to mhs");
-                Ok(res)
-            } else {
-                info!("skipping cas op, provided prev hash was stale");
-                Err(DagCacheError::CASViolationError {
-                    actual_hash: cas_current_hash,
-                })
-            }
-        }
-        None => {
-            let res = batch_put_cata(store, cache, tree).await?;
-            Ok(res)
-        }
-    }
-}
 
 // catamorphism - a consuming change
 // recursively publish DAG node tree to IPFS, starting with leaf nodes
@@ -59,7 +25,7 @@ pub async fn batch_put_cata<'a>(
     let focus = tree.root_node.clone();
     let tree = Arc::new(tree);
     // NOTE: should not need to clone here
-    let (_size, root_hash, additional_uploaded) =
+    let ( root_hash, additional_uploaded) =
         batch_put_worker(store.clone(), cache.clone(), tree, focus).await?; // TODO: don't panic on join error
     Ok(bulk_put::Resp {
         root_hash,
@@ -85,9 +51,9 @@ fn upload_link<'a>(
                 // unhandled deref failure, known to be safe b/c of validated tree wrapper
                 let node = tree.nodes[&id].clone();
 
-                let (size, hash, mut additional_uploaded) =
+                let (hash, mut additional_uploaded) =
                     batch_put_worker(store.clone(), cache.clone(), tree.clone(), node.clone()).await?;
-                let hdr = Header { id, size, hash };
+                let hdr = Header { id, hash };
                 additional_uploaded.push((id, hdr.hash.clone()));
                 Ok((hdr, additional_uploaded))
             }
@@ -105,10 +71,9 @@ async fn batch_put_worker(
     // OR NOT: struct is quite small, even if the owned-by-it vec of u8/vec of links is big
     // TODO: ask rain
     node: bulk_put::Node,
-) -> Result<(u64, Hash, Vec<(Id, Hash)>), DagCacheError> {
+) -> Result<(Hash, Vec<(Id, Hash)>), DagCacheError> {
     let bulk_put::Node { data, links } = node;
 
-    let size = data.0.len() as u64;
 
     // let link_uploads: Vec<tokio::task::JoinHandle<>> = links
     let link_uploads: Vec<
@@ -120,6 +85,10 @@ async fn batch_put_worker(
 
     let joined_link_uploads: Vec<Result<Result<_, DagCacheError>, tokio::task::JoinError>> =
         futures::future::join_all(link_uploads).await;
+
+
+
+
     let links: Vec<_> = joined_link_uploads
         .into_iter()
         .map(|x| x.unwrap()) // TODO: figure out how to handle join errors
@@ -131,11 +100,8 @@ async fn batch_put_worker(
     let links = links.into_iter().map(|x| x.0).collect();
     let dag_node = Node { data, links };
 
-    // might be a bit of an approximation, but w/e
-    let size = size + dag_node.links.iter().map(|x| x.size).sum::<u64>();
-
     let hash = put_and_cache(&store, &cache, dag_node).await?;
-    Ok((size, hash, additional_uploaded))
+    Ok((hash, additional_uploaded))
 }
 
 #[cfg(test)]
@@ -146,6 +112,7 @@ mod tests {
     use dag_store_types::types::encodings::Base64;
     use dag_store_types::types::errors::DagCacheError;
     use std::collections::HashMap;
+    use std::num::NonZeroUsize;
     use std::sync::Mutex;
 
     struct MockStore(Mutex<HashMap<Hash, Node>>);
@@ -209,7 +176,8 @@ mod tests {
 
         let store = Arc::new(MockStore(Mutex::new(HashMap::new())));
 
-        let cache = Arc::new(Cache::new(16));
+        // TODO: much larger cache size
+        let cache = Arc::new(Cache::new(NonZeroUsize::new(16).unwrap()));
 
         fn shim(x: Arc<MockStore>) -> Arc<dyn HashedBlobStore> {
             x

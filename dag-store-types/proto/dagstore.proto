@@ -3,14 +3,20 @@ syntax = "proto3";
 package dagstore;
 
 service DagStore {
-  rpc GetHashForKey(GetHashForKeyReq) returns (GetHashForKeyResp) {}
-
   // get a node, return it plus any children of that node reachable via the in-memory cache
   rpc GetNode(Hash) returns (GetResp) {}
+
+  // get nodes, using provided javascript to decide which subnodes to traverse and return
+  rpc GetNodes(Hash) returns (stream Node) {}
 
   rpc PutNode(Node) returns (Hash) {}
 
   rpc PutNodes(BulkPutReq) returns (BulkPutResp) {}
+}
+
+message GetNodeReq {
+  Hash hash = 1;
+  string filter_fn = 2;
 }
 
 message GetHashForKeyReq {
@@ -35,14 +41,6 @@ message NodeWithHeader {
 message BulkPutReq {
   BulkPutNode root_node = 1;
   repeated BulkPutNodeWithHash nodes = 2;
-
-  // optional check-and-set - only write if cas_key is required_previous_hash
-  CheckAndSet cas = 3;
-}
-
-message CheckAndSet {
-  Hash required_previous_hash = 1;
-  string cas_key = 2;
 }
 
 message BulkPutResp {
@@ -83,7 +81,6 @@ message Hash {
 message Header {
   Id id = 1;
   Hash hash = 2;
-  uint64 size = 3;
 }
 
 message Node {

@@ -18,21 +18,6 @@ where
     async fn put(&self, v: Node) -> Result<Hash, DagCacheError>;
 }
 
-// used to store key->hash mappings for CAS use
-#[tonic::async_trait]
-pub trait MutableHashStore
-where
-    Self: Send + Sync,
-{
-    async fn get(&self, k: &str) -> Result<Option<Hash>, DagCacheError>;
-    async fn cas(
-        &self,
-        k: &str,
-        previous_hash: Option<Hash>,
-        proposed_hash: Hash,
-    ) -> Result<(), DagCacheError>;
-}
-
 #[instrument(skip(store, cache))]
 pub async fn get_and_cache<'a>(
     store: &'a Arc<dyn HashedBlobStore>,
