@@ -1,4 +1,4 @@
-use crate::capabilities::HashedBlobStore;
+use crate::capabilities::{HashedBlobStore};
 use dag_store_types::types::domain::{Hash, Node};
 use dag_store_types::types::errors::DagCacheError;
 use prost::Message;
@@ -48,23 +48,8 @@ impl FileSystemStore {
 
         Ok(hash)
     }
-
-    #[instrument(skip(self))]
-    fn get_mhs(&self, k: &str) -> Result<Option<Hash>, DagCacheError> {
-        let res = self.0.get(k).map_err(DagCacheError::unexpected)?;
-        let res = res.map(decode);
-        Ok(res)
-    }
 }
 
-fn decode(hash: sled::IVec) -> Hash {
-    // FIXME/TODO: is this recoverable? not really, but I still don't like panic here
-    Hash::from_bytes(&hash).expect("invalid bytes for hash in CAS store, panic")
-}
-
-fn encode(hash: Hash) -> Vec<u8> {
-    hash.0.as_bytes().to_vec()
-}
 
 #[tonic::async_trait]
 impl HashedBlobStore for FileSystemStore {

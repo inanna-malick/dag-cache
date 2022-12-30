@@ -14,7 +14,6 @@ use tracing::info;
 // that is the _transaction-scoped_ tree - pretty sure this is supported.
 // UPDATE: nah that's out of band hashtag YOLO
 
-
 // catamorphism - a consuming change
 // recursively publish DAG node tree to IPFS, starting with leaf nodes
 pub async fn batch_put_cata<'a>(
@@ -25,7 +24,7 @@ pub async fn batch_put_cata<'a>(
     let focus = tree.root_node.clone();
     let tree = Arc::new(tree);
     // NOTE: should not need to clone here
-    let ( root_hash, additional_uploaded) =
+    let (root_hash, additional_uploaded) =
         batch_put_worker(store.clone(), cache.clone(), tree, focus).await?; // TODO: don't panic on join error
     Ok(bulk_put::Resp {
         root_hash,
@@ -52,7 +51,8 @@ fn upload_link<'a>(
                 let node = tree.nodes[&id].clone();
 
                 let (hash, mut additional_uploaded) =
-                    batch_put_worker(store.clone(), cache.clone(), tree.clone(), node.clone()).await?;
+                    batch_put_worker(store.clone(), cache.clone(), tree.clone(), node.clone())
+                        .await?;
                 let hdr = Header { id, hash };
                 additional_uploaded.push((id, hdr.hash.clone()));
                 Ok((hdr, additional_uploaded))
@@ -74,7 +74,6 @@ async fn batch_put_worker(
 ) -> Result<(Hash, Vec<(Id, Hash)>), DagCacheError> {
     let bulk_put::Node { data, links } = node;
 
-
     // let link_uploads: Vec<tokio::task::JoinHandle<>> = links
     let link_uploads: Vec<
         tokio::task::JoinHandle<Result<(Header, Vec<(Id, Hash)>), DagCacheError>>,
@@ -85,9 +84,6 @@ async fn batch_put_worker(
 
     let joined_link_uploads: Vec<Result<Result<_, DagCacheError>, tokio::task::JoinError>> =
         futures::future::join_all(link_uploads).await;
-
-
-
 
     let links: Vec<_> = joined_link_uploads
         .into_iter()

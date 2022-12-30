@@ -7,7 +7,7 @@ use dag_store_types::types::{
     api, domain,
     grpc::{dag_store_server::DagStore, BulkPutReq, BulkPutResp, GetResp, Hash, Node},
 };
-use std::{sync::Arc};
+use std::sync::Arc;
 use tonic::{Request, Response, Status};
 use tracing::{event, info, instrument, Level};
 
@@ -36,7 +36,10 @@ impl Runtime {
     }
 
     #[instrument(skip(self))]
-    fn get_nodes_handler(&self, request: Request<Hash>) -> Result<Response<GetNodesStream>, Status> {
+    fn get_nodes_handler(
+        &self,
+        request: Request<Hash>,
+    ) -> Result<Response<GetNodesStream>, Status> {
         let hash = domain::Hash::from_proto(request.into_inner()).map_err( |e| {
             event!(Level::ERROR, msg = "unable to parse request proto as valid domain object", error = ?e);
             e
@@ -44,10 +47,12 @@ impl Runtime {
 
         let stream = batch_get::batch_get(&self.hashed_blob_store, &self.cache, hash);
 
-        let stream = stream.map(|elem| match elem {
-            Ok(n) => Ok(n.into_proto()),
-            Err(e) => Err(e.into()),
-        }).boxed();
+        let stream = stream
+            .map(|elem| match elem {
+                Ok(n) => Ok(n.into_proto()),
+                Err(e) => Err(e.into()),
+            })
+            .boxed();
 
         Ok(Response::new(stream))
     }
@@ -86,7 +91,7 @@ impl Runtime {
     }
 }
 
-type GetNodesStream = Pin<Box<dyn Stream<Item = Result<Node, Status>> + Send  + 'static>>;
+type GetNodesStream = Pin<Box<dyn Stream<Item = Result<Node, Status>> + Send + 'static>>;
 
 // NOTE: async_trait and instrument are mutually incompatible, so use non-async-trait fns and async trait stubs
 #[tonic::async_trait]

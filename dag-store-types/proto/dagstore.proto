@@ -71,7 +71,7 @@ message BulkPutNode {
 }
 
 message Id {
-  bytes id = 1; // [u8; 16], big-endian u128
+  uint32 id = 1;
 }
 
 message Hash {

@@ -8,22 +8,17 @@ use serde::{Deserializer, Serializer};
 use slice_as_array::slice_to_array_clone;
 
 #[derive(PartialEq, Hash, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
-pub struct Id(pub u128);
+pub struct Id(pub u32);
 
 impl Id {
     #[cfg(feature = "grpc")]
     pub fn from_proto(p: grpc::Id) -> Result<Self, ProtoDecodingError> {
-        slice_to_array_clone!(&p.id, [u8; 16])
-            .ok_or(ProtoDecodingError("bad hash length".to_string()))
-            .map(u128::from_be_bytes)
-            .map(Self)
+        Ok(Self(p.id))
     }
 
     #[cfg(feature = "grpc")]
     pub fn into_proto(self) -> grpc::Id {
-        grpc::Id {
-            id: self.0.to_be_bytes().to_vec(),
-        }
+        grpc::Id { id: self.0 }
     }
 }
 
@@ -60,10 +55,7 @@ impl Header {
         ))?;
         let id = Id::from_proto(id)?;
 
-        let hdr = Header {
-            hash,
-            id,
-        };
+        let hdr = Header { hash, id };
         Ok(hdr)
     }
 }

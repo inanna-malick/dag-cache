@@ -59,13 +59,19 @@ impl<'de> Deserialize<'de> for Base58 {
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub struct Base64(pub Vec<u8>);
 
+impl Base64 {
+    pub fn to_string(&self) -> String {
+        base64::encode(&self.0)
+    }
+}
+
 // always serialize as string (json)
 impl Serialize for Base64 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        serializer.serialize_str(&base64::encode(&self.0))
+        serializer.serialize_str(&self.to_string())
     }
 }
 
