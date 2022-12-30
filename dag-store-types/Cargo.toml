@@ -10,7 +10,6 @@ grpc = ["prost", "prost-derive", "tonic"]
 minimal = []
 
 [dependencies]
-base64 = "0.10.1"
 base58 = "0.1.0"
 bytes = "0.4"
 prost = {version = "0.11", optional = true }

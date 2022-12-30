@@ -105,7 +105,6 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use dag_store_types::types::domain::{Hash, Node};
-    use dag_store_types::types::encodings::Base64;
     use dag_store_types::types::errors::DagCacheError;
     use std::collections::HashMap;
     use std::num::NonZeroUsize;
@@ -142,12 +141,12 @@ mod tests {
 
         let t0 = bulk_put::Node {
             links: vec![],
-            data: Base64(vec![1, 3, 3, 7]),
+            data: vec![1, 3, 3, 7],
         };
 
         let t1 = bulk_put::Node {
             links: vec![],
-            data: Base64(vec![3, 1, 4, 1, 5]),
+            data: vec![3, 1, 4, 1, 5],
         };
 
         let t2 = bulk_put::Node {
@@ -155,12 +154,12 @@ mod tests {
                 bulk_put::NodeLink::Local(client_ids[0].clone()),
                 bulk_put::NodeLink::Local(client_ids[1].clone()),
             ],
-            data: Base64(vec![3, 1, 4, 1, 5]),
+            data: vec![3, 1, 4, 1, 5],
         };
 
         let t3 = bulk_put::Node {
             links: vec![bulk_put::NodeLink::Local(client_ids[2].clone())],
-            data: Base64(vec![0, 1, 1, 2, 3, 5]),
+            data: vec![0, 1, 1, 2, 3, 5],
         };
 
         let mut m = HashMap::new();
@@ -187,7 +186,7 @@ mod tests {
         // this pins it, to, specifically, mockstore
         let map = store.0.lock().unwrap();
 
-        let uploaded_values: Vec<(Vec<Id>, Base64)> = map
+        let uploaded_values: Vec<(Vec<Id>, Vec<u8>)> = map
             .values()
             .map(|Node { links, data }| (links.iter().map(|x| Id(x.id.0)).collect(), data.clone()))
             .collect();

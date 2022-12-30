@@ -83,7 +83,7 @@ fn choose_child_nodes_to_traverse(js: String, node: &Node, cache: Arc<Cache>) ->
 
     context.set_global(
         "node_data",
-        std::str::from_utf8(&node.data.0).expect("node is not valid utf8 string"),
+        std::str::from_utf8(&node.data).expect("node is not valid utf8 string"),
     ).unwrap();
 
     let header_map: HashMap<u32, Hash> = node.links.iter().map(|h| (h.id.0, h.hash)).collect();

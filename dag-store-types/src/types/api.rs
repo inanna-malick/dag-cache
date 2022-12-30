@@ -3,16 +3,14 @@ use crate::types::domain::{Hash, Header, Id, Node, NodeWithHeader};
 use crate::types::errors::ProtoDecodingError;
 #[cfg(feature = "grpc")]
 use crate::types::grpc;
-use serde::{Deserialize, Serialize};
 #[cfg(feature = "grpc")]
 use std::collections::HashMap;
 
 pub mod bulk_put {
     use super::*;
-    use crate::types::encodings::Base64;
     use crate::types::validated_tree::ValidatedTree;
 
-    #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+    #[derive(PartialEq, Eq, Clone, Debug)]
     pub struct Resp {
         pub root_hash: Hash,
         pub additional_uploaded: Vec<(Id, Hash)>,
@@ -149,23 +147,21 @@ pub mod bulk_put {
     #[derive(Clone, Debug)]
     pub struct Node {
         pub links: Vec<NodeLink>, // list of pointers - either to elems in this bulk req or already-uploaded
-        pub data: Base64,         // this node's data
+        pub data: Vec<u8>,         // this node's data
     }
 
     #[cfg(feature = "grpc")]
     impl Node {
         pub fn from_proto(p: grpc::BulkPutNode) -> Result<Self, ProtoDecodingError> {
-            let data = Base64(p.data);
-
             let links: Result<Vec<NodeLink>, ProtoDecodingError> =
                 p.links.into_iter().map(NodeLink::from_proto).collect();
             let links = links?;
-            Ok(Node { links, data })
+            Ok(Node { links, data: p.data })
         }
 
         pub fn into_proto(self) -> grpc::BulkPutNode {
             grpc::BulkPutNode {
-                data: self.data.0,
+                data: self.data,
                 links: self.links.into_iter().map(|x| x.into_proto()).collect(),
             }
         }
@@ -209,7 +205,7 @@ pub mod get {
     use super::*;
 
     // ~= NonEmptyList (head, rest struct)
-    #[derive(Serialize, Deserialize, Clone, Debug)]
+    #[derive(Clone, Debug)]
     pub struct Resp {
         pub requested_node: Node,
         pub extra_node_count: u64,

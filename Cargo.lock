@@ -435,7 +435,6 @@ name = "dag-store-types"
 version = "0.1.0"
 dependencies = [
  "base58",
- "base64 0.10.1",
  "blake3",
  "bytes 0.4.12",
  "prost",

@@ -1,13 +1,10 @@
-use crate::types::encodings::{Base58, Base64};
 #[cfg(feature = "grpc")]
 use crate::types::errors::ProtoDecodingError;
 #[cfg(feature = "grpc")]
 use crate::types::grpc;
-use serde::{Deserialize, Serialize};
-use serde::{Deserializer, Serializer};
 use slice_as_array::slice_to_array_clone;
 
-#[derive(PartialEq, Hash, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Hash, Eq, Clone, Copy, Debug)]
 pub struct Id(pub u32);
 
 impl Id {
@@ -28,7 +25,7 @@ impl std::fmt::Display for Id {
     }
 }
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub struct Header {
     pub id: Id,
     pub hash: Hash,
@@ -63,22 +60,16 @@ impl Header {
 #[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
 pub struct Hash(pub blake3::Hash);
 
-// TODO: Base58 to/from string fn for URI use
 impl Hash {
     pub fn to_string_canonical(&self) -> String {
         format!("{}.blake3", self)
     }
 
-    pub fn from_base58(b58: &str) -> Result<Self, Base58HashDecodeError> {
-        let bytes = Base58::from_string(b58)
-            .map_err(|e| Base58HashDecodeError(format!("invalid b58: {:?}", e)))?;
-        Self::from_bytes(&bytes.0).ok_or(Base58HashDecodeError("invalid length".to_string()))
-    }
-
     pub fn to_base58(&self) -> String {
-        let b58 = Base58::from_bytes(self.0.as_bytes().to_vec());
+        let b58 = base58::ToBase58::to_base58(&self.0.as_bytes().to_vec()[..]);
         format!("{}", b58)
     }
+
 
     pub fn from_bytes(x: &[u8]) -> Option<Self> {
         slice_to_array_clone!(x, [u8; 32])
@@ -103,25 +94,6 @@ impl Hash {
     }
 }
 
-impl<'de> Deserialize<'de> for Hash {
-    fn deserialize<D>(deserializer: D) -> Result<Hash, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let res: [u8; 32] = Deserialize::deserialize(deserializer)?;
-        Ok(Hash(blake3::Hash::from(res)))
-    }
-}
-
-impl Serialize for Hash {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let bytes: &[u8; 32] = self.0.as_bytes();
-        Serialize::serialize(bytes, serializer)
-    }
-}
 
 impl std::fmt::Display for Hash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -163,29 +135,11 @@ impl<T> core::ops::Deref for TypedHash<T> {
     }
 }
 
-impl<'de, T> Deserialize<'de> for TypedHash<T> {
-    fn deserialize<D>(deserializer: D) -> Result<TypedHash<T>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let res = Deserialize::deserialize(deserializer)?;
-        Ok(TypedHash(res, std::marker::PhantomData))
-    }
-}
 
-impl<T> Serialize for TypedHash<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        Serialize::serialize(&self.0, serializer)
-    }
-}
-
-#[derive(PartialEq, Eq, Clone, Debug, Deserialize, Serialize)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Node {
     pub links: Vec<Header>,
-    pub data: Base64,
+    pub data: Vec<u8>,
 }
 
 impl Node {
@@ -196,7 +150,7 @@ impl Node {
             hasher.update(&link.id.0.to_be_bytes());
             hasher.update(link.hash.0.as_bytes());
         }
-        hasher.update(&self.data.0);
+        hasher.update(&self.data);
         let hash = hasher.finalize();
         Hash(hash)
     }
@@ -205,7 +159,7 @@ impl Node {
     pub fn into_proto(self) -> grpc::Node {
         grpc::Node {
             links: self.links.into_iter().map(Header::into_proto).collect(),
-            data: self.data.0,
+            data: self.data,
         }
     }
 
@@ -215,7 +169,7 @@ impl Node {
             p.links.into_iter().map(Header::from_proto).collect();
         let links = links?;
         let node = Node {
-            data: Base64(p.data),
+            data: p.data,
             links,
         };
         Ok(node)
@@ -223,7 +177,7 @@ impl Node {
 }
 
 // exists primarily to have better serialized json (tuples result in 2-elem lists)
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug)]
 pub struct NodeWithHeader {
     pub header: Header,
     pub node: Node,
@@ -252,26 +206,5 @@ impl NodeWithHeader {
             .ok_or(ProtoDecodingError("missing node".to_string()))?;
         let node = Node::from_proto(node)?;
         Ok(Self { header, node })
-    }
-}
-
-// FIXME: figure out better error hierarchy
-
-#[derive(Debug)]
-pub struct Base58HashDecodeError(String);
-
-impl std::fmt::Display for Base58HashDecodeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self) // TODO: more idiomatic way of doing this
-    }
-}
-
-impl std::error::Error for Base58HashDecodeError {
-    fn description(&self) -> &str {
-        &self.0
-    }
-
-    fn cause(&self) -> Option<&dyn std::error::Error> {
-        None
     }
 }

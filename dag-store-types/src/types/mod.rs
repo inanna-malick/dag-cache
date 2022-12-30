@@ -1,6 +1,5 @@
 pub mod api;
 pub mod domain;
-pub mod encodings;
 pub mod errors;
 #[cfg(feature = "grpc")]
 pub mod grpc;

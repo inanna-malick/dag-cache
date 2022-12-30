@@ -1,10 +1,9 @@
 use crate::types::api::bulk_put::{Node, NodeLink};
 use crate::types::domain::Id;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hash::Hash;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct ValidatedTree_<K: Eq + Hash, V> {
     pub root_node: V,
     pub nodes: HashMap<K, V>,
