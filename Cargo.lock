@@ -441,6 +441,7 @@ dependencies = [
  "prost-derive",
  "rand 0.7.3",
  "serde",
+ "serde_json",
  "slice_as_array",
  "tonic",
  "tonic-build",

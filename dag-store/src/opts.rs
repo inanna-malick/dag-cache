@@ -5,7 +5,6 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use structopt::StructOpt;
 
-
 #[derive(Debug, StructOpt)]
 #[structopt(
     name = "dag cache",
@@ -26,7 +25,6 @@ impl Opt {
     /// parse opts into capabilities object, will panic if not configured correctly (TODO: FIXME)
     pub fn into_runtime(self) -> Runtime {
         let store = Arc::new(FileSystemStore::new(self.fs_path));
-
 
         tracing_subscriber::fmt::init();
 

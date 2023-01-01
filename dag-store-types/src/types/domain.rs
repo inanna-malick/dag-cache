@@ -70,7 +70,6 @@ impl Hash {
         format!("{}", b58)
     }
 
-
     pub fn from_bytes(x: &[u8]) -> Option<Self> {
         slice_to_array_clone!(x, [u8; 32])
             .map(blake3::Hash::from)
@@ -93,7 +92,6 @@ impl Hash {
         TypedHash(self, std::marker::PhantomData)
     }
 }
-
 
 impl std::fmt::Display for Hash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -134,7 +132,6 @@ impl<T> core::ops::Deref for TypedHash<T> {
         &self.0
     }
 }
-
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Node {

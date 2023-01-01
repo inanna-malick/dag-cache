@@ -6,7 +6,7 @@ edition = "2018"
 
 [features]
 grpc = ["prost", "prost-derive", "tonic"]
-
+test = ["serde_json"]
 minimal = []
 
 [dependencies]
@@ -18,6 +18,7 @@ tonic = { version = "0.8", features = [], optional = true }
 serde = { version = "1.0.91", features = ["derive"] }
 blake3 = "0.1"
 slice_as_array = "1.1.0"
+serde_json = {version = "1.0.39", optional = true }
 
 [dev-dependencies]
 rand = "0.7"

@@ -1,4 +1,4 @@
-use crate::capabilities::{HashedBlobStore};
+use crate::capabilities::HashedBlobStore;
 use dag_store_types::types::domain::{Hash, Node};
 use dag_store_types::types::errors::DagCacheError;
 use prost::Message;
@@ -49,7 +49,6 @@ impl FileSystemStore {
         Ok(hash)
     }
 }
-
 
 #[tonic::async_trait]
 impl HashedBlobStore for FileSystemStore {

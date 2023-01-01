@@ -198,4 +198,14 @@ mod tests {
         assert!(&uploaded_values.contains(&(vec!(client_ids[2].clone()), t3.data)));
         // t4 uploaded
     }
+
+    /*
+    - upload a bunch of single nodes
+    - bulk fetch all
+    - tree should ==
+
+    - bulk upload a full tree
+    - bulk fetch all
+    - should ==
+    */
 }

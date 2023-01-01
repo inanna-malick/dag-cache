@@ -147,7 +147,7 @@ pub mod bulk_put {
     #[derive(Clone, Debug)]
     pub struct Node {
         pub links: Vec<NodeLink>, // list of pointers - either to elems in this bulk req or already-uploaded
-        pub data: Vec<u8>,         // this node's data
+        pub data: Vec<u8>,        // this node's data
     }
 
     #[cfg(feature = "grpc")]
@@ -156,7 +156,10 @@ pub mod bulk_put {
             let links: Result<Vec<NodeLink>, ProtoDecodingError> =
                 p.links.into_iter().map(NodeLink::from_proto).collect();
             let links = links?;
-            Ok(Node { links, data: p.data })
+            Ok(Node {
+                links,
+                data: p.data,
+            })
         }
 
         pub fn into_proto(self) -> grpc::BulkPutNode {
