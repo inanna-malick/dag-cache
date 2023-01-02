@@ -1,6 +1,7 @@
 pub mod capabilities;
 pub mod opts;
 pub mod server;
+pub mod client;
 
 use crate::server::app::Runtime;
 use dag_store_types::types::grpc::dag_store_server::DagStoreServer;
