@@ -1,11 +1,10 @@
-use crate::capabilities::put_and_cache;
+use crate::capabilities::{get_and_cache, put_and_cache};
 use crate::capabilities::{Cache, HashedBlobStore};
 use crate::server::batch_get;
 use crate::server::batch_put;
-use crate::server::opportunistic_get;
 use dag_store_types::types::{
     api, domain,
-    grpc::{dag_store_server::DagStore, BulkPutReq, BulkPutResp, GetResp, Hash, Node},
+    grpc::{dag_store_server::DagStore, BulkPutReq, GetNodesReq, Hash, Node, NodeWithHash},
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
@@ -22,16 +21,15 @@ pub struct Runtime {
 
 impl Runtime {
     #[instrument(skip(self))]
-    async fn get_node_handler(&self, request: Request<Hash>) -> Result<Response<GetResp>, Status> {
-        let request = domain::Hash::from_proto(request.into_inner()).map_err( |e| {
+    async fn get_node_handler(&self, request: Request<Hash>) -> Result<Response<Node>, Status> {
+        let hash = domain::Hash::from_proto(request.into_inner()).map_err( |e| {
             event!(Level::ERROR, msg = "unable to parse request proto as valid domain object", error = ?e);
             e
         })?;
 
-        let resp = opportunistic_get::get(&self.hashed_blob_store, &self.cache, request).await?;
+        let node = get_and_cache(&self.hashed_blob_store, &self.cache, hash).await?;
 
-        let resp = resp.into_proto();
-        let resp = Response::new(resp);
+        let resp = Response::new(node.into_proto());
         Ok(resp)
     }
 
@@ -45,6 +43,14 @@ impl Runtime {
             e
         })?;
 
+        // TODO: figure out strat for traversal filtering, probably start with an enum:
+        // StringMatch: str (exact match on metadata)
+        // IfInCache: str (exact match on metadata)
+        // All
+        // OR: make my life simpler (?), it's just js: you get (metadata, is_in_cache) pair and filter it
+        //  BUT: what if it drops from cache in the meantime b/c this is slow and etc
+        //  A: I guess reserve its slot in the cache? or just rerun the fn ugh lol
+        // NOTE: this kinda sucks and I don't want to do it, so instead it's just a "hey does this exact string match" type situation
         let stream = batch_get::batch_get(&self.hashed_blob_store, &self.cache, hash);
 
         let stream = stream
@@ -76,7 +82,7 @@ impl Runtime {
     async fn put_nodes_handler(
         &self,
         request: Request<BulkPutReq>,
-    ) -> Result<Response<BulkPutResp>, Status> {
+    ) -> Result<Response<Hash>, Status> {
         let request = api::bulk_put::Req::from_proto(request.into_inner()).map_err( |e| {
             event!(Level::ERROR, msg = "unable to parse request proto as valid domain object", error = ?e);
             e
@@ -91,12 +97,12 @@ impl Runtime {
     }
 }
 
-type GetNodesStream = Pin<Box<dyn Stream<Item = Result<Node, Status>> + Send + 'static>>;
+type GetNodesStream = Pin<Box<dyn Stream<Item = Result<NodeWithHash, Status>> + Send + 'static>>;
 
 // NOTE: async_trait and instrument are mutually incompatible, so use non-async-trait fns and async trait stubs
 #[tonic::async_trait]
 impl DagStore for Runtime {
-    async fn get_node(&self, request: Request<Hash>) -> Result<Response<GetResp>, Status> {
+    async fn get_node(&self, request: Request<Hash>) -> Result<Response<Node>, Status> {
         self.get_node_handler(request).await
     }
 
@@ -113,10 +119,7 @@ impl DagStore for Runtime {
         self.get_nodes_handler(request)
     }
 
-    async fn put_nodes(
-        &self,
-        request: Request<BulkPutReq>,
-    ) -> Result<Response<BulkPutResp>, Status> {
+    async fn put_nodes(&self, request: Request<BulkPutReq>) -> Result<Response<Hash>, Status> {
         self.put_nodes_handler(request).await
     }
 }

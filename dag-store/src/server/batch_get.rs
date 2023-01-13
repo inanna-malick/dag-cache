@@ -3,7 +3,7 @@ mod js_filter;
 use crate::capabilities::get_and_cache;
 use crate::capabilities::{Cache, HashedBlobStore};
 use chashmap::CHashMap;
-use dag_store_types::types::domain::{Hash, Node};
+use dag_store_types::types::domain::{Hash, Node, NodeWithHash};
 use dag_store_types::types::errors::DagCacheError;
 use futures::Stream;
 use futures::StreamExt;
@@ -13,7 +13,8 @@ use tokio;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
-type GetNodesStream = Pin<Box<dyn Stream<Item = Result<Node, DagCacheError>> + Send + 'static>>;
+type GetNodesStream =
+    Pin<Box<dyn Stream<Item = Result<NodeWithHash, DagCacheError>> + Send + 'static>>;
 
 pub fn batch_get<'a>(
     store: &'a Arc<dyn HashedBlobStore>,
@@ -40,8 +41,8 @@ fn batch_get_ana_internal<'a>(
     store: &'a Arc<dyn HashedBlobStore>,
     cache: &'a Arc<Cache>,
     hash: Hash,
-    resp_chan: mpsc::Sender<Result<Node, DagCacheError>>, // used to send completed nodes (eagerly)
-    to_populate: Arc<CHashMap<Hash, ()>>,                 // used to memoize async fetches
+    resp_chan: mpsc::Sender<Result<NodeWithHash, DagCacheError>>, // used to send completed nodes (eagerly)
+    to_populate: Arc<CHashMap<Hash, ()>>,                         // used to memoize async fetches
 ) {
     let store = store.clone();
     let cache = cache.clone();
@@ -61,18 +62,18 @@ async fn batch_get_worker(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
     hash: Hash,
-    resp_chan: mpsc::Sender<Result<Node, DagCacheError>>,
+    resp_chan: mpsc::Sender<Result<NodeWithHash, DagCacheError>>,
     to_populate: Arc<CHashMap<Hash, ()>>, // used to memoize async fetches
 ) {
     let res = get_and_cache(&store, &cache, hash).await;
     match res {
         Ok(node) => {
-            let links = node.links.clone();
+            let links = node.headers.clone();
             // this way will only recurse on & traverse links if writing to channel doesn't fail
             // short circuit if failure
             // NOTE: should have some way to signal that this is an error instead of just failing?
             //       but the channel's broken so I can't.
-            let sr = resp_chan.send(Ok(node)).await;
+            let sr = resp_chan.send(Ok(NodeWithHash { hash, node })).await;
 
             // todo: weird type errors (async/await?), refactor later
             match sr {

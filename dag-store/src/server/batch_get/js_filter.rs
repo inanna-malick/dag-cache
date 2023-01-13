@@ -79,7 +79,7 @@ fn choose_child_nodes_to_traverse(js: String, node: &Node, cache: Arc<Cache>) ->
         )
         .unwrap();
 
-    let header_map: HashMap<u32, Hash> = node.links.iter().map(|h| (h.id.0, h.hash)).collect();
+    let header_map: HashMap<u32, Hash> = node.headers.iter().map(|h| (h.id.0, h.hash)).collect();
     context
         .add_callback("is_in_cache", IsInCache { cache, header_map })
         //  .add_callback("hash_for_id", |id: u32| a + b) TODO/FIXME: need conversion into JsValue

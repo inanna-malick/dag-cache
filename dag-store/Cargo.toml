@@ -45,6 +45,8 @@ serde_json = "1.0.39"
 
 dag-store-types = { path = "../dag-store-types", features = ["grpc"] }
 
+recursion-schemes = "0.1.2"
+
 
 quick-js = "0.4.1"
 

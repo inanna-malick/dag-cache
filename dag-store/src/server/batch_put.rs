@@ -20,16 +20,12 @@ pub async fn batch_put_cata<'a>(
     store: &'a Arc<dyn HashedBlobStore>,
     cache: &'a Arc<Cache>,
     tree: ValidatedTree,
-) -> Result<bulk_put::Resp, DagCacheError> {
+) -> Result<Hash, DagCacheError> {
     let focus = tree.root_node.clone();
     let tree = Arc::new(tree);
     // NOTE: should not need to clone here
-    let (root_hash, additional_uploaded) =
-        batch_put_worker(store.clone(), cache.clone(), tree, focus).await?; // TODO: don't panic on join error
-    Ok(bulk_put::Resp {
-        root_hash,
-        additional_uploaded,
-    })
+    let root_hash = batch_put_worker(store.clone(), cache.clone(), tree, focus).await?; // TODO: don't panic on join error
+    Ok(root_hash)
 }
 
 fn upload_link<'a>(
@@ -37,7 +33,7 @@ fn upload_link<'a>(
     cache: &'a Arc<Cache>,
     x: bulk_put::NodeLink,
     tree: Arc<ValidatedTree>,
-) -> tokio::task::JoinHandle<Result<(Header, Vec<(Id, Hash)>), DagCacheError>> {
+) -> tokio::task::JoinHandle<Result<Header, DagCacheError>> {
     let store = store.clone();
     let cache = cache.clone();
     tokio::spawn(async move {
@@ -50,14 +46,18 @@ fn upload_link<'a>(
                 // unhandled deref failure, known to be safe b/c of validated tree wrapper
                 let node = tree.nodes[&id].clone();
 
-                let (hash, mut additional_uploaded) =
+                let hash =
                     batch_put_worker(store.clone(), cache.clone(), tree.clone(), node.clone())
                         .await?;
-                let hdr = Header { id, hash };
-                additional_uploaded.push((id, hdr.hash.clone()));
-                Ok((hdr, additional_uploaded))
+                let hdr = Header {
+                    id,
+                    hash,
+                    metadata: String::new(),
+                }; // TODO: more explicit affordances for metadata, mb
+
+                Ok(hdr)
             }
-            bulk_put::NodeLink::Remote(hdr) => Ok((hdr.clone(), Vec::new())),
+            bulk_put::NodeLink::Remote(hdr) => Ok(hdr.clone()),
         }
     })
 }
@@ -71,13 +71,11 @@ async fn batch_put_worker(
     // OR NOT: struct is quite small, even if the owned-by-it vec of u8/vec of links is big
     // TODO: ask rain
     node: bulk_put::Node,
-) -> Result<(Hash, Vec<(Id, Hash)>), DagCacheError> {
+) -> Result<Hash, DagCacheError> {
     let bulk_put::Node { data, links } = node;
 
     // let link_uploads: Vec<tokio::task::JoinHandle<>> = links
-    let link_uploads: Vec<
-        tokio::task::JoinHandle<Result<(Header, Vec<(Id, Hash)>), DagCacheError>>,
-    > = links
+    let link_uploads: Vec<tokio::task::JoinHandle<Result<Header, DagCacheError>>> = links
         .into_iter()
         .map(|ln| upload_link(&store, &cache, ln, tree.clone()))
         .collect();
@@ -90,14 +88,13 @@ async fn batch_put_worker(
         .map(|x| x.unwrap()) // TODO: figure out how to handle join errors
         .collect::<Result<Vec<_>, DagCacheError>>()?;
 
-    let additional_uploaded: Vec<(Id, Hash)> =
-        links.iter().map(|x| x.1.clone()).flatten().collect();
-
-    let links = links.into_iter().map(|x| x.0).collect();
-    let dag_node = Node { data, links };
+    let dag_node = Node {
+        data,
+        headers: links,
+    };
 
     let hash = put_and_cache(&store, &cache, dag_node).await?;
-    Ok((hash, additional_uploaded))
+    Ok(hash)
 }
 
 #[cfg(test)]
@@ -188,7 +185,9 @@ mod tests {
 
         let uploaded_values: Vec<(Vec<Id>, Vec<u8>)> = map
             .values()
-            .map(|Node { links, data }| (links.iter().map(|x| Id(x.id.0)).collect(), data.clone()))
+            .map(|Node { headers, data }| {
+                (headers.iter().map(|x| Id(x.id.0)).collect(), data.clone())
+            })
             .collect();
 
         assert!(&uploaded_values.contains(&(vec!(), t0.data))); // t1 uploaded

@@ -1,4 +1,4 @@
-use crate::types::domain::{Hash, Header, Id, Node, NodeWithHeader};
+use crate::types::domain::{Header, Id};
 #[cfg(feature = "grpc")]
 use crate::types::errors::ProtoDecodingError;
 #[cfg(feature = "grpc")]
@@ -9,59 +9,6 @@ use std::collections::HashMap;
 pub mod bulk_put {
     use super::*;
     use crate::types::validated_tree::ValidatedTree;
-
-    #[derive(PartialEq, Eq, Clone, Debug)]
-    pub struct Resp {
-        pub root_hash: Hash,
-        pub additional_uploaded: Vec<(Id, Hash)>,
-    }
-
-    #[cfg(feature = "grpc")]
-    impl Resp {
-        pub fn into_proto(self) -> grpc::BulkPutResp {
-            grpc::BulkPutResp {
-                root_hash: Some(self.root_hash.into_proto()),
-                additional_uploaded: self
-                    .additional_uploaded
-                    .into_iter()
-                    .map(|x| grpc::BulkPutRespPair {
-                        client_id: Some(x.0.into_proto()),
-                        hash: Some(x.1.into_proto()),
-                    })
-                    .collect(),
-            }
-        }
-
-        pub fn from_proto(p: grpc::BulkPutResp) -> Result<Self, ProtoDecodingError> {
-            let root_hash = p.root_hash.ok_or(ProtoDecodingError(
-                "root hash not present on Bulk Put Resp proto".to_string(),
-            ))?;
-            let root_hash = Hash::from_proto(root_hash)?;
-
-            let additional_uploaded: Result<Vec<(Id, Hash)>, ProtoDecodingError> = p
-                .additional_uploaded
-                .into_iter()
-                .map(|bp| {
-                    let client_id = bp.client_id.ok_or(ProtoDecodingError(
-                        "client_id not present on Bulk Put Resp proto pair".to_string(),
-                    ))?;
-                    let client_id = Id::from_proto(client_id)?;
-
-                    let hash = bp.hash.ok_or(ProtoDecodingError(
-                        "hash not present on Bulk Put Resp proto pair".to_string(),
-                    ))?;
-                    let hash = Hash::from_proto(hash)?;
-                    Ok((client_id, hash))
-                })
-                .collect();
-            let additional_uploaded = additional_uploaded?;
-
-            Ok(Resp {
-                root_hash,
-                additional_uploaded,
-            })
-        }
-    }
 
     // TODO: revisit docs now that not using ipfs
     // idea is that a put req will contain some number of nodes, with only client-side blake hashing performed.
@@ -83,9 +30,9 @@ pub mod bulk_put {
                 .validated_tree
                 .nodes
                 .into_iter()
-                .map(|(id, n)| grpc::BulkPutNodeWithHash {
+                .map(|(id, n)| grpc::BulkPutNodeWithId {
                     node: Some(n.into_proto()),
-                    client_side_hash: Some(id.into_proto()),
+                    id: Some(id.into_proto()),
                 })
                 .collect();
 
@@ -101,14 +48,14 @@ pub mod bulk_put {
             ))?;
             let root_node = Node::from_proto(root_node)?;
 
-            let nodes: Result<Vec<NodeWithHash>, ProtoDecodingError> =
-                p.nodes.into_iter().map(NodeWithHash::from_proto).collect();
+            let nodes: Result<Vec<NodeWithId>, ProtoDecodingError> =
+                p.nodes.into_iter().map(NodeWithId::from_proto).collect();
             let nodes = nodes?;
 
             let mut node_map = HashMap::with_capacity(nodes.len());
 
-            for NodeWithHash { hash, node } in nodes.into_iter() {
-                node_map.insert(hash, node);
+            for NodeWithId { id, node } in nodes.into_iter() {
+                node_map.insert(id, node);
             }
 
             let validated_tree = ValidatedTree::validate(root_node, node_map).map_err(|e| {
@@ -123,24 +70,31 @@ pub mod bulk_put {
     }
 
     #[derive(Clone, Debug)]
-    pub struct NodeWithHash {
-        pub hash: Id,
+    pub struct NodeWithId {
+        pub id: Id,
         pub node: Node,
     }
 
-    impl NodeWithHash {
+    impl NodeWithId {
         #[cfg(feature = "grpc")]
-        pub fn from_proto(p: grpc::BulkPutNodeWithHash) -> Result<Self, ProtoDecodingError> {
-            let hash = p.client_side_hash.ok_or(ProtoDecodingError(
+        pub fn from_proto(p: grpc::BulkPutNodeWithId) -> Result<Self, ProtoDecodingError> {
+            let id = p.id.ok_or(ProtoDecodingError(
                 "client side hash not present on BulkPutNodeWithHash proto".to_string(),
             ))?;
-            let hash = Id::from_proto(hash)?;
+            let id = Id::from_proto(id)?;
 
             let node = p.node.ok_or(ProtoDecodingError(
                 "node not present on BulkPutNodeWithHash proto".to_string(),
             ))?;
             let node = Node::from_proto(node)?;
-            Ok(NodeWithHash { hash, node })
+            Ok(NodeWithId { id, node })
+        }
+
+        pub fn into_proto(self) -> grpc::BulkPutNodeWithId {
+            grpc::BulkPutNodeWithId {
+                id: Some(self.id.into_proto()),
+                node: Some(self.node.into_proto()),
+            }
         }
     }
 
@@ -199,55 +153,6 @@ pub mod bulk_put {
                 None => Err(ProtoDecodingError(
                     "no value for bulk put link oneof".to_string(),
                 )),
-            }
-        }
-    }
-}
-
-pub mod get {
-    use super::*;
-
-    // ~= NonEmptyList (head, rest struct)
-    #[derive(Clone, Debug)]
-    pub struct Resp {
-        pub requested_node: Node,
-        pub extra_node_count: u64,
-        pub extra_nodes: Vec<NodeWithHeader>,
-    }
-
-    impl Resp {
-        #[cfg(feature = "grpc")]
-        pub fn from_proto(p: grpc::GetResp) -> Result<Self, ProtoDecodingError> {
-            let extra_nodes: Result<Vec<NodeWithHeader>, ProtoDecodingError> = p
-                .extra_nodes
-                .into_iter()
-                .map(|n| NodeWithHeader::from_proto(n))
-                .collect();
-            let extra_nodes = extra_nodes?;
-
-            let requested_node = p
-                .requested_node
-                .ok_or(ProtoDecodingError("missing requested_node".to_string()))?;
-            let requested_node = Node::from_proto(requested_node)?;
-
-            let res = Self {
-                extra_node_count: p.extra_node_count,
-                requested_node,
-                extra_nodes,
-            };
-            Ok(res)
-        }
-
-        #[cfg(feature = "grpc")]
-        pub fn into_proto(self) -> grpc::GetResp {
-            grpc::GetResp {
-                requested_node: Some(self.requested_node.into_proto()),
-                extra_node_count: self.extra_node_count,
-                extra_nodes: self
-                    .extra_nodes
-                    .into_iter()
-                    .map(|x| x.into_proto())
-                    .collect(),
             }
         }
     }

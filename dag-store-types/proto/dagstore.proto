@@ -3,54 +3,32 @@ syntax = "proto3";
 package dagstore;
 
 service DagStore {
-  // get a node, return it plus any children of that node reachable via the in-memory cache
-  rpc GetNode(Hash) returns (GetResp) {}
+  // get a single node
+  rpc GetNode(Hash) returns (Node) {}
 
-  // get nodes, using provided javascript to decide which subnodes to traverse and return
-  rpc GetNodes(Hash) returns (stream Node) {}
+  // get nodes, using provided matcher fn to decide which subnodes to traverse and return
+  rpc GetNodes(Hash) returns (stream NodeWithHash) {}
 
   rpc PutNode(Node) returns (Hash) {}
 
-  rpc PutNodes(BulkPutReq) returns (BulkPutResp) {}
+  rpc PutNodes(BulkPutReq) returns (Hash) {}
 }
 
-message GetNodeReq {
+// TODO: use this instead of just a hash for getnodes, but only AFTER I have some working proptests
+message GetNodesReq {
   Hash hash = 1;
-  string filter_fn = 2;
+  string filter_fn = 2; // TODO: some javascript used to filter metadata
 }
 
-message GetHashForKeyReq {
-  string key = 1;
-}
 
-message GetHashForKeyResp {
-  Hash hash = 1;
-}
-
-message GetResp {
-  Node requested_node = 1;
-  uint64 extra_node_count = 2;
-  repeated NodeWithHeader extra_nodes = 3;
-}
-
-message NodeWithHeader {
-    Header header = 1;
+message NodeWithHash {
+    Hash hash = 1;
     Node node = 2;
 }
 
 message BulkPutReq {
   BulkPutNode root_node = 1;
-  repeated BulkPutNodeWithHash nodes = 2;
-}
-
-message BulkPutResp {
-  Hash root_hash = 1;
-  repeated BulkPutRespPair additional_uploaded = 2;
-}
-
-message BulkPutRespPair {
-  Hash hash = 1;
-  Id client_id = 2;
+  repeated BulkPutNodeWithId nodes = 2;
 }
 
 message BulkPutLink {
@@ -60,8 +38,8 @@ message BulkPutLink {
   }
 }
 
-message BulkPutNodeWithHash {
-  Id client_side_hash = 1;
+message BulkPutNodeWithId {
+  Id id = 1;
   BulkPutNode node = 2;
 }
 
@@ -81,6 +59,7 @@ message Hash {
 message Header {
   Id id = 1;
   Hash hash = 2;
+  string metadata = 3;
 }
 
 message Node {

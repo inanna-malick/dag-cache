@@ -25,11 +25,12 @@ impl std::fmt::Display for Id {
     }
 }
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Header {
     pub id: Id,
     pub hash: Hash,
-} // TODO: remove size
+    pub metadata: String,
+}
 
 impl Header {
     #[cfg(feature = "grpc")]
@@ -37,6 +38,7 @@ impl Header {
         grpc::Header {
             id: Some(self.id.into_proto()),
             hash: Some(self.hash.into_proto()),
+            metadata: self.metadata,
         }
     }
 
@@ -52,7 +54,11 @@ impl Header {
         ))?;
         let id = Id::from_proto(id)?;
 
-        let hdr = Header { hash, id };
+        let hdr = Header {
+            hash,
+            id,
+            metadata: p.metadata,
+        };
         Ok(hdr)
     }
 }
@@ -135,7 +141,7 @@ impl<T> core::ops::Deref for TypedHash<T> {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Node {
-    pub links: Vec<Header>,
+    pub headers: Vec<Header>,
     pub data: Vec<u8>,
 }
 
@@ -143,7 +149,7 @@ impl Node {
     /// stable hashing function (not using proto because there's no canonical encoding)
     pub fn canonical_hash(&self) -> Hash {
         let mut hasher = blake3::Hasher::new();
-        for link in self.links.iter() {
+        for link in self.headers.iter() {
             hasher.update(&link.id.0.to_be_bytes());
             hasher.update(link.hash.0.as_bytes());
         }
@@ -155,7 +161,7 @@ impl Node {
     #[cfg(feature = "grpc")]
     pub fn into_proto(self) -> grpc::Node {
         grpc::Node {
-            links: self.links.into_iter().map(Header::into_proto).collect(),
+            links: self.headers.into_iter().map(Header::into_proto).collect(),
             data: self.data,
         }
     }
@@ -167,7 +173,7 @@ impl Node {
         let links = links?;
         let node = Node {
             data: p.data,
-            links,
+            headers: links,
         };
         Ok(node)
     }
@@ -175,33 +181,33 @@ impl Node {
 
 // exists primarily to have better serialized json (tuples result in 2-elem lists)
 #[derive(Clone, Debug)]
-pub struct NodeWithHeader {
-    pub header: Header,
+pub struct NodeWithHash {
+    pub hash: Hash,
     pub node: Node,
 }
 
-impl NodeWithHeader {
+impl NodeWithHash {
     #[cfg(feature = "grpc")]
-    pub fn into_proto(self) -> grpc::NodeWithHeader {
-        let hdr = self.header.into_proto();
+    pub fn into_proto(self) -> grpc::NodeWithHash {
+        let hash = self.hash.into_proto();
         let node = self.node.into_proto();
 
-        grpc::NodeWithHeader {
-            header: Some(hdr),
+        grpc::NodeWithHash {
+            hash: Some(hash),
             node: Some(node),
         }
     }
 
     #[cfg(feature = "grpc")]
-    pub fn from_proto(p: grpc::NodeWithHeader) -> Result<Self, ProtoDecodingError> {
-        let header = p
-            .header
-            .ok_or(ProtoDecodingError("missing header".to_string()))?;
-        let header = Header::from_proto(header)?;
+    pub fn from_proto(p: grpc::NodeWithHash) -> Result<Self, ProtoDecodingError> {
+        let hash = p
+            .hash
+            .ok_or(ProtoDecodingError("missing hash".to_string()))?;
+        let hash = Hash::from_proto(hash)?;
         let node = p
             .node
             .ok_or(ProtoDecodingError("missing node".to_string()))?;
         let node = Node::from_proto(node)?;
-        Ok(Self { header, node })
+        Ok(Self { hash, node })
     }
 }

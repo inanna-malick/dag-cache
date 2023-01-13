@@ -416,6 +416,7 @@ dependencies = [
  "prost-derive",
  "quick-js",
  "rand 0.7.3",
+ "recursion-schemes",
  "serde",
  "serde_json",
  "sled",
@@ -1356,9 +1357,9 @@ dependencies = [
 
 [[package]]
 name = "recursion-schemes"
-version = "0.1.0"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "118637b4835df3a2d25853c60a6789998b2cb5c711d7aeb6005935ef3e27a02c"
+checksum = "736edd11827f2a0e6ad8c6bc1a93ab0fa546a6f67b906f7c90f9ce5c46f4ba52"
 dependencies = [
  "futures",
  "tokio",
