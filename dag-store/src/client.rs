@@ -121,7 +121,7 @@ where
         EncodeDecodeable = F::Layer<domain::Id>,
         CloneableWithHeaders = F::Layer<domain::Header>,
     >,
-    F::Layer<domain::Header>: Clone,
+    // F::Layer<domain::Header>: Clone,
 {
     fn encode(to_encode: F::Layer<domain::Id>) -> Vec<u8> {
         F::encode(&to_encode).unwrap() // doesn't have to be json but makes debugging easier
@@ -198,20 +198,18 @@ where
 
         let res: Fix<Compose<F, MerkleLayer<PartiallyApplied>>> = Fix(Box::new(F::fmap(
             F::clone(root_node),
-            |header: Header| -> MerkleLayer<Fix<Compose<F, MerkleLayer<PartiallyApplied>>>> {
+            |header| {
                 <Compose<MerkleLayer<PartiallyApplied>, F> as FunctorExt>::expand_and_collapse(
                         header,
-                        |header: Header| -> <Compose<MerkleLayer<PartiallyApplied>, F> as Functor>::Layer<
-                            Header,
-                        > {
+                        |header| {
                             match node_map.get(&header.hash) {
                                 // NOTE: requires clone to handle duplicate nodes, shrug emoji (cleaner API)
                                 Some(node) => MerkleLayer::Local(header, F::clone(node)),
                                 None => MerkleLayer::Remote(header),
                             }
                         },
-                        |layer: MerkleLayer<<F as Functor>::Layer<MerkleLayer<Fix<Compose<F, MerkleLayer<PartiallyApplied>>>>>>| -> MerkleLayer<Fix<Compose<F, MerkleLayer<PartiallyApplied>>>>   {
-                            <MerkleLayer<PartiallyApplied> as Functor>::fmap(layer, |x: <F as Functor>::Layer<MerkleLayer<Fix<Compose<F, MerkleLayer<PartiallyApplied>>>>>| -> Fix<Compose<F, MerkleLayer<PartiallyApplied>>> {
+                        |layer| {
+                            <MerkleLayer<PartiallyApplied> as Functor>::fmap(layer, |x| {
                                 Fix(Box::new(x))
                             })
                         },
