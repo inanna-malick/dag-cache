@@ -25,7 +25,8 @@ use tonic::transport::{self, Channel};
 //     nodes: HashMap<Hash, F::Layer<Header>>,
 // }
 
-type PartialMerkleTree<F> = Fix<Compose<F, MerkleLayer<PartiallyApplied>>>;
+type PartialMerkleTreeLayer<F> = Compose<F, MerkleLayer<PartiallyApplied>>;
+type PartialMerkleTree<F> = Fix<PartialMerkleTreeLayer<F>>;
 
 // type LocalTreeLayer<F> = Compose<F, BulkPutLink<PartiallyApplied>>::Layer<Id>;
 
@@ -113,12 +114,14 @@ where
     }
 }
 
-
-
 impl<F: Functor> Client<F>
 // TODO: F::Layer<X> expected to have X == Id if there's a direct bound here on F::Layer<Id>: Serialize/Deserialize later in this impl block
 where
-    F: Shim<EncodeDecodeable = F::Layer<domain::Id>, CloneableWithHeaders = F::Layer<domain::Header>>,
+    F: Shim<
+        EncodeDecodeable = F::Layer<domain::Id>,
+        CloneableWithHeaders = F::Layer<domain::Header>,
+    >,
+    F::Layer<domain::Header>: Clone,
 {
     fn encode(to_encode: F::Layer<domain::Id>) -> Vec<u8> {
         F::encode(&to_encode).unwrap() // doesn't have to be json but makes debugging easier
@@ -195,9 +198,8 @@ where
 
         let res: Fix<Compose<F, MerkleLayer<PartiallyApplied>>> = Fix(Box::new(F::fmap(
             F::clone(root_node),
-            |header: Header| -> MerkleLayer<Fix<_>> {
-                let partial =
-                    <Compose<MerkleLayer<PartiallyApplied>, F> as FunctorExt>::expand_and_collapse(
+            |header: Header| -> MerkleLayer<Fix<Compose<F, MerkleLayer<PartiallyApplied>>>> {
+                <Compose<MerkleLayer<PartiallyApplied>, F> as FunctorExt>::expand_and_collapse(
                         header,
                         |header: Header| -> <Compose<MerkleLayer<PartiallyApplied>, F> as Functor>::Layer<
                             Header,
@@ -208,17 +210,12 @@ where
                                 None => MerkleLayer::Remote(header),
                             }
                         },
-                        // |layer: <Compose<MerkleLayer<PartiallyApplied>, F> as Functor>::Layer<
-                        //     Fix<Compose<MerkleLayer<PartiallyApplied>, F>>,
-                        // >|
-                        |layer|  {
-                            <MerkleLayer<PartiallyApplied> as Functor>::fmap(layer, |x| {
+                        |layer: MerkleLayer<<F as Functor>::Layer<MerkleLayer<Fix<Compose<F, MerkleLayer<PartiallyApplied>>>>>>| -> MerkleLayer<Fix<Compose<F, MerkleLayer<PartiallyApplied>>>>   {
+                            <MerkleLayer<PartiallyApplied> as Functor>::fmap(layer, |x: <F as Functor>::Layer<MerkleLayer<Fix<Compose<F, MerkleLayer<PartiallyApplied>>>>>| -> Fix<Compose<F, MerkleLayer<PartiallyApplied>>> {
                                 Fix(Box::new(x))
                             })
                         },
-                    );
-
-                partial
+                    )
             },
         )));
 
