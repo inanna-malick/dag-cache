@@ -2,9 +2,10 @@
 use crate::types::errors::ProtoDecodingError;
 #[cfg(feature = "grpc")]
 use crate::types::grpc;
+use serde::{Deserialize, Serialize};
 use slice_as_array::slice_to_array_clone;
 
-#[derive(PartialEq, Hash, Eq, Clone, Copy, Debug)]
+#[derive(PartialEq, Hash, Eq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Id(pub u32);
 
 impl Id {

@@ -90,6 +90,7 @@ pub mod bulk_put {
             Ok(NodeWithId { id, node })
         }
 
+        #[cfg(feature = "grpc")]
         pub fn into_proto(self) -> grpc::BulkPutNodeWithId {
             grpc::BulkPutNodeWithId {
                 id: Some(self.id.into_proto()),

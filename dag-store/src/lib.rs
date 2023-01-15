@@ -13,6 +13,7 @@ pub async fn run(
     runtime: Runtime,
     addr: SocketAddr,
 ) -> Result<(), Box<dyn std::error::Error + 'static>> {
+    println!("serving at addr {:?}", addr);
     Server::builder()
         .add_service(DagStoreServer::new(runtime))
         .serve(addr)
