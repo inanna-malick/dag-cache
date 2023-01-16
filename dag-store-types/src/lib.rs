@@ -3,11 +3,11 @@ pub mod types;
 
 // #[cfg(feature = "test")]
 pub mod test {
-    use crate::types::domain::Id;
+    use crate::types::domain;
     use core::fmt::Debug;
     use recursion_schemes::{
         functor::*,
-        recursive::Fix,
+        recursive::{Corecursive, Fix, Recursive},
     };
     use serde::{Deserialize, Serialize};
     use std::{collections::HashMap, fmt::Display};
@@ -24,6 +24,42 @@ pub mod test {
 
     pub type MerkleTomlFunctorToken<K = String> = MerkleToml<PartiallyApplied, K>;
 
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum TomlSimple {
+        Map(HashMap<String, TomlSimple>),
+        List(Vec<TomlSimple>),
+        Scalar(i32),
+    }
+
+
+    impl Corecursive for TomlSimple {
+        type FunctorToken = MerkleTomlFunctorToken<String>;
+
+        fn from_layer(x: <Self::FunctorToken as Functor>::Layer<Self>) -> Self {
+            match x {
+                MerkleToml::Map(xs) => {
+                    TomlSimple::Map(xs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())
+                }
+                MerkleToml::List(xs) => TomlSimple::List(xs.into_iter().collect()),
+                MerkleToml::Scalar(x) => TomlSimple::Scalar(x),
+            }
+        }
+    }
+
+    impl Recursive for TomlSimple {
+        type FunctorToken = MerkleTomlFunctorToken<String>;
+
+        fn into_layer(self) -> <Self::FunctorToken as Functor>::Layer<Self> {
+            match self {
+                TomlSimple::Map(xs) => {
+                    MerkleToml::Map(xs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())
+                }
+                TomlSimple::List(xs) => MerkleToml::List(xs.into_iter().collect()),
+                TomlSimple::Scalar(x) => MerkleToml::Scalar(x),
+            }
+        }
+    }
+
     // janky & etc
     impl<X: Display + Eq + std::hash::Hash> Display for MerkleToml<String, X> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -32,8 +68,10 @@ pub mod test {
                     format!(
                         "Map({})",
                         // very inefficient, ehh
-                        xs.iter()
-                            .fold("".to_string(), |s, (k, v)| format!("{}({} -> {}), ", s, k, v))
+                        xs.iter().fold("".to_string(), |s, (k, v)| format!(
+                            "{}({} -> {}), ",
+                            s, k, v
+                        ))
                     )
                 }
                 MerkleToml::List(xs) => {
@@ -51,30 +89,31 @@ pub mod test {
         }
     }
 
-
-    impl<'a> ToOwnedF for MerkleToml<PartiallyApplied, &'a str>{
+    impl<'a> ToOwnedF for MerkleToml<PartiallyApplied, &'a str> {
         type OwnedFunctor = MerkleToml<PartiallyApplied, String>;
-        fn to_owned<A>(input: <Self as Functor>::Layer<A>)
-            -> <Self::OwnedFunctor as Functor>::Layer<A>{
-                match input {
-                    MerkleToml::Map(xs) => MerkleToml::Map(xs.into_iter().map(|(k,v)| (k.to_owned(), v)).collect()),
-                    MerkleToml::List(xs) => MerkleToml::List(xs.into_iter().collect()),
-                    MerkleToml::Scalar(x) => MerkleToml::Scalar(x),
+        fn to_owned<A>(
+            input: <Self as Functor>::Layer<A>,
+        ) -> <Self::OwnedFunctor as Functor>::Layer<A> {
+            match input {
+                MerkleToml::Map(xs) => {
+                    MerkleToml::Map(xs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())
                 }
+                MerkleToml::List(xs) => MerkleToml::List(xs.into_iter().collect()),
+                MerkleToml::Scalar(x) => MerkleToml::Scalar(x),
             }
+        }
     }
-
-
 
     impl AsRefF for MerkleToml<PartiallyApplied, String> {
         type RefFunctor<'a> = MerkleToml<PartiallyApplied, &'a str>;
-
 
         fn as_ref<'a, A>(
             input: &'a <Self as Functor>::Layer<A>,
         ) -> <Self::RefFunctor<'a> as Functor>::Layer<&'a A> {
             match input {
-                MerkleToml::Map(xs) => MerkleToml::Map(xs.iter().map(|(k,v)| (&k[..], v)).collect()),
+                MerkleToml::Map(xs) => {
+                    MerkleToml::Map(xs.iter().map(|(k, v)| (&k[..], v)).collect())
+                }
                 MerkleToml::List(xs) => MerkleToml::List(xs.iter().collect()),
                 MerkleToml::Scalar(x) => MerkleToml::Scalar(*x),
             }
@@ -116,10 +155,10 @@ pub mod test {
         }
     }
 
-    impl MerkleToml<Id> {
+    impl MerkleToml<domain::Id> {
         pub fn from_str(s: &str) -> serde_json::Result<Self> {
             let x: MerkleToml<String> = serde_json::from_str(s)?;
-            x.traverse(|s| s.parse().map(Id))
+            x.traverse(|s| s.parse().map(domain::Id))
                 .map_err(|e| serde::de::Error::custom(e))
         }
         pub fn to_str(self) -> String {

@@ -11,7 +11,7 @@ use dag_store_types::types::{
     grpc::dag_store_client::DagStoreClient,
 };
 use recursion_schemes::functor::FunctorExt;
-use recursion_schemes::recursive::{Fix, RecursiveExt};
+use recursion_schemes::recursive::{Corecursive, Fix, RecursiveExt};
 use recursion_schemes::{
     functor::{Compose, Functor, PartiallyApplied},
     recursive::Recursive,
@@ -40,6 +40,15 @@ enum MerkleLayer<X> {
     Remote(Header),
 }
 
+impl<X> MerkleLayer<X> {
+    pub fn local(self) -> Option<X> {
+        match self {
+            MerkleLayer::Local(_, x) => Some(x),
+            MerkleLayer::Remote(_) => None,
+        }
+    }
+}
+
 impl Functor for MerkleLayer<PartiallyApplied> {
     type Layer<X> = MerkleLayer<X>;
 
@@ -54,8 +63,20 @@ impl Functor for MerkleLayer<PartiallyApplied> {
     }
 }
 
+pub enum BulkPutLink2<X> {
+    Remote(domain::Hash),
+    Local(X),
+}
+
+// TODO: will be used later when I get metadata stuff linked through
+type Metadata = String;
+pub trait GenerateMetadata: Functor {
+    // for any X, gen metadata?
+    fn gen_metadata<X>(l: <Self as Functor>::Layer<X>) -> <Self as Functor>::Layer<(Metadata, X)>;
+}
+
 pub enum BulkPutLink<X> {
-    Remote(domain::Header),
+    Remote(domain::Hash),
     Local(X), // TODO: include metadata for building headers?
 }
 
@@ -76,6 +97,15 @@ impl Functor for BulkPutLink<PartiallyApplied> {
 pub struct Client<FunctorToken> {
     underlying: DagStoreClient<Channel>,
     _phantom: PhantomData<FunctorToken>,
+}
+
+impl<F: Functor> Clone for Client<F> {
+    fn clone(&self) -> Self {
+        Self {
+            underlying: self.underlying.clone(),
+            _phantom: PhantomData,
+        }
+    }
 }
 
 // workaround for https://github.com/rust-lang/rust/issues/106832
@@ -152,7 +182,10 @@ where
         Ok(decoded)
     }
 
-    async fn get_nodes(&mut self, h: domain::Hash) -> anyhow::Result<PartialMerkleTree<F>> {
+    async fn get_nodes<X>(&mut self, h: domain::Hash) -> anyhow::Result<X>
+    where
+        X: Corecursive<FunctorToken = PartialMerkleTreeLayer<F>>,
+    {
         // TODO: get stream, collapse into hashmap, return that mb? or just basic ass tree structure (?)
         use futures::future;
 
@@ -177,7 +210,7 @@ where
             "get_nodes must at least return node for root hash",
         ))?;
 
-        let res = Fix::new(F::fmap(F::clone_with_headers(root_node), |header| {
+        let res = X::from_layer(F::fmap(F::clone_with_headers(root_node), |header| {
             Compose::<MerkleLayer<PartiallyApplied>, F>::expand_and_collapse(
                 header,
                 |header| {
@@ -187,7 +220,7 @@ where
                         None => MerkleLayer::Remote(header),
                     }
                 },
-                |layer| <MerkleLayer<PartiallyApplied> as Functor>::fmap(layer, Fix::new),
+                |layer| <MerkleLayer<PartiallyApplied> as Functor>::fmap(layer, X::from_layer),
             )
         }));
 
@@ -195,11 +228,13 @@ where
     }
 
     /// upload a tree of nodes with only local subnodes
-    async fn put_nodes_full(&mut self, local_tree: Fix<F>) -> anyhow::Result<domain::Hash> {
+    async fn put_nodes_full<X>(&mut self, local_tree: X) -> anyhow::Result<domain::Hash> 
+        where X: Recursive<FunctorToken = F>
+    {
         let local_tree =
             local_tree.fold_recursive(|layer| -> Fix<Compose<F, BulkPutLink<PartiallyApplied>>> {
                 let layer = F::fmap(layer, |x| BulkPutLink::Local(x));
-                Fix(Box::new(layer))
+                Fix::new(layer)
             });
         self.put_nodes(local_tree).await
     }
@@ -218,8 +253,13 @@ where
             |x: <F as Functor>::Layer<BulkPutLink<api::bulk_put::Node>>| {
                 let mut links = Vec::new();
                 let to_encode = F::fmap(x, |l| match l {
-                    BulkPutLink::Remote(header) => {
-                        let id = header.id.clone();
+                    BulkPutLink::Remote(hash) => {
+                        let id = domain::Id(id_gen.fetch_add(1, Ordering::SeqCst));
+                        let header = domain::Header {
+                            id,
+                            hash,
+                            metadata: String::new(),
+                        };
                         links.push(api::bulk_put::NodeLink::Remote(header));
                         id
                     }
@@ -271,30 +311,66 @@ mod tests {
     use std::time::Duration;
     use std::{fmt::Debug, thread};
 
+    use dag_store_types::test::TomlSimple;
     // TODO just move here mb
     use dag_store_types::{
         test::{MerkleToml, MerkleTomlFunctorToken, Toml},
         types::domain,
     };
+    use futures::future::BoxFuture;
+    use futures::FutureExt;
     use proptest::{prelude::*, test_runner::*};
     use recursion_schemes::functor::FunctorRefExt;
-    use recursion_schemes::recursive::Fix;
+    use recursion_schemes::recursive::{from_fix, into_fix, Corecursive, Fix};
     use tokio::runtime::Runtime;
 
     use super::*;
+
+    enum TomlPartial {
+        Map(HashMap<String, MerkleLayer<TomlPartial>>),
+        List(Vec<MerkleLayer<TomlPartial>>),
+        Scalar(i32),
+    }
+
+    impl TomlPartial {
+        fn as_simple(self) -> Option<TomlSimple> {
+            match self {
+                TomlPartial::Map(xs) => xs
+                    .into_iter()
+                    .map(|(k, v)| v.local().and_then(|v| v.as_simple().map(|v| (k, v))))
+                    .collect::<Option<_>>()
+                    .map(TomlSimple::Map),
+                TomlPartial::List(xs) => xs
+                    .into_iter()
+                    .map(|v| v.local().and_then(|v| v.as_simple()))
+                    .collect::<Option<_>>()
+                    .map(TomlSimple::List),
+                TomlPartial::Scalar(x) => Some(TomlSimple::Scalar(x)),
+            }
+        }
+    }
+
+    impl Corecursive for TomlPartial {
+        type FunctorToken = Compose<MerkleTomlFunctorToken<String>, MerkleLayer<PartiallyApplied>>;
+
+        fn from_layer(x: <Self::FunctorToken as Functor>::Layer<Self>) -> Self {
+            match x {
+                MerkleToml::Map(xs) => {
+                    TomlPartial::Map(xs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())
+                }
+                MerkleToml::List(xs) => TomlPartial::List(xs.into_iter().collect()),
+                MerkleToml::Scalar(x) => TomlPartial::Scalar(x),
+            }
+        }
+    }
 
     impl Shim for MerkleTomlFunctorToken {
         type EncodeDecodeable = MerkleToml<domain::Id>;
         type CloneableWithHeaders = MerkleToml<domain::Header>;
     }
 
-    async fn round_trip(t: Toml, tempdir_path: String) -> anyhow::Result<()> {
-        let port = 8088; // TODO: reserve? idk lol
-                         // spawn svc
-                         // let svc = tokio::spawn(  async move {
 
-        //     println!("WTF");
-
+        // let svc = tokio::spawn(  async move {
         //     let opt = crate::Opt {
         //         port,
         //         fs_path: tempdir_path, // tempdir
@@ -314,108 +390,136 @@ mod tests {
 
         // OK! fuck this is a blocker lol, need to figure this out. generic method for working with fold over _ref's_, to impl clone and etc
 
+
+    async fn round_trip(input: TomlSimple) -> anyhow::Result<()> {
+        let port = 8088; // TODO: reserve port somehow? idk
+                         // spawn svc
+
         let mut client =
             Client::<MerkleTomlFunctorToken>::build(format!("http://0.0.0.0:{}", port))
                 .await
                 .unwrap();
 
-        let hash = client.put_nodes_full(t.clone()).await?;
+        let hash = client.put_nodes_full(input.clone()).await?;
 
-        let fetched: PartialMerkleTree<MerkleTomlFunctorToken> = client.get_nodes(hash).await?;
+        let fetched: TomlPartial = client.get_nodes(hash.clone()).await?;
+        let fetched = fetched.as_simple().expect("I haven't implemented stop conditions for the get_nodes stream though (maximum size or etc"); 
 
-        // fetched should be full merkle tree
+        // provided tree was just round-tripped. 
+        assert_eq!(input, fetched);
 
-        let fetched: Toml = fetched.fold_recursive(|layer| {
-            Fix::new(MerkleTomlFunctorToken::fmap(layer, |partial| match partial {
-                MerkleLayer::Remote(_) => panic!("should be full tree"),
-                MerkleLayer::Local(_, x) => x,
-            }))
-        });
 
+        // NOTE: paginated fetch would be cool even if specifics never exposed to callers of API
+        // NOTE: so - let's sideline the whole metadata js filter thing and just have max req size + max depth
+
+        // use a janky async function to fetch a structure node by node, simpl async recursive
+        let fetched = fetch_recursive_naive(hash, client).await;
         println!("fetched: {:?}", fetched);
+        assert_eq!(input, fetched);
 
-
-        // lazy mode: assert debug output is ==
-        // thank fuck, this works
-        assert_eq!(format!("{:?}", t), format!("{:?}", fetched));
-
-        panic!("yolo");
+        // panic!("yolo");
 
         Ok(())
     }
 
+        fn fetch_recursive_naive(
+            h: Hash,
+            mut c: Client<MerkleTomlFunctorToken>,
+        ) -> BoxFuture<'static, TomlSimple> {
+            async move {
+                let node = c.get_node(h).await.unwrap();
+
+                match node {
+                    MerkleToml::Map(m) => {
+                        let mut mm = HashMap::new();
+                        for (k, h) in m.into_iter() {
+                            let n = fetch_recursive_naive(h.hash.clone(), c.clone()).await;
+                            mm.insert(k, n);
+                        }
+
+                        TomlSimple::Map(mm)
+                    }
+                    MerkleToml::List(l) => {
+                        let mut ll = Vec::new();
+                        for h in l.into_iter() {
+                            let n = fetch_recursive_naive(h.hash.clone(), c.clone()).await;
+                            ll.push(n);
+                        }
+
+                        TomlSimple::List(ll)
+                    }
+                    MerkleToml::Scalar(s) => TomlSimple::Scalar(s),
+                }
+            }
+            .boxed()
+        }
+
+
+    fn pair(a: TomlSimple, b: TomlSimple) -> TomlSimple {
+        TomlSimple::List(vec![a, b])
+    }
+
     #[tokio::test]
     async fn test() {
-        let t: Toml = Fix::new(MerkleToml::List(vec![
-            Fix::new(MerkleToml::Scalar(1)),
-            Fix::new(MerkleToml::Scalar(2)),
-        ]));
+        let t = TomlSimple::List(vec![TomlSimple::Scalar(1), TomlSimple::Scalar(2)]);
 
-        let h = vec![("a".to_string(), t.clone()), ("b".to_string(), t.clone())].into_iter().collect(); 
+        let h = vec![("a".to_string(), t.clone()), ("b".to_string(), t.clone())]
+            .into_iter()
+            .collect();
 
-        let t = Fix::new(MerkleToml::Map(h));
+        let t = TomlSimple::Map(h);
 
-
-        round_trip(t, "/tmp/testdir_lazy_manual_created".to_string())
+        round_trip(t)
             .await
             .unwrap();
     }
 
-    // [#test]
-    // fn test_round_trip() {
-    //     // there's only one leaf type
-    //     let leaf = prop::arbitrary::any::<i32>()
-    //         .prop_map(|x| Fix::<MerkleTomlFunctorToken<String>>::new(MerkleToml::<Toml>::Scalar(x)));
+    #[test]
+    fn test_round_trip() {
+        // there's only one leaf type
+        let leaf = prop::arbitrary::any::<i32>().prop_map(|x| TomlSimple::Scalar(x));
 
-    //     // Now define a strategy for a whole tree
-    //     let tree = leaf.prop_recursive(
-    //         16, // No more than 16 branch levels deep
-    //         64, // Target around 64 total elements
-    //         8,  // Each collection is up to 8 elements long
-    //         |element| {
-    //             prop_oneof![
-    //                 // NB `element` is an `Arc` and we'll need to reference it twice,
-    //                 // so we clone it the first time.
-    //                 prop::collection::vec(element.clone(), 0..16)
-    //                     .prop_map(|xs| Fix::<MerkleTomlFunctorToken<String>>::new(MerkleToml::List(xs))),
-    //                 prop::collection::hash_map("a*", element, 0..16)
-    //                     .prop_map(|xs| Fix::<MerkleTomlFunctorToken<String>>::new(MerkleToml::Map(xs))),
-    //             ]
-    //         },
-    //     );
+        // Now define a strategy for a whole tree
+        let tree = leaf.prop_recursive(
+            32,  // No more than 16 branch levels deep
+            128, // Target around 128 total elements
+            8,   // Each collection is up to 8 elements long
+            |element| {
+                prop_oneof![
+                    // NB `element` is an `Arc` and we'll need to reference it twice,
+                    // so we clone it the first time.
+                    prop::collection::vec(element.clone(), 0..16)
+                        .prop_map(|xs| TomlSimple::List(xs)),
+                    prop::collection::hash_map("a*", element, 0..16)
+                        .prop_map(|xs| TomlSimple::Map(xs)),
+                ]
+            },
+        );
 
-    //     // let mut runner = TestRunner::new(Config {
-    //     //     // Turn failure persistence off for demonstration
-    //     //     failure_persistence: Some(Box::new(FileFailurePersistence::Off)),
-    //     //     ..Config::default()
-    //     // });
-    //     // let result = runner.run(&tree, |v| {
-    //     //     println!("SPAWN RUNTIME");
-    //     //     Runtime::new()
-    //     //         .unwrap()
-    //     //         .block_on(async {
-    //     //             round_trip(v, "/tmp/testdir_lazy_manual_created".to_string()).await
-    //     //         })
-    //     //         .unwrap();
+        let mut runner = TestRunner::new(Config {
+            // Turn failure persistence off for demonstration
+            failure_persistence: Some(Box::new(FileFailurePersistence::Off)),
+            ..Config::default()
+        });
+        let result = runner.run(&tree, |v| {
+            println!("SPAWN RUNTIME");
+            Runtime::new()
+                .unwrap()
+                .block_on(async {
+                    round_trip(v).await
+                })
+                .unwrap();
 
-    //     //     Ok(())
-    //     // });
-    //     // result.unwrap();
+            Ok(())
+        });
+        result.unwrap();
 
-    //     let t = Fix::new(MerkleToml::Scalar(1));
-
-    //     Runtime::new().unwrap().block_on(async {
-    //         round_trip(t, "/tmp/testdir_lazy_manual_created".to_string())
-    //             .await
-    //             .unwrap();
-    //     })
-
-    //     // match result {
-    //     //     Err(TestError::Fail(_, value)) => {
-    //     //         println!("here u go: {:?}", value);
-    //     //         // assert!(false);
-    //     //     }
-    //     //     result => panic!("Unexpected result: {:?}", result),
-    //     // }
-    // }
+        // match result {
+        //     Err(TestError::Fail(_, value)) => {
+        //         println!("here u go: {:?}", value);
+        //         // assert!(false);
+        //     }
+        //     result => panic!("Unexpected result: {:?}", result),
+        // }
+    }
 }
