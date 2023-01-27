@@ -26,7 +26,7 @@ impl std::fmt::Display for Id {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Debug, Hash)]
 pub struct Header {
     pub id: Id,
     pub hash: Hash,
@@ -180,7 +180,7 @@ impl Node {
     }
 }
 
-// exists primarily to have better serialized json (tuples result in 2-elem lists)
+
 #[derive(Clone, Debug)]
 pub struct NodeWithHash {
     pub hash: Hash,
@@ -212,3 +212,28 @@ impl NodeWithHash {
         Ok(Self { hash, node })
     }
 }
+
+#[derive(Clone, Debug)]
+pub enum GetNodesResp {
+    Node(NodeWithHash),
+    ChoseNotToExplore(Header),
+}
+
+impl GetNodesResp {
+    #[cfg(feature = "grpc")]
+    pub fn into_proto(self) -> grpc::GetNodesResp {
+        match self {
+            GetNodesResp::Node(n) => grpc::GetNodesResp { link: Some(grpc::get_nodes_resp::Link::NodeResponse(n.into_proto())) },
+            GetNodesResp::ChoseNotToExplore(hdr) => grpc::GetNodesResp { link: Some(grpc::get_nodes_resp::Link::ChoseNotToTraverse(hdr.into_proto())) },
+        }
+    }
+
+    #[cfg(feature = "grpc")]
+    pub fn from_proto(p: grpc::GetNodesResp) -> Result<Self, ProtoDecodingError> {
+        match p.link.ok_or(ProtoDecodingError("proto missing enum".to_string()))? {
+            grpc::get_nodes_resp::Link::ChoseNotToTraverse(hdr) => Ok(Self::ChoseNotToExplore(Header::from_proto(hdr)?)),
+            grpc::get_nodes_resp::Link::NodeResponse(n) => Ok(Self::Node(NodeWithHash::from_proto(n)?)),
+        }
+    }
+}
+

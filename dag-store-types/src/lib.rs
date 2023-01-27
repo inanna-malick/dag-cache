@@ -5,8 +5,10 @@ pub mod types;
 pub mod test {
     use crate::types::domain;
     use core::fmt::Debug;
+    use futures::FutureExt;
     use recursion_schemes::{
         functor::*,
+        join_future::JoinFuture,
         recursive::{Corecursive, Fix, Recursive},
     };
     use serde::{Deserialize, Serialize};
@@ -30,7 +32,6 @@ pub mod test {
         List(Vec<TomlSimple>),
         Scalar(i32),
     }
-
 
     impl Corecursive for TomlSimple {
         type FunctorToken = MerkleTomlFunctorToken<String>;
@@ -136,6 +137,30 @@ pub mod test {
                 MerkleToml::List(xs) => MerkleToml::List(xs.into_iter().map(f).collect()),
                 MerkleToml::Scalar(s) => MerkleToml::Scalar(s),
             }
+        }
+    }
+
+    impl<K: Eq + std::hash::Hash + Ord + Send + Sync + 'static> JoinFuture for MerkleTomlFunctorToken<K> {
+        fn join_layer<A: Send + 'static>(
+            input: <Self as Functor>::Layer<futures::future::BoxFuture<'static, A>>,
+        ) -> futures::future::BoxFuture<'static, <Self as Functor>::Layer<A>> {
+                match input {
+                    MerkleToml::Map(xs) => async {
+                        let xs = futures::future::join_all(
+                            xs.into_iter().map(|(k, fv)| fv.map(|v| (k, v))),
+                        )
+                        .await;
+                        MerkleToml::Map(xs.into_iter().collect())
+                    }.boxed(),
+                    MerkleToml::List(xs) => async {
+                        let xs = futures::future::join_all(
+                            xs.into_iter(),
+                        )
+                        .await;
+                        MerkleToml::List(xs)
+                    }.boxed(),
+                    MerkleToml::Scalar(s) => futures::future::ready(MerkleToml::Scalar(s)).boxed(),
+                }
         }
     }
 

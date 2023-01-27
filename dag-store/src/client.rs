@@ -1,5 +1,5 @@
-use futures::TryStreamExt;
-use std::collections::HashMap;
+use futures::{StreamExt, TryStreamExt};
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::{marker::PhantomData, sync::atomic::AtomicU32};
 
@@ -37,7 +37,8 @@ type PartialMerkleTree<F> = Fix<PartialMerkleTreeLayer<F>>;
 
 enum MerkleLayer<X> {
     Local(Header, X),
-    Remote(Header),
+    Remote(Header),            // remote, did not explore (perhaps due to pagination)
+    ChoseNotToExplore(Header), // remote, explicitly filtered out
 }
 
 impl<X> MerkleLayer<X> {
@@ -45,6 +46,7 @@ impl<X> MerkleLayer<X> {
         match self {
             MerkleLayer::Local(_, x) => Some(x),
             MerkleLayer::Remote(_) => None,
+            MerkleLayer::ChoseNotToExplore(_) => None,
         }
     }
 }
@@ -59,6 +61,7 @@ impl Functor for MerkleLayer<PartiallyApplied> {
         match input {
             MerkleLayer::Local(h, x) => MerkleLayer::Local(h, f(x)),
             MerkleLayer::Remote(h) => MerkleLayer::Remote(h),
+            MerkleLayer::ChoseNotToExplore(h) => MerkleLayer::ChoseNotToExplore(h),
         }
     }
 }
@@ -195,14 +198,23 @@ where
             .await?
             .into_inner();
 
+        let mut chose_not_to_explore = HashSet::new();
+
         let node_map: HashMap<domain::Hash, F::Layer<Header>> = node_stream
             .map_err(|status| anyhow::Error::from(status))
             .and_then(|x| {
-                future::ready(domain::NodeWithHash::from_proto(x).map_err(anyhow::Error::from))
+                future::ready(domain::GetNodesResp::from_proto(x).map_err(anyhow::Error::from))
             })
-            .and_then(|NodeWithHash { hash, node }| {
-                future::ready(Self::decode(node).map(|node| (hash, node)))
+            .try_filter_map(|x| match x {
+                domain::GetNodesResp::Node(NodeWithHash { hash, node }) => {
+                    future::ready(Self::decode(node).map(|node| Some((hash, node))))
+                }
+                domain::GetNodesResp::ChoseNotToExplore(hdr) => {
+                    chose_not_to_explore.insert(hdr);
+                    future::ok(None)
+                }
             })
+            // .try_filter_map(|x| x)
             .try_collect()
             .await?;
 
@@ -214,10 +226,14 @@ where
             Compose::<MerkleLayer<PartiallyApplied>, F>::expand_and_collapse(
                 header,
                 |header| {
-                    match node_map.get(&header.hash) {
-                        // NOTE: requires clone to handle duplicate nodes, shrug emoji (cleaner API)
-                        Some(node) => MerkleLayer::Local(header, F::clone_with_headers(node)),
-                        None => MerkleLayer::Remote(header),
+                    if chose_not_to_explore.contains(&header) {
+                        todo!()
+                    } else {
+                        match node_map.get(&header.hash) {
+                            // NOTE: requires clone to handle duplicate nodes, shrug emoji (cleaner API)
+                            Some(node) => MerkleLayer::Local(header, F::clone_with_headers(node)),
+                            None => MerkleLayer::Remote(header),
+                        }
                     }
                 },
                 |layer| <MerkleLayer<PartiallyApplied> as Functor>::fmap(layer, X::from_layer),
@@ -228,8 +244,9 @@ where
     }
 
     /// upload a tree of nodes with only local subnodes
-    async fn put_nodes_full<X>(&mut self, local_tree: X) -> anyhow::Result<domain::Hash> 
-        where X: Recursive<FunctorToken = F>
+    async fn put_nodes_full<X>(&mut self, local_tree: X) -> anyhow::Result<domain::Hash>
+    where
+        X: Recursive<FunctorToken = F>,
     {
         let local_tree =
             local_tree.fold_recursive(|layer| -> Fix<Compose<F, BulkPutLink<PartiallyApplied>>> {
@@ -308,6 +325,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroUsize;
+    use std::sync::Arc;
     use std::time::Duration;
     use std::{fmt::Debug, thread};
 
@@ -321,6 +339,7 @@ mod tests {
     use futures::FutureExt;
     use proptest::{prelude::*, test_runner::*};
     use recursion_schemes::functor::FunctorRefExt;
+    use recursion_schemes::join_future::*;
     use recursion_schemes::recursive::{from_fix, into_fix, Corecursive, Fix};
     use tokio::runtime::Runtime;
 
@@ -369,27 +388,27 @@ mod tests {
         type CloneableWithHeaders = MerkleToml<domain::Header>;
     }
 
+    // let svc = tokio::spawn(  async move {
+    //     let opt = crate::Opt {
+    //         port,
+    //         fs_path: tempdir_path, // tempdir
+    //         max_cache_entries: NonZeroUsize::new(64).unwrap(),
+    //     };
 
-        // let svc = tokio::spawn(  async move {
-        //     let opt = crate::Opt {
-        //         port,
-        //         fs_path: tempdir_path, // tempdir
-        //         max_cache_entries: NonZeroUsize::new(64).unwrap(),
-        //     };
+    //     let bind_to = format!("0.0.0.0:{}", &opt.port);
+    //     let runtime = opt.into_runtime();
 
-        //     let bind_to = format!("0.0.0.0:{}", &opt.port);
-        //     let runtime = opt.into_runtime();
+    //     let addr = bind_to.parse().unwrap();
 
-        //     let addr = bind_to.parse().unwrap();
+    //     crate::run(runtime, addr).await.unwrap();
+    // });
 
-        //     crate::run(runtime, addr).await.unwrap();
-        // });
+    //wait a bit, hopefully service will be up (TODO, better?)
+    // thread::sleep(Duration::new(3, 0));
 
-        //wait a bit, hopefully service will be up (TODO, better?)
-        // thread::sleep(Duration::new(3, 0));
+    // OK! fuck this is a blocker lol, need to figure this out. generic method for working with fold over _ref's_, to impl clone and etc
 
-        // OK! fuck this is a blocker lol, need to figure this out. generic method for working with fold over _ref's_, to impl clone and etc
-
+    // NOTE: could use Free/Cofree here sume how
 
     async fn round_trip(input: TomlSimple) -> anyhow::Result<()> {
         let port = 8088; // TODO: reserve port somehow? idk
@@ -403,17 +422,39 @@ mod tests {
         let hash = client.put_nodes_full(input.clone()).await?;
 
         let fetched: TomlPartial = client.get_nodes(hash.clone()).await?;
-        let fetched = fetched.as_simple().expect("I haven't implemented stop conditions for the get_nodes stream though (maximum size or etc"); 
+        let fetched = fetched.as_simple().expect("I haven't implemented stop conditions for the get_nodes stream though (maximum size or etc");
 
-        // provided tree was just round-tripped. 
+        // provided tree was just round-tripped.
         assert_eq!(input, fetched);
 
+        // NOTE: paginated fetch would be cool even if specifics never exposed to callers of API - max batch size
+        // NOTE2: paginated fetch would be cool - can add on client side if I want, just nuke stream/conn after N elements
+        // NOTE: pagination and filtering need to be expressed differently, so need to have server end (eventually) send back
+        // NOTE: something like "the filter says you can't have this node" VS. this node hasn't hit the stream yet
+        // NOTE: sort of a 'cap'/'filter_says_no' token sent as part of the node
 
-        // NOTE: paginated fetch would be cool even if specifics never exposed to callers of API
-        // NOTE: so - let's sideline the whole metadata js filter thing and just have max req size + max depth
+        // TODO futumorphism here, eventually, to deal with case where resp is paginated). async futumorphism, just like in haskell.
+        // TODO lmao fun fun fun
 
         // use a janky async function to fetch a structure node by node, simpl async recursive
-        let fetched = fetch_recursive_naive(hash, client).await;
+        // let fetched = fetch_recursive_naive(hash, client).await;
+        let client2 = client.clone();
+        let fetched = TomlSimple::unfold_recursive_async(
+            hash,
+            Arc::new(move |hash| {
+                let client2 = client2.clone();
+                async move {
+                    let res = client2
+                        .clone()
+                        .get_node(hash)
+                        .await
+                        .expect("failed getting layer");
+                    MerkleTomlFunctorToken::<String>::fmap(res, |hdr| hdr.hash)
+                }
+                .boxed()
+            }),
+        )
+        .await;
         println!("fetched: {:?}", fetched);
         assert_eq!(input, fetched);
 
@@ -422,38 +463,37 @@ mod tests {
         Ok(())
     }
 
-        fn fetch_recursive_naive(
-            h: Hash,
-            mut c: Client<MerkleTomlFunctorToken>,
-        ) -> BoxFuture<'static, TomlSimple> {
-            async move {
-                let node = c.get_node(h).await.unwrap();
+    fn fetch_recursive_naive(
+        h: Hash,
+        mut c: Client<MerkleTomlFunctorToken>,
+    ) -> BoxFuture<'static, TomlSimple> {
+        async move {
+            let node = c.get_node(h).await.unwrap();
 
-                match node {
-                    MerkleToml::Map(m) => {
-                        let mut mm = HashMap::new();
-                        for (k, h) in m.into_iter() {
-                            let n = fetch_recursive_naive(h.hash.clone(), c.clone()).await;
-                            mm.insert(k, n);
-                        }
-
-                        TomlSimple::Map(mm)
+            match node {
+                MerkleToml::Map(m) => {
+                    let mut mm = HashMap::new();
+                    for (k, h) in m.into_iter() {
+                        let n = fetch_recursive_naive(h.hash.clone(), c.clone()).await;
+                        mm.insert(k, n);
                     }
-                    MerkleToml::List(l) => {
-                        let mut ll = Vec::new();
-                        for h in l.into_iter() {
-                            let n = fetch_recursive_naive(h.hash.clone(), c.clone()).await;
-                            ll.push(n);
-                        }
 
-                        TomlSimple::List(ll)
-                    }
-                    MerkleToml::Scalar(s) => TomlSimple::Scalar(s),
+                    TomlSimple::Map(mm)
                 }
-            }
-            .boxed()
-        }
+                MerkleToml::List(l) => {
+                    let mut ll = Vec::new();
+                    for h in l.into_iter() {
+                        let n = fetch_recursive_naive(h.hash.clone(), c.clone()).await;
+                        ll.push(n);
+                    }
 
+                    TomlSimple::List(ll)
+                }
+                MerkleToml::Scalar(s) => TomlSimple::Scalar(s),
+            }
+        }
+        .boxed()
+    }
 
     fn pair(a: TomlSimple, b: TomlSimple) -> TomlSimple {
         TomlSimple::List(vec![a, b])
@@ -469,9 +509,7 @@ mod tests {
 
         let t = TomlSimple::Map(h);
 
-        round_trip(t)
-            .await
-            .unwrap();
+        round_trip(t).await.unwrap();
     }
 
     #[test]
@@ -505,9 +543,7 @@ mod tests {
             println!("SPAWN RUNTIME");
             Runtime::new()
                 .unwrap()
-                .block_on(async {
-                    round_trip(v).await
-                })
+                .block_on(async { round_trip(v).await })
                 .unwrap();
 
             Ok(())

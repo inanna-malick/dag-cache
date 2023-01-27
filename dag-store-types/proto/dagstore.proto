@@ -7,7 +7,8 @@ service DagStore {
   rpc GetNode(Hash) returns (Node) {}
 
   // get nodes, using provided matcher fn to decide which subnodes to traverse and return
-  rpc GetNodes(Hash) returns (stream NodeWithHash) {}
+  // returns GetNodesResp, either nodes or nodes we chose not to traverse
+  rpc GetNodes(Hash) returns (stream GetNodesResp) {}
 
   rpc PutNode(Node) returns (Hash) {}
 
@@ -17,7 +18,17 @@ service DagStore {
 // TODO: use this instead of just a hash for getnodes, but only AFTER I have some working proptests
 message GetNodesReq {
   Hash hash = 1;
-  string filter_fn = 2; // TODO: some javascript used to filter metadata
+  oneof matcher {
+    string string_matcher = 2;
+    // TODO: enum, some javascript used to filter metadata 
+  }
+}
+
+message GetNodesResp {
+  oneof link {
+    Header chose_not_to_traverse = 1;
+    NodeWithHash node_response = 2;
+  }
 }
 
 

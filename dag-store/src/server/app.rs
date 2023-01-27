@@ -2,6 +2,7 @@ use crate::capabilities::{get_and_cache, put_and_cache};
 use crate::capabilities::{Cache, HashedBlobStore};
 use crate::server::batch_get;
 use crate::server::batch_put;
+use dag_store_types::types::grpc::GetNodesResp;
 use dag_store_types::types::{
     api, domain,
     grpc::{dag_store_server::DagStore, BulkPutReq, GetNodesReq, Hash, Node, NodeWithHash},
@@ -55,7 +56,7 @@ impl Runtime {
 
         let stream = stream
             .map(|elem| match elem {
-                Ok(n) => Ok(n.into_proto()),
+                Ok(x) => Ok(x.into_proto()),
                 Err(e) => Err(e.into()),
             })
             .boxed();
@@ -97,7 +98,7 @@ impl Runtime {
     }
 }
 
-type GetNodesStream = Pin<Box<dyn Stream<Item = Result<NodeWithHash, Status>> + Send + 'static>>;
+type GetNodesStream = Pin<Box<dyn Stream<Item = Result<GetNodesResp, Status>> + Send + 'static>>;
 
 // NOTE: async_trait and instrument are mutually incompatible, so use non-async-trait fns and async trait stubs
 #[tonic::async_trait]

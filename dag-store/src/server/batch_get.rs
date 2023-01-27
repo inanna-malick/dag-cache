@@ -3,7 +3,7 @@ mod js_filter;
 use crate::capabilities::get_and_cache;
 use crate::capabilities::{Cache, HashedBlobStore};
 use chashmap::CHashMap;
-use dag_store_types::types::domain::{Hash, Node, NodeWithHash};
+use dag_store_types::types::domain::{GetNodesResp, Hash, Node, NodeWithHash};
 use dag_store_types::types::errors::DagCacheError;
 use futures::Stream;
 use futures::StreamExt;
@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 use tracing::{error, info};
 
 type GetNodesStream =
-    Pin<Box<dyn Stream<Item = Result<NodeWithHash, DagCacheError>> + Send + 'static>>;
+    Pin<Box<dyn Stream<Item = Result<GetNodesResp, DagCacheError>> + Send + 'static>>;
 
 pub fn batch_get<'a>(
     store: &'a Arc<dyn HashedBlobStore>,
@@ -41,7 +41,7 @@ fn batch_get_ana_internal<'a>(
     store: &'a Arc<dyn HashedBlobStore>,
     cache: &'a Arc<Cache>,
     hash: Hash,
-    resp_chan: mpsc::Sender<Result<NodeWithHash, DagCacheError>>, // used to send completed nodes (eagerly)
+    resp_chan: mpsc::Sender<Result<GetNodesResp, DagCacheError>>, // used to send completed nodes (eagerly)
     to_populate: Arc<CHashMap<Hash, ()>>,                         // used to memoize async fetches
 ) {
     let store = store.clone();
@@ -62,7 +62,7 @@ async fn batch_get_worker(
     store: Arc<dyn HashedBlobStore>,
     cache: Arc<Cache>,
     hash: Hash,
-    resp_chan: mpsc::Sender<Result<NodeWithHash, DagCacheError>>,
+    resp_chan: mpsc::Sender<Result<GetNodesResp, DagCacheError>>,
     to_populate: Arc<CHashMap<Hash, ()>>, // used to memoize async fetches
 ) {
     let res = get_and_cache(&store, &cache, hash).await;
@@ -73,19 +73,31 @@ async fn batch_get_worker(
             // short circuit if failure
             // NOTE: should have some way to signal that this is an error instead of just failing?
             //       but the channel's broken so I can't.
-            let sr = resp_chan.send(Ok(NodeWithHash { hash, node })).await;
+            let sr = resp_chan
+                .send(Ok(GetNodesResp::Node(NodeWithHash { hash, node })))
+                .await;
 
             // todo: weird type errors (async/await?), refactor later
             match sr {
                 Ok(()) => {
                     for link in links.into_iter() {
-                        batch_get_ana_internal(
-                            &store,
-                            &cache,
-                            link.hash,
-                            resp_chan.clone(),
-                            to_populate.clone(),
-                        );
+                        // TODO: metadata filtering here
+                        if false {
+                            if let Err(e) = resp_chan
+                                .send(Ok(GetNodesResp::ChoseNotToExplore(link)))
+                                .await
+                            {
+                                error!("failed sending 'chose not to traverse' resp via mpsc due to {:?}", e);
+                            }
+                        } else {
+                            batch_get_ana_internal(
+                                &store,
+                                &cache,
+                                link.hash,
+                                resp_chan.clone(),
+                                to_populate.clone(),
+                            );
+                        }
                     }
                 }
                 Err(e) => {

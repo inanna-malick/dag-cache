@@ -455,6 +455,7 @@ dependencies = [
  "base58",
  "blake3",
  "bytes 0.4.12",
+ "futures",
  "prost",
  "prost-derive",
  "rand 0.7.3",
