@@ -140,27 +140,27 @@ pub mod test {
         }
     }
 
-    impl<K: Eq + std::hash::Hash + Ord + Send + Sync + 'static> JoinFuture for MerkleTomlFunctorToken<K> {
+    impl<K: Eq + std::hash::Hash + Ord + Send + Sync + 'static> JoinFuture
+        for MerkleTomlFunctorToken<K>
+    {
         fn join_layer<A: Send + 'static>(
             input: <Self as Functor>::Layer<futures::future::BoxFuture<'static, A>>,
         ) -> futures::future::BoxFuture<'static, <Self as Functor>::Layer<A>> {
-                match input {
-                    MerkleToml::Map(xs) => async {
-                        let xs = futures::future::join_all(
-                            xs.into_iter().map(|(k, fv)| fv.map(|v| (k, v))),
-                        )
-                        .await;
-                        MerkleToml::Map(xs.into_iter().collect())
-                    }.boxed(),
-                    MerkleToml::List(xs) => async {
-                        let xs = futures::future::join_all(
-                            xs.into_iter(),
-                        )
-                        .await;
-                        MerkleToml::List(xs)
-                    }.boxed(),
-                    MerkleToml::Scalar(s) => futures::future::ready(MerkleToml::Scalar(s)).boxed(),
+            match input {
+                MerkleToml::Map(xs) => async {
+                    let xs =
+                        futures::future::join_all(xs.into_iter().map(|(k, fv)| fv.map(|v| (k, v))))
+                            .await;
+                    MerkleToml::Map(xs.into_iter().collect())
                 }
+                .boxed(),
+                MerkleToml::List(xs) => async {
+                    let xs = futures::future::join_all(xs.into_iter()).await;
+                    MerkleToml::List(xs)
+                }
+                .boxed(),
+                MerkleToml::Scalar(s) => futures::future::ready(MerkleToml::Scalar(s)).boxed(),
+            }
         }
     }
 

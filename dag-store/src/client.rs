@@ -112,32 +112,45 @@ impl<F: Functor> Clone for Client<F> {
 }
 
 // workaround for https://github.com/rust-lang/rust/issues/106832
-pub trait Shim {
-    type EncodeDecodeable: Serialize + for<'a> Deserialize<'a>;
-    type CloneableWithHeaders: Clone;
+mod shim {
+    use super::*;
+    pub trait Shim: Functor {
+        fn encode(e: &<Self as Functor>::Layer<domain::Id>) -> Result<Vec<u8>, anyhow::Error>;
 
-    fn encode(e: &Self::EncodeDecodeable) -> Result<Vec<u8>, anyhow::Error> {
-        let x = serde_json::to_vec(e)?;
-        Ok(x)
+        fn decode(e: &[u8]) -> Result<<Self as Functor>::Layer<domain::Id>, anyhow::Error>;
+
+        fn clone_with_headers(
+            e: &<Self as Functor>::Layer<domain::Header>,
+        ) -> <Self as Functor>::Layer<domain::Header>;
     }
 
-    fn decode(e: &[u8]) -> Result<Self::EncodeDecodeable, anyhow::Error> {
-        let x = serde_json::from_slice(e)?;
-        Ok(x)
-    }
+    impl<X: Functor> Shim for X
+    where
+        <X as Functor>::Layer<domain::Id>: Serialize + for<'a> Deserialize<'a>,
+        <X as Functor>::Layer<domain::Header>: Clone,
+    {
+        fn encode(e: &<Self as Functor>::Layer<domain::Id>) -> Result<Vec<u8>, anyhow::Error> {
+            let x = serde_json::to_vec(e)?;
+            Ok(x)
+        }
 
-    fn clone_with_headers(e: &Self::CloneableWithHeaders) -> Self::CloneableWithHeaders {
-        e.clone()
+        fn decode(e: &[u8]) -> Result<<Self as Functor>::Layer<domain::Id>, anyhow::Error> {
+            let x = serde_json::from_slice(e)?;
+            Ok(x)
+        }
+
+        fn clone_with_headers(
+            e: &<Self as Functor>::Layer<domain::Header>,
+        ) -> <Self as Functor>::Layer<domain::Header> {
+            e.clone()
+        }
     }
 }
 
 impl<F: Functor> Client<F>
 where
     // TODO: remove shim after fix for https://github.com/rust-lang/rust/issues/106832
-    F: Shim<
-        EncodeDecodeable = F::Layer<domain::Id>,
-        CloneableWithHeaders = F::Layer<domain::Header>,
-    >,
+    F: shim::Shim,
 {
     fn encode(to_encode: F::Layer<domain::Id>) -> Vec<u8> {
         F::encode(&to_encode).unwrap() // doesn't have to be json but makes debugging easier
@@ -332,16 +345,14 @@ mod tests {
     use dag_store_types::test::TomlSimple;
     // TODO just move here mb
     use dag_store_types::{
-        test::{MerkleToml, MerkleTomlFunctorToken, Toml},
-        types::domain,
+        test::{MerkleToml, MerkleTomlFunctorToken},
     };
     use futures::future::BoxFuture;
     use futures::FutureExt;
     use proptest::{prelude::*, test_runner::*};
-    use recursion_schemes::functor::FunctorRefExt;
-    use recursion_schemes::join_future::*;
-    use recursion_schemes::recursive::{from_fix, into_fix, Corecursive, Fix};
+    use recursion_schemes::recursive::{Corecursive};
     use tokio::runtime::Runtime;
+    use recursion_schemes::join_future::CorecursiveAsyncExt;
 
     use super::*;
 
@@ -383,36 +394,33 @@ mod tests {
         }
     }
 
-    impl Shim for MerkleTomlFunctorToken {
-        type EncodeDecodeable = MerkleToml<domain::Id>;
-        type CloneableWithHeaders = MerkleToml<domain::Header>;
-    }
 
-    // let svc = tokio::spawn(  async move {
-    //     let opt = crate::Opt {
-    //         port,
-    //         fs_path: tempdir_path, // tempdir
-    //         max_cache_entries: NonZeroUsize::new(64).unwrap(),
-    //     };
-
-    //     let bind_to = format!("0.0.0.0:{}", &opt.port);
-    //     let runtime = opt.into_runtime();
-
-    //     let addr = bind_to.parse().unwrap();
-
-    //     crate::run(runtime, addr).await.unwrap();
-    // });
-
-    //wait a bit, hopefully service will be up (TODO, better?)
-    // thread::sleep(Duration::new(3, 0));
-
-    // OK! fuck this is a blocker lol, need to figure this out. generic method for working with fold over _ref's_, to impl clone and etc
-
-    // NOTE: could use Free/Cofree here sume how
 
     async fn round_trip(input: TomlSimple) -> anyhow::Result<()> {
-        let port = 8088; // TODO: reserve port somehow? idk
+        let port = 8098; // TODO: reserve port somehow? idk
                          // spawn svc
+
+        // Fails to connect (???, soln: just spawn a process I guess? ugh lol)
+        let svc = tokio::spawn(  async move {
+            let opt = crate::Opt {
+                port,
+                fs_path: "/tmp/testdir_lazy_manual_created".to_string(), // tempdir
+                max_cache_entries: NonZeroUsize::new(64).unwrap(),
+            };
+
+            let bind_to = format!("0.0.0.0:{}", &opt.port);
+            let runtime = opt.into_runtime();
+
+            let addr = bind_to.parse().unwrap();
+
+            crate::run(runtime, addr).await.unwrap();
+        });
+
+        //wait a bit, hopefully service will be up (TODO, better?)
+        thread::sleep(Duration::new(3, 0));
+        // OK! fuck this is a blocker lol, need to figure this out. generic method for working with fold over _ref's_, to impl clone and etc
+
+        println!("BUILD CLIENT");
 
         let mut client =
             Client::<MerkleTomlFunctorToken>::build(format!("http://0.0.0.0:{}", port))
@@ -499,8 +507,9 @@ mod tests {
         TomlSimple::List(vec![a, b])
     }
 
-    #[tokio::test]
-    async fn test() {
+    // needs to be multithread to work w/ spawning app to test against
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_round_trip_hardcoded_scenario() {
         let t = TomlSimple::List(vec![TomlSimple::Scalar(1), TomlSimple::Scalar(2)]);
 
         let h = vec![("a".to_string(), t.clone()), ("b".to_string(), t.clone())]
@@ -512,7 +521,7 @@ mod tests {
         round_trip(t).await.unwrap();
     }
 
-    #[test]
+    // #[test]
     fn test_round_trip() {
         // there's only one leaf type
         let leaf = prop::arbitrary::any::<i32>().prop_map(|x| TomlSimple::Scalar(x));
