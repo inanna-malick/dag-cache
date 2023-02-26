@@ -10,7 +10,7 @@ use dag_store_types::types::{
     domain::{self, Hash},
     grpc::dag_store_client::DagStoreClient,
 };
-use recursion_schemes::functor::FunctorExt;
+use recursion_schemes::functor::{FunctorExt, AsRefF};
 use recursion_schemes::recursive::{Corecursive, Fix, RecursiveExt};
 use recursion_schemes::{
     functor::{Compose, Functor, PartiallyApplied},
@@ -18,6 +18,8 @@ use recursion_schemes::{
 };
 use serde::{Deserialize, Serialize};
 use tonic::transport::{self, Channel};
+
+use self::shim::ClientFunctorShim;
 
 // struct PartialMerkleTree<F: Functor> {
 //     root: Hash,
@@ -35,7 +37,7 @@ type PartialMerkleTree<F> = Fix<PartialMerkleTreeLayer<F>>;
 //     nodes: HashMap<Id, LocalTreeLayer<F>>,
 // }
 
-enum MerkleLayer<X> {
+pub enum MerkleLayer<X> {
     Local(Header, X),
     Remote(Header),            // remote, did not explore (perhaps due to pagination)
     ChoseNotToExplore(Header), // remote, explicitly filtered out
@@ -65,6 +67,21 @@ impl Functor for MerkleLayer<PartiallyApplied> {
         }
     }
 }
+
+impl AsRefF for MerkleLayer<PartiallyApplied> {
+    type RefFunctor<'a> = MerkleLayer<PartiallyApplied>;
+
+    fn as_ref<'a, A>(
+        input: &'a <Self as Functor>::Layer<A>,
+    ) -> <Self::RefFunctor<'a> as Functor>::Layer<&'a A> {
+        match input {
+            MerkleLayer::Local(hdr, x) => MerkleLayer::Local(hdr.clone(), &x),
+            MerkleLayer::Remote(hdr) => MerkleLayer::Remote(hdr.clone()),
+            MerkleLayer::ChoseNotToExplore(hdr) =>  MerkleLayer::ChoseNotToExplore(hdr.clone()),
+        }
+    }
+}
+
 
 pub enum BulkPutLink2<X> {
     Remote(domain::Hash),
@@ -114,51 +131,34 @@ impl<F: Functor> Clone for Client<F> {
 // workaround for https://github.com/rust-lang/rust/issues/106832
 mod shim {
     use super::*;
-    pub trait Shim: Functor {
-        fn encode(e: &<Self as Functor>::Layer<domain::Id>) -> Result<Vec<u8>, anyhow::Error>;
-
-        fn decode(e: &[u8]) -> Result<<Self as Functor>::Layer<domain::Id>, anyhow::Error>;
-
-        fn clone_with_headers(
-            e: &<Self as Functor>::Layer<domain::Header>,
-        ) -> <Self as Functor>::Layer<domain::Header>;
+    pub trait ClientFunctorShim: Functor
+    where
+        <Self as Functor>::Layer<domain::Id>: Serialize + for<'a> Deserialize<'a>,
+        <Self as Functor>::Layer<domain::Header>: Clone,
+    {
     }
 
-    impl<X: Functor> Shim for X
+    impl<X: Functor> ClientFunctorShim for X
     where
         <X as Functor>::Layer<domain::Id>: Serialize + for<'a> Deserialize<'a>,
         <X as Functor>::Layer<domain::Header>: Clone,
     {
-        fn encode(e: &<Self as Functor>::Layer<domain::Id>) -> Result<Vec<u8>, anyhow::Error> {
-            let x = serde_json::to_vec(e)?;
-            Ok(x)
-        }
-
-        fn decode(e: &[u8]) -> Result<<Self as Functor>::Layer<domain::Id>, anyhow::Error> {
-            let x = serde_json::from_slice(e)?;
-            Ok(x)
-        }
-
-        fn clone_with_headers(
-            e: &<Self as Functor>::Layer<domain::Header>,
-        ) -> <Self as Functor>::Layer<domain::Header> {
-            e.clone()
-        }
     }
 }
 
-impl<F: Functor> Client<F>
+impl<F: shim::ClientFunctorShim> Client<F>
 where
     // TODO: remove shim after fix for https://github.com/rust-lang/rust/issues/106832
-    F: shim::Shim,
+    <F as Functor>::Layer<domain::Id>: Serialize + for<'a> Deserialize<'a>,
+    <F as Functor>::Layer<domain::Header>: Clone,
 {
     fn encode(to_encode: F::Layer<domain::Id>) -> Vec<u8> {
-        F::encode(&to_encode).unwrap() // doesn't have to be json but makes debugging easier
+        serde_json::to_vec(&to_encode).unwrap() // doesn't have to be json but makes debugging easier
     }
 
     // TODO: make encode the reverse of this. problem: encode is used for both single put and bulkput (different type, bulk put link)
     fn decode(node: domain::Node) -> anyhow::Result<F::Layer<domain::Header>> {
-        let decoded = F::decode(&node.data)?; // doesn't have to be json but makes debugging easier
+        let decoded = serde_json::from_slice(&node.data)?; // doesn't have to be json but makes debugging easier
 
         let mut headers = {
             let mut h = HashMap::new();
@@ -177,7 +177,7 @@ where
         Ok(res)
     }
 
-    async fn build(path: String) -> anyhow::Result<Self> {
+    pub async fn build(path: String) -> anyhow::Result<Self> {
         let underlying = DagStoreClient::connect(path).await?;
         Ok(Self {
             underlying,
@@ -198,7 +198,7 @@ where
         Ok(decoded)
     }
 
-    async fn get_nodes<X>(&mut self, h: domain::Hash) -> anyhow::Result<X>
+    async fn get_nodes<X>(&mut self, h: domain::Hash, max_elems: Option<usize>) -> anyhow::Result<X>
     where
         X: Corecursive<FunctorToken = PartialMerkleTreeLayer<F>>,
     {
@@ -213,29 +213,34 @@ where
 
         let mut chose_not_to_explore = HashSet::new();
 
-        let node_map: HashMap<domain::Hash, F::Layer<Header>> = node_stream
-            .map_err(|status| anyhow::Error::from(status))
-            .and_then(|x| {
-                future::ready(domain::GetNodesResp::from_proto(x).map_err(anyhow::Error::from))
-            })
-            .try_filter_map(|x| match x {
-                domain::GetNodesResp::Node(NodeWithHash { hash, node }) => {
-                    future::ready(Self::decode(node).map(|node| Some((hash, node))))
-                }
-                domain::GetNodesResp::ChoseNotToExplore(hdr) => {
-                    chose_not_to_explore.insert(hdr);
-                    future::ok(None)
-                }
-            })
-            // .try_filter_map(|x| x)
-            .try_collect()
-            .await?;
+        let node_map: HashMap<domain::Hash, F::Layer<Header>> = {
+            let s = node_stream
+                .map_err(|status| anyhow::Error::from(status))
+                .and_then(|x| {
+                    future::ready(domain::GetNodesResp::from_proto(x).map_err(anyhow::Error::from))
+                })
+                .try_filter_map(|x| match x {
+                    domain::GetNodesResp::Node(NodeWithHash { hash, node }) => {
+                        future::ready(Self::decode(node).map(|node| Some((hash, node))))
+                    }
+                    domain::GetNodesResp::ChoseNotToExplore(hdr) => {
+                        chose_not_to_explore.insert(hdr);
+                        future::ok(None)
+                    }
+                });
+
+            if let Some(max_elems) = max_elems {
+                s.take(max_elems).try_collect().await?
+            } else {
+                s.try_collect().await?
+            }
+        };
 
         let root_node = node_map.get(&h).ok_or(anyhow::Error::msg(
             "get_nodes must at least return node for root hash",
         ))?;
 
-        let res = X::from_layer(F::fmap(F::clone_with_headers(root_node), |header| {
+        let res = X::from_layer(F::fmap(root_node.clone(), |header| {
             Compose::<MerkleLayer<PartiallyApplied>, F>::expand_and_collapse(
                 header,
                 |header| {
@@ -244,7 +249,7 @@ where
                     } else {
                         match node_map.get(&header.hash) {
                             // NOTE: requires clone to handle duplicate nodes, shrug emoji (cleaner API)
-                            Some(node) => MerkleLayer::Local(header, F::clone_with_headers(node)),
+                            Some(node) => MerkleLayer::Local(header, node.clone()),
                             None => MerkleLayer::Remote(header),
                         }
                     }
@@ -344,15 +349,13 @@ mod tests {
 
     use dag_store_types::test::TomlSimple;
     // TODO just move here mb
-    use dag_store_types::{
-        test::{MerkleToml, MerkleTomlFunctorToken},
-    };
+    use dag_store_types::test::{MerkleToml, MerkleTomlFunctorToken};
     use futures::future::BoxFuture;
     use futures::FutureExt;
     use proptest::{prelude::*, test_runner::*};
-    use recursion_schemes::recursive::{Corecursive};
-    use tokio::runtime::Runtime;
     use recursion_schemes::join_future::CorecursiveAsyncExt;
+    use recursion_schemes::recursive::Corecursive;
+    use tokio::runtime::Runtime;
 
     use super::*;
 
@@ -394,14 +397,12 @@ mod tests {
         }
     }
 
-
-
     async fn round_trip(input: TomlSimple) -> anyhow::Result<()> {
         let port = 8098; // TODO: reserve port somehow? idk
                          // spawn svc
 
         // Fails to connect (???, soln: just spawn a process I guess? ugh lol)
-        let svc = tokio::spawn(  async move {
+        let svc = tokio::spawn(async move {
             let opt = crate::Opt {
                 port,
                 fs_path: "/tmp/testdir_lazy_manual_created".to_string(), // tempdir
@@ -465,8 +466,6 @@ mod tests {
         .await;
         println!("fetched: {:?}", fetched);
         assert_eq!(input, fetched);
-
-        // panic!("yolo");
 
         Ok(())
     }

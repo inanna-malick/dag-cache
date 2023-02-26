@@ -22,6 +22,12 @@ pub mod test {
         Scalar(i32),
     }
 
+    // impl<'a> Display for MerkleToml<String, &'a str> {
+    //     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    //         write!(f, "{:?}", self)
+    //     }
+    // }
+
     pub type Toml<K = String> = Fix<MerkleTomlFunctorToken<K>>;
 
     pub type MerkleTomlFunctorToken<K = String> = MerkleToml<PartiallyApplied, K>;
@@ -62,7 +68,7 @@ pub mod test {
     }
 
     // janky & etc
-    impl<X: Display + Eq + std::hash::Hash> Display for MerkleToml<String, X> {
+    impl<'a> Display for MerkleToml<String, &'a str> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             let s = match self {
                 MerkleToml::Map(xs) => {
