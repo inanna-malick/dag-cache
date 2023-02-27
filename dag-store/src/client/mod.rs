@@ -1,5 +1,6 @@
 use futures::{StreamExt, TryStreamExt};
 use std::collections::{HashMap, HashSet};
+use std::fmt::Display;
 use std::sync::atomic::Ordering;
 use std::{marker::PhantomData, sync::atomic::AtomicU32};
 
@@ -10,7 +11,7 @@ use dag_store_types::types::{
     domain::{self, Hash},
     grpc::dag_store_client::DagStoreClient,
 };
-use recursion_schemes::functor::{FunctorExt, AsRefF};
+use recursion_schemes::functor::{AsRefF, FunctorExt};
 use recursion_schemes::recursive::{Corecursive, Fix, RecursiveExt};
 use recursion_schemes::{
     functor::{Compose, Functor, PartiallyApplied},
@@ -41,6 +42,17 @@ pub enum MerkleLayer<X> {
     Local(Header, X),
     Remote(Header),            // remote, did not explore (perhaps due to pagination)
     ChoseNotToExplore(Header), // remote, explicitly filtered out
+}
+
+// todo janky
+impl Display for MerkleLayer<usize> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MerkleLayer::Local(hdr, l) => write!(f, "local: {:?} => {}", hdr, l),
+            MerkleLayer::Remote(hdr) => write!(f, "remote: {:?}", hdr),
+            MerkleLayer::ChoseNotToExplore(hdr) => write!(f, "chose not to explore: {:?}", hdr),
+        }
+    }
 }
 
 impl<X> MerkleLayer<X> {
@@ -77,11 +89,10 @@ impl AsRefF for MerkleLayer<PartiallyApplied> {
         match input {
             MerkleLayer::Local(hdr, x) => MerkleLayer::Local(hdr.clone(), &x),
             MerkleLayer::Remote(hdr) => MerkleLayer::Remote(hdr.clone()),
-            MerkleLayer::ChoseNotToExplore(hdr) =>  MerkleLayer::ChoseNotToExplore(hdr.clone()),
+            MerkleLayer::ChoseNotToExplore(hdr) => MerkleLayer::ChoseNotToExplore(hdr.clone()),
         }
     }
 }
-
 
 pub enum BulkPutLink2<X> {
     Remote(domain::Hash),
@@ -185,7 +196,7 @@ where
         })
     }
 
-    async fn get_node(&mut self, h: domain::Hash) -> anyhow::Result<F::Layer<domain::Header>> {
+    pub async fn get_node(&mut self, h: domain::Hash) -> anyhow::Result<F::Layer<domain::Header>> {
         // TODO: remove all that opportunistic get crap, having a filter fn removes the need for it
         // NOTE: can also have v1 be an exact matching on the string value
         let resp = self
@@ -262,7 +273,7 @@ where
     }
 
     /// upload a tree of nodes with only local subnodes
-    async fn put_nodes_full<X>(&mut self, local_tree: X) -> anyhow::Result<domain::Hash>
+    pub async fn put_nodes_full<X>(&mut self, local_tree: X) -> anyhow::Result<domain::Hash>
     where
         X: Recursive<FunctorToken = F>,
     {
@@ -340,12 +351,56 @@ where
     }
 }
 
+// FIXME, shared test code shrug emoji
+enum TomlPartial {
+    Map(HashMap<String, MerkleLayer<TomlPartial>>),
+    List(Vec<MerkleLayer<TomlPartial>>),
+    Scalar(i32),
+}
+
+impl TomlPartial {
+    fn as_simple(self) -> Option<dag_store_types::test::TomlSimple> {
+        match self {
+            TomlPartial::Map(xs) => xs
+                .into_iter()
+                .map(|(k, v)| v.local().and_then(|v| v.as_simple().map(|v| (k, v))))
+                .collect::<Option<_>>()
+                .map(dag_store_types::test::TomlSimple::Map),
+            TomlPartial::List(xs) => xs
+                .into_iter()
+                .map(|v| v.local().and_then(|v| v.as_simple()))
+                .collect::<Option<_>>()
+                .map(dag_store_types::test::TomlSimple::List),
+            TomlPartial::Scalar(x) => Some(dag_store_types::test::TomlSimple::Scalar(x)),
+        }
+    }
+}
+
+impl Corecursive for TomlPartial {
+    type FunctorToken = Compose<
+        dag_store_types::test::MerkleTomlFunctorToken<String>,
+        MerkleLayer<PartiallyApplied>,
+    >;
+
+    fn from_layer(x: <Self::FunctorToken as Functor>::Layer<Self>) -> Self {
+        match x {
+            dag_store_types::test::MerkleToml::Map(xs) => {
+                TomlPartial::Map(xs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())
+            }
+            dag_store_types::test::MerkleToml::List(xs) => {
+                TomlPartial::List(xs.into_iter().collect())
+            }
+            dag_store_types::test::MerkleToml::Scalar(x) => TomlPartial::Scalar(x),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroUsize;
     use std::sync::Arc;
+    use std::thread;
     use std::time::Duration;
-    use std::{fmt::Debug, thread};
 
     use dag_store_types::test::TomlSimple;
     // TODO just move here mb
@@ -354,54 +409,14 @@ mod tests {
     use futures::FutureExt;
     use proptest::{prelude::*, test_runner::*};
     use recursion_schemes::join_future::CorecursiveAsyncExt;
-    use recursion_schemes::recursive::Corecursive;
     use tokio::runtime::Runtime;
 
     use super::*;
-
-    enum TomlPartial {
-        Map(HashMap<String, MerkleLayer<TomlPartial>>),
-        List(Vec<MerkleLayer<TomlPartial>>),
-        Scalar(i32),
-    }
-
-    impl TomlPartial {
-        fn as_simple(self) -> Option<TomlSimple> {
-            match self {
-                TomlPartial::Map(xs) => xs
-                    .into_iter()
-                    .map(|(k, v)| v.local().and_then(|v| v.as_simple().map(|v| (k, v))))
-                    .collect::<Option<_>>()
-                    .map(TomlSimple::Map),
-                TomlPartial::List(xs) => xs
-                    .into_iter()
-                    .map(|v| v.local().and_then(|v| v.as_simple()))
-                    .collect::<Option<_>>()
-                    .map(TomlSimple::List),
-                TomlPartial::Scalar(x) => Some(TomlSimple::Scalar(x)),
-            }
-        }
-    }
-
-    impl Corecursive for TomlPartial {
-        type FunctorToken = Compose<MerkleTomlFunctorToken<String>, MerkleLayer<PartiallyApplied>>;
-
-        fn from_layer(x: <Self::FunctorToken as Functor>::Layer<Self>) -> Self {
-            match x {
-                MerkleToml::Map(xs) => {
-                    TomlPartial::Map(xs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())
-                }
-                MerkleToml::List(xs) => TomlPartial::List(xs.into_iter().collect()),
-                MerkleToml::Scalar(x) => TomlPartial::Scalar(x),
-            }
-        }
-    }
 
     async fn round_trip(input: TomlSimple) -> anyhow::Result<()> {
         let port = 8098; // TODO: reserve port somehow? idk
                          // spawn svc
 
-        // Fails to connect (???, soln: just spawn a process I guess? ugh lol)
         let svc = tokio::spawn(async move {
             let opt = crate::Opt {
                 port,
@@ -419,7 +434,6 @@ mod tests {
 
         //wait a bit, hopefully service will be up (TODO, better?)
         thread::sleep(Duration::new(3, 0));
-        // OK! fuck this is a blocker lol, need to figure this out. generic method for working with fold over _ref's_, to impl clone and etc
 
         println!("BUILD CLIENT");
 
@@ -430,7 +444,7 @@ mod tests {
 
         let hash = client.put_nodes_full(input.clone()).await?;
 
-        let fetched: TomlPartial = client.get_nodes(hash.clone()).await?;
+        let fetched: TomlPartial = client.get_nodes(hash.clone(), None).await?;
         let fetched = fetched.as_simple().expect("I haven't implemented stop conditions for the get_nodes stream though (maximum size or etc");
 
         // provided tree was just round-tripped.
