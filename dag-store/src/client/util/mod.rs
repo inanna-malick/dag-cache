@@ -53,7 +53,10 @@ impl<A: TreeItemRender> StatefulTree<A> {
         &mut self.items
     }
 
-    pub fn with_selected_leaf<'b>(&'b mut self, f: impl FnOnce(Option<&'b mut TreeItem<A>>)) {
+    pub fn with_selected_leaf<'b, X>(
+        &'b mut self,
+        f: impl FnOnce(Option<&'b mut TreeItem<A>>) -> X,
+    ) -> X {
         fn traverse<'short, A: TreeItemRender>(
             path: Vec<usize>,
             nodes: &'short mut [TreeItem<A>],

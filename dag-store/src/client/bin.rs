@@ -9,7 +9,7 @@ use crossterm::{
 use dag_store::client::{Client, MerkleLayer};
 use dag_store_types::{
     test::{MerkleToml, MerkleTomlFunctorToken, TomlSimple},
-    types::domain::{self, Hash},
+    types::domain::{self, Hash, Header, Id},
 };
 use recursion_schemes::functor::{AsRefF, Compose, Functor, PartiallyApplied};
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,7 @@ use tui_tree_widget::{Tree, TreeItem, TreeItemRender};
 
 type ChildIdx = usize;
 
-struct Layer<F: Functor>(<Compose<F, MerkleLayer<PartiallyApplied>> as Functor>::Layer<ChildIdx>);
+struct Layer<F: Functor>(<Compose<MerkleLayer<PartiallyApplied>, F> as Functor>::Layer<ChildIdx>);
 
 impl<F> TreeItemRender for Layer<F>
 where
@@ -34,15 +34,53 @@ where
     F: AsRefF,
 {
     fn as_text(&self) -> tui::text::Text {
-        let fmtd = <F::RefFunctor<'_> as Functor>::fmap(F::as_ref(&self.0), |partial| {
-            format!("{}", partial)
-        });
-        Wrapper(fmtd).into()
+        match &self.0 {
+            MerkleLayer::Local(hdr, node) => {
+                let mut text = Text::from(format!("local: {:?}", hdr));
+
+                let fmtd = <F::RefFunctor<'_> as Functor>::fmap(F::as_ref(&node), |idx| {
+                    format!("childidx: {}", idx)
+                });
+
+                let t: Text<'_> = Wrapper(fmtd).into();
+                text.extend(t);
+                text
+            }
+            MerkleLayer::Remote(hdr) => Text::from(format!("remote: {:?}", hdr)),
+            MerkleLayer::ChoseNotToExplore(hdr) => {
+                Text::from(format!("chose not to explore: {:?}", hdr))
+            }
+        }
+
+        // let fmtd = <F::RefFunctor<'_> as Functor>::fmap(F::as_ref(&self.0), |partial| {
+        //     format!("{}", partial)
+        // });
+        // Wrapper(fmtd).into()
     }
 }
 
-struct Wrapper<T>(T);
+// from single layer to start, can do multifetch later
+fn tree_node_from_layer<F>(hdr: Header, f: F::Layer<Header>) -> TreeItem<Layer<F>>
+where
+    F: Functor,
+    for<'a> Wrapper<<F::RefFunctor<'a> as Functor>::Layer<String>>: Into<Text<'a>>,
+    F: AsRefF,
+    <F as Functor>::Layer<domain::Id>: Serialize + for<'a> Deserialize<'a>,
+    <F as Functor>::Layer<domain::Header>: Clone,
+{
+    let mut child_nodes = Vec::new();
 
+    let elem = F::fmap(f, |hdr| {
+        let idx = child_nodes.len();
+        child_nodes.push(TreeItem::new_leaf(Layer(MerkleLayer::Remote(hdr))));
+        idx
+    });
+
+    TreeItem::new(Layer(MerkleLayer::Local(hdr, elem)), child_nodes)
+}
+
+// FIXME: hax for orphan instance rule, specific child idx type
+struct Wrapper<T>(T);
 impl<'a> Into<Text<'a>> for Wrapper<MerkleToml<String, &'a str>> {
     fn into(self) -> Text<'a> {
         let spans: Vec<Spans<'a>> = match self.0 {
@@ -51,13 +89,14 @@ impl<'a> Into<Text<'a>> for Wrapper<MerkleToml<String, &'a str>> {
                 let mut elems = xs.into_iter().collect::<Vec<_>>();
                 // produce stable ordering for visualization
                 elems.sort();
-                elems.iter()
+                elems
+                    .iter()
                     .map(|(k, v)| format!("({} -> {}), ", k, v).into())
                     .collect()
             }
             MerkleToml::List(xs) => {
                 // TODO: append 'list'
-                xs.into_iter().map(|x| x.into()).collect()
+                xs.into_iter().map(|x| x.to_string().into()).collect()
             }
             MerkleToml::Scalar(s) => vec![format!("Scalar: {:?}", s).into()],
         };
@@ -79,14 +118,14 @@ where
     <F as Functor>::Layer<domain::Id>: Serialize + for<'a> Deserialize<'a>,
     <F as Functor>::Layer<domain::Header>: Clone,
 {
-    async fn new(mut client: Client<F>, root: Hash) -> Result<Self, Box<dyn std::error::Error>> {
-        let root = client.get_node(root).await?;
-        let root = F::fmap(root, |hdr| MerkleLayer::Remote(hdr));
+    async fn new(client: Client<F>, root_hash: Hash) -> Result<Self, Box<dyn std::error::Error>> {
+        let root = TreeItem::new_leaf(Layer(MerkleLayer::Remote(Header {
+            id: Id(0),
+            hash: root_hash,
+            metadata: "root node (hax)".to_owned(),
+        })));
 
-        // TODO: node expand function that does this, initially with one node then multi-expand i think
-        let root = TreeItem::new_leaf(Layer(root));
-
-
+        // TODO: node expand function, initially with one node then multi-expand i think
 
         Ok(Self {
             tree: StatefulTree::with_items(vec![root]), // TODO need unexpanded root hash I think
@@ -140,11 +179,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn run_app<F, B: Backend>(terminal: &mut Terminal<B>, mut app: App<F>) -> io::Result<()>
+async fn run_app<F, B: Backend>(
+    terminal: &mut Terminal<B>,
+    mut app: App<F>,
+) -> Result<(), Box<dyn std::error::Error>>
 where
     F: Functor,
     for<'a> Wrapper<<F::RefFunctor<'a> as Functor>::Layer<String>>: Into<Text<'a>>,
     F: AsRefF,
+    <F as Functor>::Layer<domain::Id>: Serialize + for<'a> Deserialize<'a>,
+    <F as Functor>::Layer<domain::Header>: Clone,
 {
     loop {
         terminal.draw(|f| {
@@ -170,14 +214,30 @@ where
             match key.code {
                 KeyCode::Char('q') => return Ok(()),
                 // expand partial if selected
-                // KeyCode::Enter => {
-                //     app.tree.with_selected_leaf(|node| {
-                //         if let Some(node) = node {
-                //             node.ele
-                //             node.add_child(TreeItem::new_leaf("text"));
-                //         }
-                //     });
-                // }
+                KeyCode::Enter => {
+                    let hdr_to_fetch = app.tree.with_selected_leaf(|node| {
+                        if let Some(node) = node {
+                            match &node.elem.0 {
+                                MerkleLayer::Remote(hdr) => Some(hdr.clone()),
+                                _ => None,
+                            }
+                        } else {
+                            None
+                        }
+                    });
+
+                    if let Some(hdr) = hdr_to_fetch {
+                        let node = app.client.get_node(hdr.hash).await?;
+
+                        let updated = tree_node_from_layer(hdr, node);
+
+                        app.tree.with_selected_leaf(|node| {
+                            if let Some(node) = node {
+                                *node = updated;
+                            }
+                        });
+                    }
+                }
                 KeyCode::Char('\n' | ' ') => app.tree.toggle(),
                 KeyCode::Left => app.tree.left(),
                 KeyCode::Right => app.tree.right(),
